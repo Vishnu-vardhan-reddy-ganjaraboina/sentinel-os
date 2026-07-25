@@ -1,22 +1,101 @@
+"""
+Base Service abstraction for Sentinel OS.
+
+Every executable capability inside Sentinel OS derives from Service.
+
+Responsibilities:
+    - Identity
+    - Dependency declaration
+    - Initialization
+    - Shutdown
+    - Health reporting
+
+Non-responsibilities:
+    - Lifecycle management
+    - State transitions
+    - Dependency resolution
+    - Event publishing
+    - Logging
+"""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from typing import Any
 
 
 class Service(ABC):
-    """
-    Base class for every Sentinel service.
-    """
+    """Abstract base class for all Sentinel services."""
 
-    def __init__(self, name: str):
-        self.name = name
-        self.running = False
+    __slots__ = ("_name", "_dependencies")
+
+    def __init__(
+        self,
+        name: str,
+        dependencies: tuple[str, ...] = (),
+    ) -> None:
+        """
+        Initialize a service.
+
+        Args:
+            name:
+                Unique service name.
+
+            dependencies:
+                Names of services that must be initialized first.
+
+        Raises:
+            ValueError:
+                If the service name is empty.
+        """
+        name = name.strip()
+
+        if not name:
+            raise ValueError("Service name cannot be empty.")
+
+        self._name = name
+        self._dependencies = tuple(dependencies)
+
+    @property
+    def name(self) -> str:
+        """Return the unique service name."""
+        return self._name
+
+    @property
+    def dependencies(self) -> tuple[str, ...]:
+        """Return immutable dependency names."""
+        return self._dependencies
 
     @abstractmethod
-    def start(self):
-        """Start the service."""
+    def initialize(self) -> None:
+        """
+        Initialize the service.
+
+        Called exactly once by the LifecycleManager.
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def stop(self):
-        """Stop the service."""
+    def shutdown(self) -> None:
+        """
+        Shut down the service gracefully.
+        """
+        raise NotImplementedError
 
-    def status(self):
-        return "Running" if self.running else "Stopped"
+    def health(self) -> Mapping[str, Any]:
+        """
+        Return health information.
+
+        Subclasses may override this to provide richer diagnostics.
+        """
+        return {
+            "healthy": True,
+        }
+
+    def __repr__(self) -> str:
+        """Return a developer-friendly representation."""
+        return (
+            f"{self.__class__.__name__}"
+            f"(name={self._name!r})"
+        )

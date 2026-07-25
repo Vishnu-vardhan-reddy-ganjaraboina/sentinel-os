@@ -1,5 +1,28 @@
 [project]
 name = "sentinel-os"
 version = "0.1.0"
-description = "AI-Native Operating Platform"
-requires-python = ">=3.12"
+description = "Sentinel Operating System"
+requires-python = ">=3.13"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["sentinel"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true

@@ -1,0 +1,5 @@
+[project]
+name = "sentinel-os"
+version = "0.1.0"
+description = "AI-Native Operating Platform"
+requires-python = ">=3.12"

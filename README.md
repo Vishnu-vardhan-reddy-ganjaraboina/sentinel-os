@@ -1,0 +1,83 @@
+# Sentinel OS
+
+> AI-Native Operating Platform
+
+---
+
+## Vision
+
+Sentinel is an intelligent operating platform designed to understand, plan, execute, learn, and protect.
+
+It is **not** a chatbot.
+
+Instead of answering questions like a traditional AI assistant, Sentinel coordinates secure execution of tasks across multiple devices while keeping the user in control.
+
+---
+
+## Mission
+
+Build a secure, modular, and extensible operating platform capable of:
+
+- Understanding user intent
+- Planning complex tasks
+- Executing actions safely
+- Learning from context
+- Operating across multiple devices
+- Protecting users through built-in security
+
+---
+
+## Core Principles
+
+- Brain before AI
+- Security by default
+- Skills instead of prompts
+- Modular architecture
+- Device independence
+- Offline-first where practical
+
+---
+
+## Architecture
+
+Sentinel consists of independent subsystems.
+
+- Kernel
+- Brain
+- Security
+- Memory
+- Skills
+- AI
+- Communication
+- Devices
+- Voice
+- Vision
+- Automation
+
+Each subsystem has a single responsibility and communicates through well-defined interfaces.
+
+---
+
+## Current Status
+
+Version:
+
+Sentinel OS v0.1
+
+Current Phase:
+
+Foundation
+
+---
+
+## Long-Term Goal
+
+Create a secure intelligent operating platform capable of running on desktop, mobile, smartwatch, and future devices.
+
+The Brain remains the center of the platform while AI models act only as reasoning engines.
+
+---
+
+## License
+
+To be determined.

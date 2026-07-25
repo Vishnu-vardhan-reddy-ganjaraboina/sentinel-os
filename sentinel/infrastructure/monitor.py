@@ -1,55 +1,112 @@
+"""
+Health monitoring service for Sentinel OS.
+"""
+
 from __future__ import annotations
 
-from sentinel.kernel.event import Event
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict
+
 from sentinel.kernel.service import Service
+from sentinel.kernel.service_state import ServiceState
+
+
+@dataclass(slots=True)
+class ServiceHealth:
+    """
+    Represents the health information of a service.
+    """
+
+    service_name: str
+    state: ServiceState
+    healthy: bool
+    started_at: datetime | None = None
+    last_updated: datetime | None = None
+    error_count: int = 0
 
 
 class Monitor(Service):
     """
-    Monitors Sentinel events and service health.
-
-    This service subscribes to kernel lifecycle events and
-    reports them. In future versions it will expose metrics,
-    diagnostics, and health monitoring.
+    Tracks the health of all registered services.
     """
 
     def __init__(self) -> None:
-        super().__init__("Monitor")
+        super().__init__("monitor")
+        self._services: Dict[str, ServiceHealth] = {}
 
-    def start(self) -> None:
-        if self.event_bus is None:
-            raise RuntimeError("EventBus has not been injected.")
+    def initialize(self) -> None:
+        """Initialize the monitor."""
 
-        self.event_bus.subscribe(
-            "ServiceStarted",
-            self._on_service_started,
+    def shutdown(self) -> None:
+        """Shutdown the monitor."""
+        self._services.clear()
+
+    def register_service(
+        self,
+        service_name: str,
+        state: ServiceState,
+    ) -> None:
+        """
+        Register a service for monitoring.
+        """
+        self._services[service_name] = ServiceHealth(
+            service_name=service_name,
+            state=state,
+            healthy=True,
+            started_at=datetime.now(),
+            last_updated=datetime.now(),
         )
 
-        self.event_bus.subscribe(
-            "ServiceStopped",
-            self._on_service_stopped,
-        )
+    def update_state(
+        self,
+        service_name: str,
+        state: ServiceState,
+    ) -> None:
+        """
+        Update a service state.
+        """
+        health = self._services[service_name]
 
-        print("Monitor initialized.")
+        health.state = state
+        health.last_updated = datetime.now()
 
-    def stop(self) -> None:
-        if self.event_bus is not None:
-            self.event_bus.unsubscribe(
-                "ServiceStarted",
-                self._on_service_started,
-            )
+    def mark_unhealthy(
+        self,
+        service_name: str,
+    ) -> None:
+        """
+        Mark a service as unhealthy.
+        """
+        health = self._services[service_name]
 
-            self.event_bus.unsubscribe(
-                "ServiceStopped",
-                self._on_service_stopped,
-            )
+        health.healthy = False
+        health.error_count += 1
+        health.last_updated = datetime.now()
 
-        print("Monitor stopped.")
+    def mark_healthy(
+        self,
+        service_name: str,
+    ) -> None:
+        """
+        Mark a service as healthy.
+        """
+        health = self._services[service_name]
 
-    def _on_service_started(self, event: Event) -> None:
-        service = event.payload["service"]
-        print(f"[Monitor] Service started: {service}")
+        health.healthy = True
+        health.last_updated = datetime.now()
 
-    def _on_service_stopped(self, event: Event) -> None:
-        service = event.payload["service"]
-        print(f"[Monitor] Service stopped: {service}")
+    def get_health(
+        self,
+        service_name: str,
+    ) -> ServiceHealth:
+        """
+        Return health information for a service.
+        """
+        return self._services[service_name]
+
+    def get_all_health(self) -> dict[str, ServiceHealth]:
+        """
+        Return all monitored services.
+        """
+        return self._services.copy()

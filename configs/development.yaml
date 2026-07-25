@@ -1,0 +1,9 @@
+logging:
+  level: INFO
+  file: sentinel.log
+
+kernel:
+  max_services: 100
+
+brain:
+  default_model: local

@@ -7,3 +7,7 @@ kernel:
 
 brain:
   default_model: local
+
+storage:
+  backend: sqlite
+  database: data/sentinel.db

@@ -16,6 +16,10 @@ class KernelError(SentinelError):
     """Base class for all kernel exceptions."""
 
 
+# ============================================================================
+# Service Exceptions
+# ============================================================================
+
 class ServiceError(KernelError):
     """Base class for service-related exceptions."""
 
@@ -36,6 +40,10 @@ class ServiceNotRunningError(ServiceError, OperationError):
     """Raised when stopping a service that is not running."""
 
 
+# ============================================================================
+# Dependency Exceptions
+# ============================================================================
+
 class DependencyError(KernelError):
     """Base class for dependency-related exceptions."""
 
@@ -46,3 +54,19 @@ class DependencyNotFoundError(DependencyError, NotFoundError):
 
 class CircularDependencyError(DependencyError):
     """Raised when circular dependencies are detected."""
+
+
+# ============================================================================
+# Scheduler Exceptions
+# ============================================================================
+
+class SchedulerError(KernelError):
+    """Base class for scheduler-related exceptions."""
+
+
+class DuplicateTaskError(SchedulerError, AlreadyExistsError):
+    """Raised when attempting to register a task twice."""
+
+
+class TaskNotFoundError(SchedulerError, NotFoundError):
+    """Raised when a scheduled task cannot be found."""

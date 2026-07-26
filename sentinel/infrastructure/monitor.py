@@ -15,6 +15,9 @@ from threading import RLock
 from sentinel.kernel.exceptions import ServiceNotFoundError
 from sentinel.kernel.service import Service
 from sentinel.kernel.service_state import ServiceState
+from sentinel.infrastructure.constants import (
+    DEFAULT_MONITOR_HEALTHY,
+)
 
 
 @dataclass(slots=True)
@@ -94,7 +97,7 @@ class Monitor(Service):
             self._services[service_name] = ServiceHealth(
                 service_name=service_name,
                 state=state,
-                healthy=True,
+        
                 started_at=now,
                 last_updated=now,
             )

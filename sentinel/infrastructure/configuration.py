@@ -1,21 +1,36 @@
 """
 Configuration management for Sentinel OS.
 
-Loads and provides access to YAML configuration files.
+This module is responsible for loading, validating, and providing
+read-only access to application configuration stored in YAML files.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from sentinel.core.exceptions import ConfigurationError
+
 
 class Configuration:
-    """Loads and provides application configuration."""
+    """
+    Loads and provides access to Sentinel configuration.
+
+    Configuration values can be accessed using dot notation.
+
+    Example:
+        >>> config = Configuration()
+        >>> config.load("configs/sentinel.yaml")
+        >>> config.get("logging.level")
+        'INFO'
+    """
 
     def __init__(self) -> None:
+        """Initialize an empty configuration."""
         self._config: dict[str, Any] = {}
 
     def load(self, file_path: str | Path) -> None:
@@ -23,18 +38,20 @@ class Configuration:
         Load a YAML configuration file.
 
         Args:
-            file_path: Path to the YAML configuration file.
+            file_path:
+                Path to the YAML configuration file.
 
         Raises:
             FileNotFoundError:
                 If the configuration file does not exist.
 
-            ValueError:
-                If the YAML is invalid.
+            ConfigurationError:
+                If the YAML file is invalid or its root element
+                is not a mapping.
         """
         path = Path(file_path)
 
-        if not path.exists():
+        if not path.exists() or not path.is_file():
             raise FileNotFoundError(
                 f"Configuration file not found: {path}"
             )
@@ -43,19 +60,40 @@ class Configuration:
             with path.open("r", encoding="utf-8") as file:
                 data = yaml.safe_load(file)
 
-            self._config = data or {}
-
         except yaml.YAMLError as exc:
-            raise ValueError(
+            raise ConfigurationError(
                 f"Invalid YAML configuration: {path}"
             ) from exc
+
+        if data is None:
+            self._config = {}
+
+        elif not isinstance(data, dict):
+            raise ConfigurationError(
+                "The root element of a configuration file "
+                "must be a mapping (dictionary)."
+            )
+
+        else:
+            self._config = data
 
     def get(self, key: str, default: Any = None) -> Any:
         """
         Retrieve a configuration value using dot notation.
 
+        Args:
+            key:
+                Dot-separated configuration key.
+
+            default:
+                Value returned if the key does not exist.
+
+        Returns:
+            The configuration value or the default value.
+
         Example:
-            config.get("logging.level")
+            >>> config.get("database.host")
+            'localhost'
         """
         value: Any = self._config
 
@@ -72,12 +110,22 @@ class Configuration:
 
     def exists(self, key: str) -> bool:
         """
-        Check whether a configuration key exists.
+        Determine whether a configuration key exists.
+
+        Args:
+            key:
+                Dot-separated configuration key.
+
+        Returns:
+            True if the key exists, otherwise False.
         """
         return self.get(key, None) is not None
 
     def as_dict(self) -> dict[str, Any]:
         """
-        Return the entire configuration.
+        Return a deep copy of the configuration.
+
+        Returns:
+            A deep copy of the entire configuration dictionary.
         """
-        return self._config.copy()
+        return deepcopy(self._config)

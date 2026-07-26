@@ -1,4 +1,4 @@
-from sentinel.storage.backends.memory import MemoryBackend
+from sentinel.storage.backends.in_memory import MemoryBackend
 
 
 def test_memory_backend() -> None:

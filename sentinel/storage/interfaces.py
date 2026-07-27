@@ -1,5 +1,7 @@
 """
-Storage interface definitions.
+Storage interfaces for Sentinel OS.
+
+Defines abstract contracts for all storage backends.
 """
 
 from __future__ import annotations
@@ -9,41 +11,58 @@ from typing import Any
 
 
 class StorageBackend(ABC):
-    """Abstract storage backend."""
+    """
+    Base interface for all storage implementations.
+    """
 
     @abstractmethod
-    def connect(self) -> None:
-        """Connect to the backend."""
+    def exists(self, key: str) -> bool:
+        """
+        Return True if the key exists.
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def disconnect(self) -> None:
-        """Disconnect from the backend."""
+    def get(self, key: str) -> Any:
+        """
+        Retrieve a value.
+
+        Raises:
+            StorageKeyNotFoundError
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def save(
-        self,
-        key: str,
-        value: Any,
-    ) -> None:
-        """Save data."""
+    def set(self, key: str, value: Any) -> None:
+        """
+        Store a value.
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def load(
-        self,
-        key: str,
-    ) -> Any:
-        """Load data."""
+    def delete(self, key: str) -> None:
+        """
+        Delete a key.
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def delete(
-        self,
-        key: str,
-    ) -> None:
-        """Delete data."""
+    def clear(self) -> None:
+        """
+        Remove all stored data.
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def exists(
-        self,
-        key: str,
-    ) -> bool:
-        """Return whether the key exists."""
+    def keys(self) -> list[str]:
+        """
+        Return all keys.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def close(self) -> None:
+        """
+        Shutdown the backend.
+        """
+        raise NotImplementedError

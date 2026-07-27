@@ -1,25 +1,43 @@
 """
-Storage exceptions for Sentinel OS.
+Storage exception hierarchy for Sentinel OS.
 """
 
 from __future__ import annotations
 
-
-class StorageError(Exception):
-    """Base class for all storage errors."""
+from sentinel.core.exceptions import SentinelError
 
 
-class StorageConnectionError(StorageError):
-    """Raised when a storage backend cannot be reached."""
+class StorageError(SentinelError):
+    """
+    Base class for all storage-related exceptions.
+    """
 
 
-class StorageNotFoundError(StorageError):
-    """Raised when requested data does not exist."""
+class StorageKeyNotFoundError(StorageError, KeyError):
+    """
+    Raised when a requested storage key does not exist.
+    """
 
 
-class StorageWriteError(StorageError):
-    """Raised when data cannot be written."""
+class StorageBackendError(StorageError):
+    """
+    Raised when a storage backend encounters an unrecoverable error.
+    """
 
 
-class StorageReadError(StorageError):
-    """Raised when data cannot be read."""
+class StorageSerializationError(StorageError):
+    """
+    Raised when serialization or deserialization fails.
+    """
+
+
+class StoragePermissionError(StorageError):
+    """
+    Raised when access to storage is denied.
+    """
+
+
+class StorageTransactionError(StorageError):
+    """
+    Raised when a storage transaction fails.
+    """

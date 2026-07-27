@@ -1,95 +1,43 @@
 """
-sentinel.knowledge.exceptions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Exception hierarchy for the Knowledge subsystem.
-
-The Knowledge subsystem exposes a well-defined set of domain-specific
-exceptions. Higher-level subsystems should catch KnowledgeError unless
-they need to handle a more specific condition.
-
-RFC:
-    RFC-0003 Knowledge Subsystem
+Knowledge exceptions for Sentinel OS.
 """
 
 from __future__ import annotations
 
-__all__ = [
-    "SentinelError",
-    "KnowledgeError",
-    "ValidationError",
-    "InvalidKnowledgeError",
-    "InvalidIdentifierError",
-    "InvalidRelationshipError",
-    "NotFoundError",
-    "KnowledgeNotFoundError",
-    "ConflictError",
-    "DuplicateKnowledgeError",
-    "StorageError",
-]
-
-
-class SentinelError(Exception):
-    """
-    Base exception for all Sentinel OS subsystems.
-    """
+from sentinel.core.exceptions import SentinelError
 
 
 class KnowledgeError(SentinelError):
     """
-    Base exception for all Knowledge subsystem errors.
+    Base exception for knowledge layer.
     """
 
 
-class ValidationError(KnowledgeError):
+class DocumentNotFoundError(KnowledgeError):
     """
-    Raised when domain validation fails.
-    """
-
-
-class InvalidKnowledgeError(ValidationError):
-    """
-    Raised when a KnowledgeEntity contains invalid data.
+    Raised when a document cannot be found.
     """
 
 
-class InvalidIdentifierError(ValidationError):
+class ChunkNotFoundError(KnowledgeError):
     """
-    Raised when an entity identifier is malformed or invalid.
-    """
-
-
-class InvalidRelationshipError(ValidationError):
-    """
-    Raised when a relationship definition is invalid.
+    Raised when a chunk cannot be found.
     """
 
 
-class NotFoundError(KnowledgeError):
+class EmbeddingError(KnowledgeError):
     """
-    Raised when a requested resource cannot be found.
-    """
-
-
-class KnowledgeNotFoundError(NotFoundError):
-    """
-    Raised when a knowledge entity cannot be located.
+    Raised when embedding generation fails.
     """
 
 
-class ConflictError(KnowledgeError):
+class VectorStoreError(KnowledgeError):
     """
-    Raised when an operation would violate uniqueness or consistency.
-    """
-
-
-class DuplicateKnowledgeError(ConflictError):
-    """
-    Raised when attempting to create a duplicate knowledge entity.
+    Raised when vector store operations fail.
     """
 
 
-class StorageError(KnowledgeError):
+class RetrievalError(KnowledgeError):
     """
-    Raised when an underlying storage operation fails.
+    Raised when retrieval fails.
     """

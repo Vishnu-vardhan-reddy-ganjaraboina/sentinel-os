@@ -18,7 +18,17 @@ class EmbeddingProvider(ABC):
         text: str,
     ) -> list[float]:
         """
-        Generate an embedding vector for text.
+        Generate an embedding vector for a single text.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def embed_many(
+        self,
+        texts: list[str],
+    ) -> list[list[float]]:
+        """
+        Generate embeddings for multiple texts.
         """
         raise NotImplementedError
 
@@ -32,7 +42,7 @@ class EmbeddingProvider(ABC):
 
 class DummyEmbeddingProvider(EmbeddingProvider):
     """
-    Simple deterministic embedding provider for tests.
+    Deterministic embedding provider used for testing.
     """
 
     def __init__(
@@ -40,9 +50,7 @@ class DummyEmbeddingProvider(EmbeddingProvider):
         dimension: int = 8,
     ) -> None:
         if dimension <= 0:
-            raise ValueError(
-                "Dimension must be positive."
-            )
+            raise ValueError("Dimension must be positive.")
 
         self._dimension = dimension
 
@@ -55,10 +63,19 @@ class DummyEmbeddingProvider(EmbeddingProvider):
         """
         value = float(len(text))
 
-        return [
-            value
-            for _ in range(self._dimension)
-        ]
+        return [value] * self._dimension
+
+    def embed_many(
+        self,
+        texts: list[str],
+    ) -> list[list[float]]:
+        """
+        Generate embeddings for multiple texts.
+        """
+        return [self.embed(text) for text in texts]
 
     def dimension(self) -> int:
+        """
+        Return the embedding dimension.
+        """
         return self._dimension

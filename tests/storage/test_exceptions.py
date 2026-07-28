@@ -24,16 +24,28 @@ def test_key_not_found():
 
 
 def test_backend_error():
-    assert isinstance(StorageBackendError(), StorageError)
+    assert isinstance(
+        StorageBackendError("Backend failure"),
+        StorageError,
+    )
 
 
 def test_serialization_error():
-    assert isinstance(StorageSerializationError(), StorageError)
+    assert isinstance(
+        StorageSerializationError("Serialization failure"),
+        StorageError,
+    )
 
 
 def test_permission_error():
-    assert isinstance(StoragePermissionError(), StorageError)
+    assert isinstance(
+        StoragePermissionError("Permission denied"),
+        StorageError,
+    )
 
 
 def test_transaction_error():
-    assert isinstance(StorageTransactionError(), StorageError)
+    assert isinstance(
+        StorageTransactionError("Transaction failed"),
+        StorageError,
+    )

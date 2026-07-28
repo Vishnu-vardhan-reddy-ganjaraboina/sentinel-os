@@ -97,7 +97,7 @@ class Monitor(Service):
             self._services[service_name] = ServiceHealth(
                 service_name=service_name,
                 state=state,
-        
+                healthy=True,
                 started_at=now,
                 last_updated=now,
             )

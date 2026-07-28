@@ -10,6 +10,7 @@ from typing import Any
 
 from sentinel.storage.exceptions import (
     StorageConnectionError,
+    StorageKeyNotFoundError,
     StorageReadError,
     StorageWriteError,
 )
@@ -18,25 +19,29 @@ from sentinel.storage.interfaces import StorageBackend
 
 class SQLiteBackend(StorageBackend):
     """
-    SQLite implementation of the StorageBackend interface.
+    SQLite implementation of StorageBackend.
     """
 
-    def __init__(self, database: str | Path) -> None:
+    def __init__(self, database: str | Path):
         self._database = Path(database)
-        self._connection: sqlite3.Connection | None = None
+        self._connection = None
 
-    def connect(self) -> None:
-        """
-        Connect to the SQLite database.
-        """
+        self._database.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+    )
+
+        self._database.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         try:
-            self._database.parent.mkdir(parents=True, exist_ok=True)
-
             self._connection = sqlite3.connect(self._database)
 
             self._connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS storage (
+                CREATE TABLE IF NOT EXISTS storage(
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 )
@@ -47,104 +52,130 @@ class SQLiteBackend(StorageBackend):
 
         except sqlite3.Error as exc:
             raise StorageConnectionError(
-                f"Unable to connect to database: {self._database}"
+                str(exc)
             ) from exc
 
-    def disconnect(self) -> None:
-        """
-        Close the database connection.
-        """
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
+    def exists(self, key: str) -> bool:
+        cursor = self._connection.execute(
+            "SELECT 1 FROM storage WHERE key=?",
+            (key,),
+        )
 
-    def save(
-        self,
-        key: str,
-        value: Any,
-    ) -> None:
-        """
-        Save or update a key/value pair.
-        """
-        if self._connection is None:
-            raise StorageConnectionError("Database is not connected.")
+        return cursor.fetchone() is not None
 
-        try:
-            self._connection.execute(
-                """
-                INSERT INTO storage(key, value)
-                VALUES (?, ?)
-                ON CONFLICT(key)
-                DO UPDATE SET value = excluded.value
-                """,
-                (key, str(value)),
-            )
-
-            self._connection.commit()
-
-        except sqlite3.Error as exc:
-            raise StorageWriteError(
-                f"Failed to save '{key}'."
-            ) from exc
-
-    def load(
-        self,
-        key: str,
-    ) -> Any:
-        """
-        Load a value.
-        """
-        if self._connection is None:
-            raise StorageConnectionError("Database is not connected.")
-
+    def get(self, key: str) -> Any:
         try:
             cursor = self._connection.execute(
-                "SELECT value FROM storage WHERE key = ?",
+                "SELECT value FROM storage WHERE key=?",
                 (key,),
             )
 
             row = cursor.fetchone()
 
             if row is None:
-                return None
+                raise StorageKeyNotFoundError(
+                    f"Key '{key}' not found."
+                )
 
             return row[0]
 
         except sqlite3.Error as exc:
             raise StorageReadError(
-                f"Failed to load '{key}'."
+                str(exc)
             ) from exc
 
-    def delete(
+    def set(
         self,
         key: str,
+        value: Any,
     ) -> None:
-        """
-        Delete a key.
-        """
-        if self._connection is None:
-            raise StorageConnectionError("Database is not connected.")
+        try:
+            self._connection.execute(
+                """
+                INSERT INTO storage(key,value)
+                VALUES(?,?)
+                ON CONFLICT(key)
+                DO UPDATE SET value=excluded.value
+                """,
+                (
+                    key,
+                    str(value),
+                ),
+            )
 
+            self._connection.commit()
+
+        except sqlite3.Error as exc:
+            raise StorageWriteError(
+                str(exc)
+            ) from exc
+
+    def delete(self, key: str) -> None:
         self._connection.execute(
-            "DELETE FROM storage WHERE key = ?",
+            "DELETE FROM storage WHERE key=?",
             (key,),
         )
 
         self._connection.commit()
 
-    def exists(
-        self,
-        key: str,
-    ) -> bool:
-        """
-        Check if a key exists.
-        """
-        if self._connection is None:
-            raise StorageConnectionError("Database is not connected.")
-
-        cursor = self._connection.execute(
-            "SELECT 1 FROM storage WHERE key = ?",
-            (key,),
+    def clear(self) -> None:
+        self._connection.execute(
+            "DELETE FROM storage"
         )
 
-        return cursor.fetchone() is not None
+        self._connection.commit()
+
+    def keys(self) -> list[str]:
+        cursor = self._connection.execute(
+            "SELECT key FROM storage"
+        )
+
+        return [row[0] for row in cursor.fetchall()]
+
+    def close(self) -> None:
+        self._connection.close()
+
+
+
+    def connect(self) -> None:
+        if self._connection is not None:
+            return
+
+        self._connection = sqlite3.connect(self._database)
+
+        self._connection.execute(
+           """
+           CREATE TABLE IF NOT EXISTS storage(
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+        )
+        """
+    )
+
+        self._connection.commit()
+    
+    def disconnect(self) -> None:
+        if self._connection is not None:
+             self._connection.close()
+             self._connection = None
+
+
+
+    def _ensure_connected(self):
+        if self._connection is None:
+             raise StorageConnectionError(
+            "Backend is not connected."
+        )
+
+    def save(self, key: str, value: Any) -> None:
+        """
+        Backward-compatible alias for set().
+        """
+        self.set(key, value)
+
+
+    def load(self, key: str) -> Any:
+        """
+        Backward-compatible alias for get().
+        """
+        return self.get(key)

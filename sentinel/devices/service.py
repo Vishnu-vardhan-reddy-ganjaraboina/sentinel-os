@@ -1,5 +1,5 @@
 """
-Device manager for the Sentinel Devices subsystem.
+High-level service for the Sentinel Devices subsystem.
 """
 
 from __future__ import annotations
@@ -7,32 +7,38 @@ from __future__ import annotations
 from typing import Any
 
 from sentinel.devices.device import BaseDevice
-from sentinel.devices.exceptions import (
-    DeviceOperationError,
-)
+from sentinel.devices.manager import DeviceManager
 from sentinel.devices.registry import DeviceRegistry
 
 
-class DeviceManager:
+class DeviceService:
     """
-    Manages Sentinel devices.
+    Public API for interacting with Sentinel devices.
 
-    The manager acts as the runtime layer between the registry
-    and the rest of Sentinel OS.
+    The service delegates device management and execution to the
+    underlying DeviceManager while providing a stable interface for
+    other Sentinel subsystems.
     """
 
     def __init__(
         self,
-        registry: DeviceRegistry | None = None,
+        manager: DeviceManager | None = None,
     ) -> None:
-        self._registry = registry or DeviceRegistry()
+        self._manager = manager or DeviceManager()
+
+    @property
+    def manager(self) -> DeviceManager:
+        """
+        Return the underlying device manager.
+        """
+        return self._manager
 
     @property
     def registry(self) -> DeviceRegistry:
         """
-        Return the device registry.
+        Return the underlying device registry.
         """
-        return self._registry
+        return self._manager.registry
 
     def register(
         self,
@@ -41,7 +47,7 @@ class DeviceManager:
         """
         Register a device.
         """
-        self._registry.register(device)
+        self._manager.register(device)
 
     def unregister(
         self,
@@ -50,7 +56,7 @@ class DeviceManager:
         """
         Unregister a device.
         """
-        self._registry.unregister(device_id)
+        self._manager.unregister(device_id)
 
     def connect(
         self,
@@ -59,7 +65,7 @@ class DeviceManager:
         """
         Connect a registered device.
         """
-        self._registry.get(device_id).connect()
+        self._manager.connect(device_id)
 
     def disconnect(
         self,
@@ -68,7 +74,7 @@ class DeviceManager:
         """
         Disconnect a registered device.
         """
-        self._registry.get(device_id).disconnect()
+        self._manager.disconnect(device_id)
 
     def execute(
         self,
@@ -78,21 +84,10 @@ class DeviceManager:
         """
         Execute a device operation.
         """
-        device = self._registry.get(device_id)
-
-        try:
-            return device.execute(**kwargs)
-
-        except Exception as exc:
-            raise DeviceOperationError(
-                f"Device '{device_id}' operation failed."
-            ) from exc
-
-    def list(self) -> list[BaseDevice]:
-        """
-        Return all registered devices.
-        """
-        return self._registry.list()
+        return self._manager.execute(
+            device_id,
+            **kwargs,
+        )
 
     def exists(
         self,
@@ -101,10 +96,16 @@ class DeviceManager:
         """
         Return True if the device exists.
         """
-        return self._registry.exists(device_id)
+        return self._manager.exists(device_id)
+
+    def list(self) -> list[BaseDevice]:
+        """
+        Return all registered devices.
+        """
+        return self._manager.list()
 
     def clear(self) -> None:
         """
         Remove all registered devices.
         """
-        self._registry.clear()
+        self._manager.clear()

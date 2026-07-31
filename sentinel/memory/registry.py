@@ -4,7 +4,8 @@ Registry for the Sentinel Memory subsystem.
 
 from __future__ import annotations
 
-from typing import Iterator, List
+import builtins
+from collections.abc import Iterator
 
 from sentinel.memory.interfaces import MemoryEntry
 from sentinel.memory.memory import MemoryStore
@@ -34,10 +35,10 @@ class MemoryRegistry:
     def exists(self, memory_id: str) -> bool:
         return self._store.exists(memory_id)
 
-    def search(self, keyword: str) -> List[MemoryEntry]:
+    def search(self, keyword: str) -> builtins.list[MemoryEntry]:
         return self._store.search(keyword)
 
-    def list(self) -> List[MemoryEntry]:
+    def list(self) -> builtins.list[MemoryEntry]:
         return self._store.list()
 
     def clear(self) -> None:

@@ -4,8 +4,9 @@ Workflow registry for the Sentinel Automation subsystem.
 
 from __future__ import annotations
 
+import builtins
+from collections.abc import Iterator
 from threading import RLock
-from typing import Dict, Iterator, List
 
 from sentinel.automation.exceptions import (
     WorkflowAlreadyExistsError,
@@ -20,7 +21,7 @@ class WorkflowRegistry:
     """
 
     def __init__(self) -> None:
-        self._workflows: Dict[str, Workflow] = {}
+        self._workflows: dict[str, Workflow] = {}
         self._lock = RLock()
 
     def register(self, workflow: Workflow) -> None:
@@ -54,11 +55,11 @@ class WorkflowRegistry:
         with self._lock:
             return workflow_id in self._workflows
 
-    def list(self) -> List[Workflow]:
+    def list(self) -> builtins.list[Workflow]:
         with self._lock:
             return list(self._workflows.values())
 
-    def list_enabled(self) -> List[Workflow]:
+    def list_enabled(self) -> builtins.list[Workflow]:
         with self._lock:
             return [
                 workflow
@@ -66,7 +67,7 @@ class WorkflowRegistry:
                 if workflow.enabled
             ]
 
-    def list_disabled(self) -> List[Workflow]:
+    def list_disabled(self) -> builtins.list[Workflow]:
         with self._lock:
             return [
                 workflow

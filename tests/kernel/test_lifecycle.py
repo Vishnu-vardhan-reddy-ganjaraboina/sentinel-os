@@ -1,4 +1,3 @@
-import pytest
 
 from sentinel.kernel.event_bus import EventBus
 from sentinel.kernel.lifecycle import LifecycleManager

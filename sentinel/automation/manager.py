@@ -4,7 +4,8 @@ Workflow manager for the Sentinel Automation subsystem.
 
 from __future__ import annotations
 
-from typing import Any, List
+import builtins
+from typing import Any
 
 from sentinel.automation.exceptions import (
     WorkflowExecutionError,
@@ -37,7 +38,7 @@ class WorkflowManager:
     def exists(self, workflow_id: str) -> bool:
         return self._registry.exists(workflow_id)
 
-    def list(self) -> List[Workflow]:
+    def list(self) -> builtins.list[Workflow]:
         return self._registry.list()
 
     def execute(self, workflow_id: str, **kwargs: Any) -> Any:

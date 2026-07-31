@@ -1,11 +1,11 @@
 import pytest
 
-from sentinel.kernel.registry import ServiceRegistry
-from sentinel.kernel.service import Service
 from sentinel.kernel.exceptions import (
     DuplicateServiceError,
     ServiceNotFoundError,
 )
+from sentinel.kernel.registry import ServiceRegistry
+from sentinel.kernel.service import Service
 
 
 class DummyService(Service):

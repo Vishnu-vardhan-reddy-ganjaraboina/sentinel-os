@@ -1,9 +1,10 @@
+import time
+
 import pytest
 
 from sentinel.execution.constants import TaskStatus
 from sentinel.execution.executor import DefaultExecutor
 from sentinel.execution.task import Task
-import time
 
 
 def add(a: int, b: int) -> int:

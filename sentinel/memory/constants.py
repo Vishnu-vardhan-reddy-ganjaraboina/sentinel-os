@@ -2,7 +2,7 @@
 Constants for the Sentinel Memory subsystem.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_MEMORY_VERSION = "1.0.0"
 
@@ -11,7 +11,7 @@ DEFAULT_IMPORTANCE = 1
 DEFAULT_TTL = None
 
 
-class MemoryType(str, Enum):
+class MemoryType(StrEnum):
     """
     Supported memory categories.
     """
@@ -23,7 +23,7 @@ class MemoryType(str, Enum):
     SEMANTIC = "semantic"
 
 
-class MemoryStatus(str, Enum):
+class MemoryStatus(StrEnum):
     """
     Status of a memory entry.
     """

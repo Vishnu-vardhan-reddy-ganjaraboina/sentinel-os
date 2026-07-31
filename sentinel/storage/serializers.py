@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import pickle
-
 from abc import ABC, abstractmethod
 from typing import Any, BinaryIO, TextIO
 

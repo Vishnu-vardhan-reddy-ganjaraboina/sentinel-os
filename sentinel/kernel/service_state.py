@@ -4,10 +4,10 @@ Service lifecycle states for Sentinel OS.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ServiceState(str, Enum):
+class ServiceState(StrEnum):
     """Represents the lifecycle state of a service."""
 
     CREATED = "created"

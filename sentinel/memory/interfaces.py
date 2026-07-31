@@ -5,7 +5,7 @@ Interfaces for the Sentinel Memory subsystem.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, List
+from typing import Any
 
 
 class MemoryEntry(ABC):
@@ -72,7 +72,7 @@ class Memory(ABC):
         """
 
     @abstractmethod
-    def search(self, keyword: str) -> List[MemoryEntry]:
+    def search(self, keyword: str) -> list[MemoryEntry]:
         """
         Search memory entries.
         """

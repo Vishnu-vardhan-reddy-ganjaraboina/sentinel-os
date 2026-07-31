@@ -7,7 +7,8 @@ execution, and process management.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sentinel.execution.command import CommandExecutor, CommandResult
 from sentinel.execution.context import ExecutionContext

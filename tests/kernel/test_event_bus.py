@@ -1,4 +1,3 @@
-import pytest
 
 from sentinel.kernel.event import Event
 from sentinel.kernel.event_bus import EventBus

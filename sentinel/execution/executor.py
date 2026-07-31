@@ -4,13 +4,13 @@ Production-grade executor for the Execution subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
-from typing import Any, Callable
+from typing import Any
 
 from sentinel.execution.constants import DEFAULT_MAX_WORKERS, TaskStatus
 from sentinel.execution.context import ExecutionContext
-from sentinel.execution.exceptions import TaskCancelledError
 from sentinel.execution.interfaces import Executor
 from sentinel.execution.task import Task
 

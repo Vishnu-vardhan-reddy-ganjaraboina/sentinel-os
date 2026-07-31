@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from enum import Enum
 
-
 DEFAULT_SECURITY_VERSION = "1.0.0"
 
 

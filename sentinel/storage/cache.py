@@ -6,13 +6,9 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from threading import RLock
-from typing import Generic, TypeVar
-
-K = TypeVar("K")
-V = TypeVar("V")
 
 
-class LRUCache(Generic[K, V]):
+class LRUCache[K, V]:
     """
     Thread-safe Least Recently Used (LRU) cache.
     """

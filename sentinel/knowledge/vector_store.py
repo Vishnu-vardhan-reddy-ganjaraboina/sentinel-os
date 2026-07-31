@@ -3,7 +3,7 @@ Vector store interfaces for Sentinel OS.
 """
 
 from __future__ import annotations
-from sentinel.knowledge.similarity import DotProductSimilarity
+
 from abc import ABC, abstractmethod
 
 from sentinel.knowledge.chunk import Chunk

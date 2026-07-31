@@ -4,9 +4,10 @@ Task model for the Execution subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 from sentinel.execution.constants import (

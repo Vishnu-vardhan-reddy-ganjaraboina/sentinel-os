@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sentinel.capabilities.constants import (
-    CapabilityCategory,
     DEFAULT_CAPABILITY_VERSION,
+    CapabilityCategory,
 )
 
 
@@ -79,7 +79,7 @@ class CapabilityMetadata:
     def from_dict(
         cls,
         data: dict[str, Any],
-    ) -> "CapabilityMetadata":
+    ) -> CapabilityMetadata:
         """
         Deserialize metadata.
         """

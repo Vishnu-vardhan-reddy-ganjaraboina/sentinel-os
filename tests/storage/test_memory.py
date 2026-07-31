@@ -2,7 +2,6 @@
 Tests for the MemoryStorage backend.
 """
 
-from copy import deepcopy
 
 import pytest
 

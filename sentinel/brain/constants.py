@@ -2,7 +2,7 @@
 Constants for the Sentinel Brain subsystem.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_BRAIN_VERSION = "1.0.0"
 
@@ -11,7 +11,7 @@ DEFAULT_MAX_PLANNING_DEPTH = 5
 DEFAULT_MAX_CONTEXT_ITEMS = 100
 
 
-class BrainState(str, Enum):
+class BrainState(StrEnum):
     """
     Brain execution states.
     """
@@ -24,7 +24,7 @@ class BrainState(str, Enum):
     FAILED = "failed"
 
 
-class PlanStatus(str, Enum):
+class PlanStatus(StrEnum):
     """
     Planning lifecycle.
     """

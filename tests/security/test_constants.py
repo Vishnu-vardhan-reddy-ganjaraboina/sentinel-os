@@ -1,9 +1,9 @@
 from sentinel.security.constants import (
     DEFAULT_SECURITY_VERSION,
-    Role,
-    Permission,
     AuthenticationStatus,
     AuthorizationStatus,
+    Permission,
+    Role,
 )
 
 

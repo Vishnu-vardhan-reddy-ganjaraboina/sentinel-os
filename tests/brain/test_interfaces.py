@@ -2,8 +2,8 @@ import pytest
 
 from sentinel.brain.interfaces import (
     Context,
-    Planner,
     Engine,
+    Planner,
 )
 
 

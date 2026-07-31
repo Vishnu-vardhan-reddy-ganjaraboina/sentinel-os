@@ -76,7 +76,7 @@ class DeviceMetadata:
     def from_dict(
         cls,
         data: dict[str, Any],
-    ) -> "DeviceMetadata":
+    ) -> DeviceMetadata:
         """
         Deserialize metadata.
         """

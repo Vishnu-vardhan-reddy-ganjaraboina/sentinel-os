@@ -5,7 +5,6 @@ Unit tests for Sentinel logging.
 from __future__ import annotations
 
 import logging
-
 from pathlib import Path
 
 from sentinel.infrastructure.logger import (

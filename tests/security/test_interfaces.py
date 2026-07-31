@@ -2,10 +2,10 @@ import pytest
 
 from sentinel.security.constants import Permission, Role
 from sentinel.security.interfaces import (
-    Identity,
-    Credentials,
     Authenticator,
     Authorizer,
+    Credentials,
+    Identity,
     PermissionStore,
 )
 

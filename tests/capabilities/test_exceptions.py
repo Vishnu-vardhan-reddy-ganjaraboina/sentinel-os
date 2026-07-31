@@ -1,6 +1,5 @@
 import pytest
 
-from sentinel.core.exceptions import SentinelError
 from sentinel.capabilities.exceptions import (
     CapabilityAlreadyExistsError,
     CapabilityDisabledError,
@@ -9,6 +8,7 @@ from sentinel.capabilities.exceptions import (
     CapabilityNotFoundError,
     InvalidCapabilityError,
 )
+from sentinel.core.exceptions import SentinelError
 
 
 def test_capability_error():

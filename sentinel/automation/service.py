@@ -4,7 +4,8 @@ Service layer for the Sentinel Automation subsystem.
 
 from __future__ import annotations
 
-from typing import Any, List
+import builtins
+from typing import Any
 
 from sentinel.automation.interfaces import Workflow
 from sentinel.automation.manager import WorkflowManager
@@ -48,7 +49,7 @@ class AutomationService:
     def exists(self, workflow_id: str) -> bool:
         return self._manager.exists(workflow_id)
 
-    def list(self) -> List[Workflow]:
+    def list(self) -> builtins.list[Workflow]:
         return self._manager.list()
 
     def clear(self) -> None:

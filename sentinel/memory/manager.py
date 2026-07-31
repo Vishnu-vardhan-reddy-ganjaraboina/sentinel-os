@@ -4,7 +4,7 @@ Manager for the Sentinel Memory subsystem.
 
 from __future__ import annotations
 
-from typing import List
+import builtins
 
 from sentinel.memory.interfaces import MemoryEntry
 from sentinel.memory.registry import MemoryRegistry
@@ -34,10 +34,10 @@ class MemoryManager:
     def exists(self, memory_id: str) -> bool:
         return self._registry.exists(memory_id)
 
-    def search(self, keyword: str) -> List[MemoryEntry]:
+    def search(self, keyword: str) -> builtins.list[MemoryEntry]:
         return self._registry.search(keyword)
 
-    def list(self) -> List[MemoryEntry]:
+    def list(self) -> builtins.list[MemoryEntry]:
         return self._registry.list()
 
     def clear(self) -> None:

@@ -15,9 +15,6 @@ from threading import RLock
 from sentinel.kernel.exceptions import ServiceNotFoundError
 from sentinel.kernel.service import Service
 from sentinel.kernel.service_state import ServiceState
-from sentinel.infrastructure.constants import (
-    DEFAULT_MONITOR_HEALTHY,
-)
 
 
 @dataclass(slots=True)

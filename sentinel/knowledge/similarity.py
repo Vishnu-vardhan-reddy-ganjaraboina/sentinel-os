@@ -61,7 +61,7 @@ class CosineSimilarity(SimilarityMetric):
     ) -> float:
         self._validate_vectors(left, right)
 
-        dot = sum(a * b for a, b in zip(left, right))
+        dot = sum(a * b for a, b in zip(left, right, strict=True))
 
         norm_left = sqrt(sum(a * a for a in left))
         norm_right = sqrt(sum(b * b for b in right))
@@ -84,7 +84,7 @@ class DotProductSimilarity(SimilarityMetric):
     ) -> float:
         self._validate_vectors(left, right)
 
-        return sum(a * b for a, b in zip(left, right))
+        return sum(a * b for a, b in zip(left, right, strict=True))
 
 
 class EuclideanSimilarity(SimilarityMetric):
@@ -108,7 +108,7 @@ class EuclideanSimilarity(SimilarityMetric):
         distance = sqrt(
             sum(
                 (a - b) ** 2
-                for a, b in zip(left, right)
+                for a, b in zip(left, right, strict=True)
             )
         )
 

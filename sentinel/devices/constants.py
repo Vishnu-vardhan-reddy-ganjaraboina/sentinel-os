@@ -2,12 +2,12 @@
 Constants for the Sentinel Devices subsystem.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_DEVICE_VERSION = "1.0.0"
 
 
-class DeviceCategory(str, Enum):
+class DeviceCategory(StrEnum):
     """
     Supported device categories.
     """
@@ -29,7 +29,7 @@ class DeviceCategory(str, Enum):
     CUSTOM = "custom"
 
 
-class DeviceStatus(str, Enum):
+class DeviceStatus(StrEnum):
     """
     Device status.
     """

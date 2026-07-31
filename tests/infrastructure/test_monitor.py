@@ -1,3 +1,5 @@
+import pytest
+
 from sentinel.infrastructure.monitor import Monitor
 from sentinel.kernel.exceptions import ServiceNotFoundError
 from sentinel.kernel.service_state import ServiceState
@@ -71,11 +73,8 @@ def test_mark_healthy() -> None:
 def test_unknown_service() -> None:
     monitor = Monitor()
 
-    try:
+    with pytest.raises(ServiceNotFoundError):
         monitor.get_health("unknown")
-        assert False
-    except ServiceNotFoundError:
-        pass
 
 
 def test_shutdown() -> None:

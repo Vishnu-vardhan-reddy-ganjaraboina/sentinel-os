@@ -58,7 +58,6 @@ def test_limit():
 
     assert len(results) == 3
 
-    from sentinel.knowledge.similarity import DotProductSimilarity
 
 
 def test_exists():

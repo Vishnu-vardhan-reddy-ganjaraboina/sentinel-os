@@ -5,8 +5,8 @@ Process management for the Execution subsystem.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from sentinel.execution.constants import (
     DEFAULT_SHELL,

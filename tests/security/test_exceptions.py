@@ -1,12 +1,12 @@
 import pytest
 
 from sentinel.security.exceptions import (
-    SecurityError,
     AuthenticationError,
     AuthorizationError,
-    IdentityError,
     CredentialError,
+    IdentityError,
     PermissionError,
+    SecurityError,
 )
 
 

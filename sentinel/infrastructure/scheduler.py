@@ -8,10 +8,9 @@ periodic tasks safely and reliably.
 from __future__ import annotations
 
 import time
-
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Event, RLock, Thread
-from typing import Callable
 
 from sentinel.infrastructure.logger import get_logger
 from sentinel.kernel.exceptions import (

@@ -1,11 +1,11 @@
 import pytest
 
 from sentinel.kernel.dependency_resolver import DependencyResolver
-from sentinel.kernel.service import Service
 from sentinel.kernel.exceptions import (
     CircularDependencyError,
     DependencyNotFoundError,
 )
+from sentinel.kernel.service import Service
 
 
 class Dummy(Service):

@@ -1,6 +1,4 @@
-import pytest
 
-from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.chunker import FixedSizeChunker
 from sentinel.knowledge.document import Document
 from sentinel.knowledge.embeddings import DummyEmbeddingProvider

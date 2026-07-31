@@ -7,7 +7,7 @@ framework.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 # ---------------------------------------------------------------------------
 # Execution Defaults
@@ -29,7 +29,7 @@ MAX_PRIORITY: int = 10
 # ---------------------------------------------------------------------------
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """
     Represents the lifecycle of an execution task.
     """

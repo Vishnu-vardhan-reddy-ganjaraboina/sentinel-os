@@ -1,10 +1,10 @@
 from sentinel.core.exceptions import SentinelError
 from sentinel.storage.exceptions import (
+    StorageBackendError,
     StorageError,
     StorageKeyNotFoundError,
-    StorageBackendError,
-    StorageSerializationError,
     StoragePermissionError,
+    StorageSerializationError,
     StorageTransactionError,
 )
 

@@ -4,12 +4,12 @@ Constants for the Capabilities subsystem.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_CAPABILITY_VERSION = "1.0.0"
 
 
-class CapabilityCategory(str, Enum):
+class CapabilityCategory(StrEnum):
     """
     Categories of capabilities supported by Sentinel.
     """
@@ -25,7 +25,7 @@ class CapabilityCategory(str, Enum):
     CUSTOM = "custom"
 
 
-class CapabilityStatus(str, Enum):
+class CapabilityStatus(StrEnum):
     """
     Lifecycle status of a capability.
     """

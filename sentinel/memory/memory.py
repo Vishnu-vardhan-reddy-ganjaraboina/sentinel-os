@@ -4,8 +4,8 @@ Memory store implementation for the Sentinel Memory subsystem.
 
 from __future__ import annotations
 
+import builtins
 from threading import RLock
-from typing import Dict, List
 
 from sentinel.memory.exceptions import (
     MemoryAlreadyExistsError,
@@ -20,7 +20,7 @@ class MemoryStore(Memory):
     """
 
     def __init__(self) -> None:
-        self._entries: Dict[str, MemoryEntry] = {}
+        self._entries: dict[str, MemoryEntry] = {}
         self._lock = RLock()
 
     def add(self, entry: MemoryEntry) -> None:
@@ -54,7 +54,7 @@ class MemoryStore(Memory):
         with self._lock:
             return memory_id in self._entries
 
-    def search(self, keyword: str) -> List[MemoryEntry]:
+    def search(self, keyword: str) -> builtins.list[MemoryEntry]:
         with self._lock:
             keyword = keyword.lower()
 
@@ -68,7 +68,7 @@ class MemoryStore(Memory):
         with self._lock:
             self._entries.clear()
 
-    def list(self) -> List[MemoryEntry]:
+    def list(self) -> builtins.list[MemoryEntry]:
         with self._lock:
             return list(self._entries.values())
 

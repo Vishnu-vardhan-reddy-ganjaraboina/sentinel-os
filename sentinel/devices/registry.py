@@ -4,6 +4,8 @@ Device registry for the Sentinel Devices subsystem.
 
 from __future__ import annotations
 
+import builtins
+from collections.abc import Iterator
 from threading import RLock
 
 from sentinel.devices.constants import DeviceCategory
@@ -72,7 +74,7 @@ class DeviceRegistry:
         """
         return device_id in self._devices
 
-    def list(self) -> list[BaseDevice]:
+    def list(self) -> builtins.list[BaseDevice]:
         """
         Return all registered devices.
         """
@@ -81,7 +83,7 @@ class DeviceRegistry:
     def list_by_category(
         self,
         category: DeviceCategory,
-    ) -> list[BaseDevice]:
+    ) -> builtins.list[BaseDevice]:
         """
         Return devices belonging to a category.
         """
@@ -107,5 +109,5 @@ class DeviceRegistry:
     def __len__(self) -> int:
         return len(self._devices)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[BaseDevice]:
         return iter(self._devices.values())

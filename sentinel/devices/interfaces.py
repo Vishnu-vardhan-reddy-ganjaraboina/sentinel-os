@@ -5,6 +5,7 @@ Interfaces for the Sentinel Devices subsystem.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class Device(ABC):
@@ -66,7 +67,7 @@ class Device(ABC):
         """
 
     @abstractmethod
-    def execute(self, **kwargs):
+    def execute(self, **kwargs: Any) -> Any:
         """
         Execute a device-specific operation.
         """

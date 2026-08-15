@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.kernel.service import Service
+from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.service import OrchestrationService
 from sentinel.security.identity import SecurityIdentity
@@ -25,6 +26,7 @@ class OrchestrationRuntimeService(Service):
         security: SecurityManager | None = None,
         identity: SecurityIdentity | None = None,
         memory: MemoryService | None = None,
+        knowledge: KnowledgeService | None = None,
     ) -> None:
         super().__init__("orchestration")
 
@@ -36,6 +38,7 @@ class OrchestrationRuntimeService(Service):
                 security=security,
                 identity=identity,
                 memory=memory,
+                knowledge=knowledge,
             )
         )
 
@@ -48,7 +51,7 @@ class OrchestrationRuntimeService(Service):
         """
         Initialize orchestration resources.
 
-        OrchestrationService creates its resources during
+        The current orchestration service creates its resources during
         construction, so no additional initialization is required.
         """
 
@@ -56,7 +59,7 @@ class OrchestrationRuntimeService(Service):
         """
         Shut down orchestration resources.
 
-        OrchestrationService currently owns no external resources,
+        The current orchestration service owns no external resources,
         so there is nothing to release at shutdown.
         """
 

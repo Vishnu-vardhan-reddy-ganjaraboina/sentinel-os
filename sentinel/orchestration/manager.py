@@ -9,6 +9,7 @@ from typing import Any
 
 from sentinel.brain.manager import BrainManager
 from sentinel.capabilities.manager import CapabilityManager
+from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.exceptions import (
     OrchestrationExecutionError,
@@ -28,9 +29,10 @@ class OrchestrationManager:
     """
     High-level manager for orchestration operations.
 
-    The manager validates requests, delegates reasoning to the Brain,
-    authorizes capability execution through Security, executes
-    authorized capabilities, and persists successful results in Memory.
+    The manager validates requests, retrieves relevant Memory and
+    Knowledge context, delegates reasoning to the Brain, authorizes
+    capability execution through Security, executes authorized
+    capabilities, and persists successful results in Memory.
     """
 
     def __init__(
@@ -41,6 +43,7 @@ class OrchestrationManager:
         security: SecurityManager | None = None,
         identity: SecurityIdentity | None = None,
         memory: MemoryService | None = None,
+        knowledge: KnowledgeService | None = None,
     ) -> None:
         self._handler = handler
 
@@ -69,6 +72,8 @@ class OrchestrationManager:
             if memory is not None
             else MemoryService()
         )
+
+        self._knowledge = knowledge
 
     @property
     def handler(
@@ -99,8 +104,13 @@ class OrchestrationManager:
 
     @property
     def memory(self) -> MemoryService:
-        """Return the Memory service."""
+        """Return the shared Memory service."""
         return self._memory
+
+    @property
+    def knowledge(self) -> KnowledgeService | None:
+        """Return the shared Knowledge service."""
+        return self._knowledge
 
     def execute(
         self,
@@ -114,7 +124,7 @@ class OrchestrationManager:
         capability identified by the resulting plan is authorized
         and executed.
 
-        Successful orchestration results are persisted in shared Memory.
+        Successful orchestration results are persisted in Memory.
         """
         self._validate(request)
 
@@ -158,8 +168,9 @@ class OrchestrationManager:
         """
         Execute a request through the Brain subsystem.
 
-        Relevant memories are retrieved from the shared Memory service
-        and made available to the Brain through the execution context.
+        Relevant memories and knowledge are retrieved from their
+        shared services and made available to the Brain through
+        the execution context.
         """
         memories = self._memory.search(
             str(request.input),
@@ -171,8 +182,27 @@ class OrchestrationManager:
             if not memory.expired
         ]
 
+        knowledge_context: list[dict[str, Any]] = []
+
+        if self._knowledge is not None:
+            chunks = self._knowledge.search(
+                str(request.input),
+            )
+
+            knowledge_context = [
+                {
+                    "id": chunk.id,
+                    "document_id": chunk.document_id,
+                    "text": chunk.text,
+                    "index": chunk.index,
+                    "metadata": chunk.metadata.copy(),
+                }
+                for chunk in chunks
+            ]
+
         context_data = dict(request.context)
         context_data["memories"] = memory_context
+        context_data["knowledge"] = knowledge_context
 
         context = self._brain.create_context(
             context_id=request.id,
@@ -188,8 +218,10 @@ class OrchestrationManager:
 
         if isinstance(result_context, dict):
             result_context["memories"] = memory_context
+            result_context["knowledge"] = knowledge_context
 
         return self._execute_plan(result)
+
     def _execute_plan(
         self,
         result: dict[str, Any],

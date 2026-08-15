@@ -466,3 +466,59 @@ def test_brain_context_contains_empty_memories_when_no_match() -> None:
     context = result.data["context"]
 
     assert context["memories"] == []
+
+def test_knowledge_is_available_to_brain_context() -> None:
+    from sentinel.knowledge.chunker import FixedSizeChunker
+    from sentinel.knowledge.document import Document
+    from sentinel.knowledge.embeddings import DummyEmbeddingProvider
+    from sentinel.knowledge.indexer import Indexer
+    from sentinel.knowledge.knowledge_service import KnowledgeService
+    from sentinel.knowledge.retriever import Retriever
+    from sentinel.knowledge.vector_store import InMemoryVectorStore
+
+    provider = DummyEmbeddingProvider()
+    store = InMemoryVectorStore()
+
+    knowledge = KnowledgeService(
+        indexer=Indexer(
+            chunker=FixedSizeChunker(),
+            embedding_provider=provider,
+            vector_store=store,
+        ),
+        retriever=Retriever(
+            embedding_provider=provider,
+            vector_store=store,
+        ),
+    )
+
+    knowledge.add_document(
+        Document(
+            id="knowledge.python",
+            text="Python is used for Sentinel development.",
+        )
+    )
+
+    manager = OrchestrationManager(
+        knowledge=knowledge,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.knowledge.context",
+        input="Python",
+    )
+
+    result = manager.execute(request)
+
+    assert result.success is True
+    assert isinstance(result.data, dict)
+
+    context = result.data["context"]
+
+    knowledge_context = context["knowledge"]
+
+    assert len(knowledge_context) == 1
+    assert knowledge_context[0]["id"] == "knowledge.python:0"
+    assert knowledge_context[0]["document_id"] == "knowledge.python"
+    assert knowledge_context[0]["text"] == (
+        "Python is used for Sentinel development."
+    )

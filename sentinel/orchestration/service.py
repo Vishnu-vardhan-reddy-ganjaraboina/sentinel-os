@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from sentinel.capabilities.manager import CapabilityManager
+from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.manager import OrchestrationManager
 from sentinel.orchestration.models import (
@@ -31,6 +32,7 @@ class OrchestrationService:
         security: SecurityManager | None = None,
         identity: SecurityIdentity | None = None,
         memory: MemoryService | None = None,
+        knowledge: KnowledgeService | None = None,
     ) -> None:
         self._manager = (
             manager
@@ -41,6 +43,7 @@ class OrchestrationService:
                 security=security,
                 identity=identity,
                 memory=memory,
+                knowledge=knowledge,
             )
         )
 
@@ -66,8 +69,13 @@ class OrchestrationService:
 
     @property
     def memory(self) -> MemoryService:
-        """Return the Memory service."""
+        """Return the shared Memory service."""
         return self._manager.memory
+
+    @property
+    def knowledge(self) -> KnowledgeService | None:
+        """Return the shared Knowledge service."""
+        return self._manager.knowledge
 
     def execute(
         self,

@@ -8,6 +8,8 @@ from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
+from sentinel.knowledge.knowledge_service import KnowledgeService
+from sentinel.knowledge.runtime import KnowledgeRuntimeService
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
@@ -31,6 +33,7 @@ class Application:
         security: SecurityManager | None = None,
         identity: SecurityIdentity | None = None,
         memory: MemoryService | None = None,
+        knowledge: KnowledgeService | None = None,
     ) -> None:
         if bootstrap is not None:
             self._bootstrap = bootstrap
@@ -41,18 +44,29 @@ class Application:
                 else MemoryService()
             )
 
+            knowledge_runtime = KnowledgeRuntimeService(
+                knowledge=knowledge,
+            )
+
+            shared_knowledge = knowledge_runtime.knowledge
+
             self._bootstrap = Bootstrap(
                 services=(
                     ExecutionRuntimeService(),
+
                     OrchestrationRuntimeService(
                         capabilities=capabilities,
                         security=security,
                         identity=identity,
                         memory=shared_memory,
+                        knowledge=shared_knowledge,
                     ),
+
                     MemoryRuntimeService(
                         memory=shared_memory,
                     ),
+
+                    knowledge_runtime,
                 ),
             )
 

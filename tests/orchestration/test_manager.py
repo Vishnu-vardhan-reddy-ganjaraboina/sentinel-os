@@ -342,3 +342,127 @@ def test_execute_capability_without_identity() -> None:
 
     with pytest.raises(AuthorizationError):
         manager.execute(request)
+
+def test_successful_execution_is_stored_in_memory() -> None:
+    capabilities = CapabilityManager()
+    capabilities.register(EchoCapability())
+
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.memory",
+        input="hello",
+        context={
+            "capability_id": "system.echo",
+            "capability_arguments": {
+                "message": "hello",
+            },
+        },
+    )
+
+    result = manager.execute(request)
+
+    memory_id = "orchestration:req.memory"
+
+    assert manager.memory.exists(memory_id) is True
+
+    memory = manager.memory.get(memory_id)
+
+    assert memory.content == result.to_dict()
+
+def test_failed_execution_is_not_stored_in_memory() -> None:
+    capabilities = CapabilityManager()
+    capabilities.register(EchoCapability())
+
+    security = SecurityManager()
+
+    identity = SecurityIdentity(
+        "user.1",
+        "Test User",
+        {Role.USER},
+    )
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.memory.denied",
+        input="hello",
+        context={
+            "capability_id": "system.echo",
+            "capability_arguments": {
+                "message": "hello",
+            },
+        },
+    )
+
+    with pytest.raises(AuthorizationError):
+        manager.execute(request)
+
+    memory_id = "orchestration:req.memory.denied"
+
+    assert manager.memory.exists(memory_id) is False
+
+def test_memory_is_available_to_brain_context() -> None:
+    capabilities = CapabilityManager()
+    capabilities.register(EchoCapability())
+
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    manager.memory.create(
+        memory_id="memory.python",
+        content="User prefers Python development.",
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.memory.context",
+        input="Python",
+    )
+
+    result = manager.execute(request)
+
+    assert result.success is True
+    assert isinstance(result.data, dict)
+
+    context = result.data["context"]
+
+    memories = context["memories"]
+
+    assert len(memories) == 1
+    assert memories[0]["id"] == "memory.python"
+    assert memories[0]["content"] == (
+        "User prefers Python development."
+    )
+
+
+def test_brain_context_contains_empty_memories_when_no_match() -> None:
+    manager = OrchestrationManager()
+
+    request = OrchestrationRequest(
+        request_id="req.no.memory",
+        input="something-that-does-not-exist",
+    )
+
+    result = manager.execute(request)
+
+    assert result.success is True
+    assert isinstance(result.data, dict)
+
+    context = result.data["context"]
+
+    assert context["memories"] == []

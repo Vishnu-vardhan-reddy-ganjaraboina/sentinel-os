@@ -3,7 +3,7 @@ from sentinel.kernel.service import Service
 
 
 class Dummy(Service):
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         super().__init__(name)
 
     def initialize(self) -> None:
@@ -13,7 +13,7 @@ class Dummy(Service):
         pass
 
 
-def test_register():
+def test_register() -> None:
     kernel = Kernel()
 
     service = Dummy("logger")
@@ -23,7 +23,7 @@ def test_register():
     assert kernel.get("logger") is service
 
 
-def test_boot_shutdown():
+def test_boot_shutdown() -> None:
     kernel = Kernel()
 
     service = Dummy("logger")

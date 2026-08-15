@@ -4,11 +4,15 @@ Application lifecycle for Sentinel OS.
 
 from __future__ import annotations
 
+from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.memory.runtime import MemoryRuntimeService
+from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
+from sentinel.security.identity import SecurityIdentity
+from sentinel.security.manager import SecurityManager
 
 
 class Application:
@@ -22,18 +26,36 @@ class Application:
     def __init__(
         self,
         bootstrap: Bootstrap | None = None,
+        *,
+        capabilities: CapabilityManager | None = None,
+        security: SecurityManager | None = None,
+        identity: SecurityIdentity | None = None,
+        memory: MemoryService | None = None,
     ) -> None:
-        self._bootstrap = (
-            bootstrap
-            if bootstrap is not None
-            else Bootstrap(
+        if bootstrap is not None:
+            self._bootstrap = bootstrap
+        else:
+            shared_memory = (
+                memory
+                if memory is not None
+                else MemoryService()
+            )
+
+            self._bootstrap = Bootstrap(
                 services=(
                     ExecutionRuntimeService(),
-                    OrchestrationRuntimeService(),
-                    MemoryRuntimeService(),
+                    OrchestrationRuntimeService(
+                        capabilities=capabilities,
+                        security=security,
+                        identity=identity,
+                        memory=shared_memory,
+                    ),
+                    MemoryRuntimeService(
+                        memory=shared_memory,
+                    ),
                 ),
             )
-        )
+
         self._running = False
 
     @property

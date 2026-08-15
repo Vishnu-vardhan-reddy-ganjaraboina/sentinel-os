@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from sentinel.capabilities.manager import CapabilityManager
+from sentinel.memory.service import MemoryService
 from sentinel.orchestration.manager import OrchestrationManager
 from sentinel.orchestration.models import (
     OrchestrationRequest,
@@ -29,6 +30,7 @@ class OrchestrationService:
         capabilities: CapabilityManager | None = None,
         security: SecurityManager | None = None,
         identity: SecurityIdentity | None = None,
+        memory: MemoryService | None = None,
     ) -> None:
         self._manager = (
             manager
@@ -38,6 +40,7 @@ class OrchestrationService:
                 capabilities=capabilities,
                 security=security,
                 identity=identity,
+                memory=memory,
             )
         )
 
@@ -60,6 +63,11 @@ class OrchestrationService:
     def identity(self) -> SecurityIdentity | None:
         """Return the identity used for authorization."""
         return self._manager.identity
+
+    @property
+    def memory(self) -> MemoryService:
+        """Return the Memory service."""
+        return self._manager.memory
 
     def execute(
         self,

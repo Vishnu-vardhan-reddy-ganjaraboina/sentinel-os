@@ -9,6 +9,7 @@ from typing import Any
 
 from sentinel.brain.manager import BrainManager
 from sentinel.capabilities.manager import CapabilityManager
+from sentinel.memory.service import MemoryService
 from sentinel.orchestration.exceptions import (
     OrchestrationExecutionError,
     OrchestrationValidationError,
@@ -28,8 +29,8 @@ class OrchestrationManager:
     High-level manager for orchestration operations.
 
     The manager validates requests, delegates reasoning to the Brain,
-    authorizes capability execution through Security, and executes
-    authorized capabilities.
+    authorizes capability execution through Security, executes
+    authorized capabilities, and persists successful results in Memory.
     """
 
     def __init__(
@@ -39,6 +40,7 @@ class OrchestrationManager:
         capabilities: CapabilityManager | None = None,
         security: SecurityManager | None = None,
         identity: SecurityIdentity | None = None,
+        memory: MemoryService | None = None,
     ) -> None:
         self._handler = handler
 
@@ -61,6 +63,12 @@ class OrchestrationManager:
         )
 
         self._identity = identity
+
+        self._memory = (
+            memory
+            if memory is not None
+            else MemoryService()
+        )
 
     @property
     def handler(
@@ -89,6 +97,11 @@ class OrchestrationManager:
         """Return the identity used for authorization."""
         return self._identity
 
+    @property
+    def memory(self) -> MemoryService:
+        """Return the Memory service."""
+        return self._memory
+
     def execute(
         self,
         request: OrchestrationRequest,
@@ -100,6 +113,8 @@ class OrchestrationManager:
         Otherwise the request is passed through the Brain and any
         capability identified by the resulting plan is authorized
         and executed.
+
+        Successful orchestration results are persisted in shared Memory.
         """
         self._validate(request)
 
@@ -117,11 +132,15 @@ class OrchestrationManager:
                 f"Orchestration request '{request.id}' failed."
             ) from exc
 
-        return OrchestrationResult(
+        orchestration_result = OrchestrationResult(
             request_id=request.id,
             success=True,
             data=result,
         )
+
+        self._persist_result(orchestration_result)
+
+        return orchestration_result
 
     def can_execute(
         self,
@@ -138,10 +157,26 @@ class OrchestrationManager:
     ) -> dict[str, Any]:
         """
         Execute a request through the Brain subsystem.
+
+        Relevant memories are retrieved from the shared Memory service
+        and made available to the Brain through the execution context.
         """
+        memories = self._memory.search(
+            str(request.input),
+        )
+
+        memory_context = [
+            memory.to_dict()
+            for memory in memories
+            if not memory.expired
+        ]
+
+        context_data = dict(request.context)
+        context_data["memories"] = memory_context
+
         context = self._brain.create_context(
             context_id=request.id,
-            **request.context,
+            **context_data,
         )
 
         result = self._brain.execute(
@@ -149,8 +184,12 @@ class OrchestrationManager:
             context=context,
         )
 
-        return self._execute_plan(result)
+        result_context = result.get("context")
 
+        if isinstance(result_context, dict):
+            result_context["memories"] = memory_context
+
+        return self._execute_plan(result)
     def _execute_plan(
         self,
         result: dict[str, Any],
@@ -241,6 +280,23 @@ class OrchestrationManager:
                 f"Identity '{self._identity.id}' is not authorized "
                 f"to execute capability '{capability_id}'."
             )
+
+    def _persist_result(
+        self,
+        result: OrchestrationResult,
+    ) -> None:
+        """
+        Persist a successful orchestration result in shared Memory.
+        """
+        memory_id = f"orchestration:{result.request_id}"
+
+        if self._memory.exists(memory_id):
+            self._memory.remove(memory_id)
+
+        self._memory.create(
+            memory_id=memory_id,
+            content=result.to_dict(),
+        )
 
     def _validate(
         self,

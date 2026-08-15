@@ -4,6 +4,7 @@ Capability registry for the Sentinel Capabilities subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from threading import RLock
 
 from sentinel.capabilities.capability import BaseCapability
@@ -12,6 +13,8 @@ from sentinel.capabilities.exceptions import (
     CapabilityAlreadyExistsError,
     CapabilityNotFoundError,
 )
+
+CapabilityList = list[BaseCapability]
 
 
 class CapabilityRegistry:
@@ -78,7 +81,7 @@ class CapabilityRegistry:
 
     def list(
         self,
-    ) -> list[BaseCapability]:
+    ) -> CapabilityList:
         """
         Return all registered capabilities.
         """
@@ -87,7 +90,7 @@ class CapabilityRegistry:
     def list_by_category(
         self,
         category: CapabilityCategory,
-    ) -> list[BaseCapability]:
+    ) -> CapabilityList:
         """
         Return capabilities belonging to a category.
         """
@@ -113,5 +116,5 @@ class CapabilityRegistry:
     def __len__(self) -> int:
         return len(self._capabilities)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[BaseCapability]:
         return iter(self._capabilities.values())

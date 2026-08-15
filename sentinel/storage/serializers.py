@@ -9,12 +9,10 @@ import pickle
 from abc import ABC, abstractmethod
 from typing import Any, BinaryIO, TextIO
 
-from sentinel.storage.exceptions import (
-    StorageSerializationError,
-)
+from sentinel.storage.exceptions import StorageSerializationError
 
 
-class Serializer(ABC):
+class Serializer[StreamT: TextIO | BinaryIO](ABC):
     """
     Base serializer interface.
     """
@@ -23,7 +21,7 @@ class Serializer(ABC):
     def dump(
         self,
         value: Any,
-        stream: TextIO | BinaryIO,
+        stream: StreamT,
     ) -> None:
         """
         Serialize an object.
@@ -33,13 +31,15 @@ class Serializer(ABC):
     @abstractmethod
     def load(
         self,
-        stream: TextIO | BinaryIO,
+        stream: StreamT,
     ) -> Any:
         """
         Deserialize an object.
         """
         raise NotImplementedError
-class JsonSerializer(Serializer):
+
+
+class JsonSerializer(Serializer[TextIO]):
     """
     JSON serializer.
     """
@@ -71,7 +71,8 @@ class JsonSerializer(Serializer):
                 str(exc)
             ) from exc
 
-class PickleSerializer(Serializer):
+
+class PickleSerializer(Serializer[BinaryIO]):
     """
     Binary pickle serializer.
 

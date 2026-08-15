@@ -16,14 +16,20 @@ class StorageBackend(ABC):
     """
 
     @abstractmethod
-    def exists(self, key: str) -> bool:
+    def exists(
+        self,
+        key: str,
+    ) -> bool:
         """
         Return True if the key exists.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def get(self, key: str) -> Any:
+    def get(
+        self,
+        key: str,
+    ) -> Any:
         """
         Retrieve a value.
 
@@ -33,14 +39,21 @@ class StorageBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def set(self, key: str, value: Any) -> None:
+    def set(
+        self,
+        key: str,
+        value: Any,
+    ) -> None:
         """
         Store a value.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, key: str) -> None:
+    def delete(
+        self,
+        key: str,
+    ) -> None:
         """
         Delete a key.
         """
@@ -67,5 +80,37 @@ class StorageBackend(ABC):
         """
         raise NotImplementedError
 
+    def connect(self) -> None:
+        """
+        Connect to the storage backend.
 
-    
+        Backends that require an explicit connection should override this.
+        """
+        return None
+
+    def disconnect(self) -> None:
+        """
+        Disconnect from the storage backend.
+
+        By default, this delegates to close().
+        """
+        self.close()
+
+    def save(
+        self,
+        key: str,
+        value: Any,
+    ) -> None:
+        """
+        Backward-compatible alias for set().
+        """
+        self.set(key, value)
+
+    def load(
+        self,
+        key: str,
+    ) -> Any:
+        """
+        Backward-compatible alias for get().
+        """
+        return self.get(key)

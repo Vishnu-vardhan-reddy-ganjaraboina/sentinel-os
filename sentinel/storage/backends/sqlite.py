@@ -22,50 +22,41 @@ class SQLiteBackend(StorageBackend):
     SQLite implementation of StorageBackend.
     """
 
-    def __init__(self, database: str | Path):
+    def __init__(
+        self,
+        database: str | Path,
+    ) -> None:
         self._database = Path(database)
-        self._connection = None
-
-        self._database.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-    )
+        self._connection: sqlite3.Connection | None = None
 
         self._database.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-        try:
-            self._connection = sqlite3.connect(self._database)
+        self.connect()
 
-            self._connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS storage(
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """
-            )
+    def exists(
+        self,
+        key: str,
+    ) -> bool:
+        connection = self._ensure_connected()
 
-            self._connection.commit()
-
-        except sqlite3.Error as exc:
-            raise StorageConnectionError(
-                str(exc)
-            ) from exc
-
-    def exists(self, key: str) -> bool:
-        cursor = self._connection.execute(
+        cursor = connection.execute(
             "SELECT 1 FROM storage WHERE key=?",
             (key,),
         )
 
         return cursor.fetchone() is not None
 
-    def get(self, key: str) -> Any:
+    def get(
+        self,
+        key: str,
+    ) -> Any:
+        connection = self._ensure_connected()
+
         try:
-            cursor = self._connection.execute(
+            cursor = connection.execute(
                 "SELECT value FROM storage WHERE key=?",
                 (key,),
             )
@@ -89,11 +80,13 @@ class SQLiteBackend(StorageBackend):
         key: str,
         value: Any,
     ) -> None:
+        connection = self._ensure_connected()
+
         try:
-            self._connection.execute(
+            connection.execute(
                 """
-                INSERT INTO storage(key,value)
-                VALUES(?,?)
+                INSERT INTO storage(key, value)
+                VALUES(?, ?)
                 ON CONFLICT(key)
                 DO UPDATE SET value=excluded.value
                 """,
@@ -103,78 +96,112 @@ class SQLiteBackend(StorageBackend):
                 ),
             )
 
-            self._connection.commit()
+            connection.commit()
 
         except sqlite3.Error as exc:
             raise StorageWriteError(
                 str(exc)
             ) from exc
 
-    def delete(self, key: str) -> None:
-        self._connection.execute(
+    def delete(
+        self,
+        key: str,
+    ) -> None:
+        connection = self._ensure_connected()
+
+        connection.execute(
             "DELETE FROM storage WHERE key=?",
             (key,),
         )
 
-        self._connection.commit()
+        connection.commit()
 
     def clear(self) -> None:
-        self._connection.execute(
+        connection = self._ensure_connected()
+
+        connection.execute(
             "DELETE FROM storage"
         )
 
-        self._connection.commit()
+        connection.commit()
 
     def keys(self) -> list[str]:
-        cursor = self._connection.execute(
+        connection = self._ensure_connected()
+
+        cursor = connection.execute(
             "SELECT key FROM storage"
         )
 
         return [row[0] for row in cursor.fetchall()]
 
     def close(self) -> None:
-        self._connection.close()
-
-
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
 
     def connect(self) -> None:
+        """
+        Connect to the SQLite database.
+        """
         if self._connection is not None:
             return
 
-        self._connection = sqlite3.connect(self._database)
+        try:
+            connection = sqlite3.connect(self._database)
 
-        self._connection.execute(
-           """
-           CREATE TABLE IF NOT EXISTS storage(
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-        )
-        """
-    )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS storage(
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
 
-        self._connection.commit()
-    
+            connection.commit()
+
+            self._connection = connection
+
+        except sqlite3.Error as exc:
+            raise StorageConnectionError(
+                str(exc)
+            ) from exc
+
     def disconnect(self) -> None:
-        if self._connection is not None:
-             self._connection.close()
-             self._connection = None
+        """
+        Disconnect from the SQLite database.
+        """
+        self.close()
 
+    def _ensure_connected(self) -> sqlite3.Connection:
+        """
+        Return the active database connection.
 
-
-    def _ensure_connected(self):
+        Raises:
+            StorageConnectionError:
+                If the backend is not connected.
+        """
         if self._connection is None:
-             raise StorageConnectionError(
-            "Backend is not connected."
-        )
+            raise StorageConnectionError(
+                "Backend is not connected."
+            )
 
-    def save(self, key: str, value: Any) -> None:
+        return self._connection
+
+    def save(
+        self,
+        key: str,
+        value: Any,
+    ) -> None:
         """
         Backward-compatible alias for set().
         """
         self.set(key, value)
 
-
-    def load(self, key: str) -> Any:
+    def load(
+        self,
+        key: str,
+    ) -> Any:
         """
         Backward-compatible alias for get().
         """

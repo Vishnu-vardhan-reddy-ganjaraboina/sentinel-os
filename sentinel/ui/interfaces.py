@@ -101,7 +101,7 @@ class UIManager(ABC):
         ...
 
     @abstractmethod
-    def get_window(self) -> Window:
+    def get_window(self) -> Window | None:
         ...
 
     @abstractmethod

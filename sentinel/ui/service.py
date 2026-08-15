@@ -4,6 +4,8 @@ Service layer for the Sentinel UI subsystem.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sentinel.ui.interfaces import View, Window
 from sentinel.ui.manager import SentinelUIManager
 
@@ -40,10 +42,10 @@ class UIService:
     def get_view(
         self,
         name: str,
-    ):
+    ) -> View:
         return self._manager.get_view(name)
 
-    def views(self):
+    def views(self) -> list[View]:
         return self._manager.views()
 
     def set_window(
@@ -52,13 +54,13 @@ class UIService:
     ) -> None:
         self._manager.set_window(window)
 
-    def get_window(self):
+    def get_window(self) -> Window | None:
         return self._manager.get_window()
 
     def clear(self) -> None:
         self._manager.clear()
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return self._manager.to_dict()
 
     def __len__(self) -> int:

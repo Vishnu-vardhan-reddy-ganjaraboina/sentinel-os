@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+from sentinel.execution.task import Task
+
 
 class Executor(ABC):
     """
@@ -36,9 +38,7 @@ class Executor(ABC):
     @abstractmethod
     def execute(
         self,
-        callback: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
+        task: Task,
     ) -> Any:
         """
         Execute a task immediately and return its result.

@@ -7,7 +7,7 @@ execution, and process management.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from sentinel.execution.command import CommandExecutor, CommandResult
@@ -48,7 +48,10 @@ class ExecutionService:
     # Task execution
     # ------------------------------------------------------------------
 
-    def execute_task(self, task: Task) -> Any:
+    def execute_task(
+        self,
+        task: Task,
+    ) -> Any:
         """
         Execute a Task.
         """
@@ -56,9 +59,9 @@ class ExecutionService:
 
     def submit(
         self,
-        callback,
-        *args,
-        **kwargs,
+        callback: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> str:
         """
         Submit a callable for execution.
@@ -69,7 +72,10 @@ class ExecutionService:
             **kwargs,
         )
 
-    def cancel(self, task_id: str) -> bool:
+    def cancel(
+        self,
+        task_id: str,
+    ) -> bool:
         """
         Cancel a submitted task.
         """

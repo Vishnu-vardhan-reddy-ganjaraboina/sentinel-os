@@ -52,3 +52,27 @@ def test_context_manager() -> None:
         assert application.running is True
 
     assert application.running is False
+
+def test_execution_service_is_registered() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.get("execution") is not None
+    assert kernel.running("execution") is True
+
+    application.shutdown()
+
+def test_execution_service_stops_on_shutdown() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    execution = kernel.get("execution")
+
+    assert kernel.running("execution") is True
+
+    application.shutdown()
+
+    assert application.running is False
+    assert kernel.running("execution") is False

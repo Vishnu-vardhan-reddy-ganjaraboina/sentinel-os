@@ -4,6 +4,7 @@ Application lifecycle for Sentinel OS.
 
 from __future__ import annotations
 
+from sentinel.execution.runtime import ExecutionRuntimeService
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 
@@ -23,7 +24,11 @@ class Application:
         self._bootstrap = (
             bootstrap
             if bootstrap is not None
-            else Bootstrap()
+            else Bootstrap(
+                services=(
+                    ExecutionRuntimeService(),
+                ),
+            )
         )
         self._running = False
 

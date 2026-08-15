@@ -10,7 +10,10 @@ Infrastructure services are registered by the application layer.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from .kernel import Kernel
+from .service import Service
 
 
 class Bootstrap:
@@ -21,52 +24,38 @@ class Bootstrap:
     a clean entry point for starting and stopping Sentinel.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        services: Iterable[Service] = (),
+    ) -> None:
+        self._services = tuple(services)
         self._kernel: Kernel | None = None
 
     @property
     def kernel(self) -> Kernel:
-        """
-        Return the running kernel.
-
-        Raises:
-            RuntimeError:
-                If the kernel has not been started.
-        """
+        """Return the running kernel."""
         if self._kernel is None:
             raise RuntimeError("Kernel has not been started.")
 
         return self._kernel
 
     def start(self) -> Kernel:
-        """
-        Create and start the Sentinel Kernel.
-
-        Returns:
-            Kernel:
-                The running kernel instance.
-
-        Raises:
-            RuntimeError:
-                If the kernel is already running.
-        """
+        """Create, configure and start the Sentinel Kernel."""
         if self._kernel is not None:
             raise RuntimeError("Kernel is already running.")
 
         kernel = Kernel()
+
+        for service in self._services:
+            kernel.register(service)
+
         kernel.boot()
 
         self._kernel = kernel
         return kernel
 
     def shutdown(self) -> None:
-        """
-        Gracefully stop the Sentinel Kernel.
-
-        Raises:
-            RuntimeError:
-                If the kernel is not running.
-        """
+        """Gracefully stop the Sentinel Kernel."""
         if self._kernel is None:
             raise RuntimeError("Kernel is not running.")
 

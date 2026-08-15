@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sentinel.brain.constants import BrainState
 from sentinel.brain.context import BrainContext
 from sentinel.brain.engine import BrainEngine
 
@@ -45,7 +46,7 @@ class BrainManager:
             data=kwargs,
         )
 
-    def state(self):
+    def state(self) -> BrainState:
         """
         Return the current engine state.
         """

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sentinel.brain.constants import BrainState
 from sentinel.brain.context import BrainContext
 from sentinel.brain.manager import BrainManager
 
@@ -51,7 +52,7 @@ class BrainService:
             context=context,
         )
 
-    def state(self):
+    def state(self) -> BrainState:
         """
         Return the current Brain state.
         """

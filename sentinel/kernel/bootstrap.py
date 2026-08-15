@@ -54,7 +54,7 @@ class Bootstrap:
             raise RuntimeError("Kernel is already running.")
 
         kernel = Kernel()
-        kernel.start()
+        kernel.boot()
 
         self._kernel = kernel
         return kernel

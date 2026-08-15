@@ -5,6 +5,7 @@ Memory store implementation for the Sentinel Memory subsystem.
 from __future__ import annotations
 
 import builtins
+from collections.abc import Iterator
 from threading import RLock
 
 from sentinel.memory.exceptions import (
@@ -79,5 +80,5 @@ class MemoryStore(Memory):
         with self._lock:
             return len(self._entries)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[MemoryEntry]:
         return iter(self.list())

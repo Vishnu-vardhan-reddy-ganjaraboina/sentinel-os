@@ -4,15 +4,15 @@ Sentinel OS application entry point.
 
 from __future__ import annotations
 
-from sentinel.kernel.bootstrap import Bootstrap
+from sentinel.application import Application
 
 
 def main() -> None:
     """
     Start Sentinel OS.
     """
-    bootstrap = Bootstrap()
-    bootstrap.start()
+    application = Application()
+    application.start()
 
 
 if __name__ == "__main__":

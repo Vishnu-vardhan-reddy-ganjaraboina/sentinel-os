@@ -5,7 +5,7 @@ Authenticator implementation for the Sentinel Security subsystem.
 from __future__ import annotations
 
 from sentinel.security.credentials import SecurityCredentials
-from sentinel.security.interfaces import Authenticator
+from sentinel.security.interfaces import Authenticator, Credentials
 
 
 class SecurityAuthenticator(Authenticator):
@@ -36,7 +36,7 @@ class SecurityAuthenticator(Authenticator):
 
     def authenticate(
         self,
-        credentials: SecurityCredentials,
+        credentials: Credentials,
     ) -> bool:
         """
         Authenticate supplied credentials.

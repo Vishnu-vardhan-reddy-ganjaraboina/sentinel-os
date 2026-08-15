@@ -4,9 +4,10 @@ Authorizer implementation for the Sentinel Security subsystem.
 
 from __future__ import annotations
 
-from sentinel.security.constants import Permission
-from sentinel.security.identity import SecurityIdentity
-from sentinel.security.interfaces import Authorizer
+from collections.abc import Iterable
+
+from sentinel.security.constants import Permission, Role
+from sentinel.security.interfaces import Authorizer, Identity
 from sentinel.security.permissions import RolePermissionStore
 
 
@@ -34,7 +35,7 @@ class SecurityAuthorizer(Authorizer):
 
     def authorize(
         self,
-        identity: SecurityIdentity,
+        identity: Identity,
         permission: Permission,
     ) -> bool:
         """
@@ -51,8 +52,8 @@ class SecurityAuthorizer(Authorizer):
 
     def grant(
         self,
-        role,
-        permissions,
+        role: Role,
+        permissions: Iterable[Permission],
     ) -> None:
         """
         Grant permissions to a role.
@@ -64,8 +65,8 @@ class SecurityAuthorizer(Authorizer):
 
     def revoke(
         self,
-        role,
-        permissions,
+        role: Role,
+        permissions: Iterable[Permission],
     ) -> None:
         """
         Revoke permissions from a role.

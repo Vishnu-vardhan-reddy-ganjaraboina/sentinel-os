@@ -4,9 +4,11 @@ Manager for the Sentinel Security subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from sentinel.security.authenticator import SecurityAuthenticator
 from sentinel.security.authorizer import SecurityAuthorizer
-from sentinel.security.constants import Permission
+from sentinel.security.constants import Permission, Role
 from sentinel.security.credentials import SecurityCredentials
 from sentinel.security.identity import SecurityIdentity
 
@@ -84,8 +86,8 @@ class SecurityManager:
 
     def grant(
         self,
-        role,
-        permissions,
+        role: Role,
+        permissions: Iterable[Permission],
     ) -> None:
         """
         Grant permissions to a role.
@@ -97,8 +99,8 @@ class SecurityManager:
 
     def revoke(
         self,
-        role,
-        permissions,
+        role: Role,
+        permissions: Iterable[Permission],
     ) -> None:
         """
         Revoke permissions from a role.

@@ -1,76 +1,139 @@
-import pytest
+from datetime import timedelta
 
-from sentinel.memory.entry import BaseMemoryEntry
-from sentinel.memory.exceptions import MemoryNotFoundError
+from sentinel.memory.constants import MemoryType
+from sentinel.memory.manager import MemoryManager
 from sentinel.memory.service import MemoryService
 
 
-def test_register():
+def test_manager_property() -> None:
+    manager = MemoryManager()
+    service = MemoryService(manager)
+
+    assert service.manager is manager
+
+
+def test_create() -> None:
     service = MemoryService()
 
-    entry = BaseMemoryEntry("memory.one", "Hello")
+    entry = service.create(
+        "memory.1",
+        "hello",
+    )
 
-    service.register(entry)
+    assert entry.id == "memory.1"
+    assert entry.content == "hello"
+    assert service.exists("memory.1")
 
-    assert service.exists(entry.id)
 
-
-def test_get():
+def test_create_with_options() -> None:
     service = MemoryService()
 
-    entry = BaseMemoryEntry("memory.one", "Hello")
+    entry = service.create(
+        "memory.1",
+        {"value": 42},
+        importance=5,
+        memory_type=MemoryType.LONG_TERM,
+        ttl=timedelta(hours=1),
+    )
 
-    service.register(entry)
+    assert entry.importance == 5
+    assert entry.memory_type == MemoryType.LONG_TERM
+    assert entry.expired is False
 
-    assert service.get(entry.id) is entry
 
-
-def test_unregister():
+def test_get() -> None:
     service = MemoryService()
 
-    entry = BaseMemoryEntry("memory.one", "Hello")
+    created = service.create(
+        "memory.1",
+        "hello",
+    )
 
-    service.register(entry)
-
-    service.unregister(entry.id)
-
-    assert not service.exists(entry.id)
+    assert service.get("memory.1") is created
 
 
-def test_search():
+def test_remove() -> None:
     service = MemoryService()
 
-    service.register(BaseMemoryEntry("1", "Sentinel AI"))
-    service.register(BaseMemoryEntry("2", "Python"))
+    service.create(
+        "memory.1",
+        "hello",
+    )
+
+    service.remove("memory.1")
+
+    assert not service.exists("memory.1")
+
+
+def test_search() -> None:
+    service = MemoryService()
+
+    service.create(
+        "memory.1",
+        "Sentinel operating system",
+    )
+    service.create(
+        "memory.2",
+        "Python programming",
+    )
 
     results = service.search("sentinel")
 
     assert len(results) == 1
-    assert results[0].id == "1"
+    assert results[0].id == "memory.1"
 
 
-def test_list():
+def test_archive() -> None:
     service = MemoryService()
 
-    service.register(BaseMemoryEntry("1", "A"))
-    service.register(BaseMemoryEntry("2", "B"))
+    service.create(
+        "memory.1",
+        "hello",
+    )
 
-    assert len(service.list()) == 2
+    entry = service.archive("memory.1")
+
+    assert entry.status.value == "archived"
 
 
-def test_clear():
+def test_delete() -> None:
     service = MemoryService()
 
-    service.register(BaseMemoryEntry("1", "A"))
-    service.register(BaseMemoryEntry("2", "B"))
+    service.create(
+        "memory.1",
+        "hello",
+    )
+
+    entry = service.delete("memory.1")
+
+    assert entry.status.value == "deleted"
+
+
+def test_clear() -> None:
+    service = MemoryService()
+
+    service.create("memory.1", "one")
+    service.create("memory.2", "two")
 
     service.clear()
 
-    assert len(service.list()) == 0
+    assert len(service) == 0
 
 
-def test_get_missing():
+def test_list() -> None:
     service = MemoryService()
 
-    with pytest.raises(MemoryNotFoundError):
-        service.get("missing")
+    first = service.create("memory.1", "one")
+    second = service.create("memory.2", "two")
+
+    assert service.list() == [first, second]
+
+
+def test_len() -> None:
+    service = MemoryService()
+
+    assert len(service) == 0
+
+    service.create("memory.1", "hello")
+
+    assert len(service) == 1

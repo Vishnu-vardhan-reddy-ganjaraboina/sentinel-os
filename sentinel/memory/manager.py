@@ -1,44 +1,130 @@
 """
-Manager for the Sentinel Memory subsystem.
+High-level manager for the Sentinel Memory subsystem.
 """
 
 from __future__ import annotations
 
-import builtins
+from datetime import timedelta
+from typing import Any
 
+from sentinel.memory.constants import MemoryType
+from sentinel.memory.entry import BaseMemoryEntry
 from sentinel.memory.interfaces import MemoryEntry
-from sentinel.memory.registry import MemoryRegistry
+from sentinel.memory.store import InMemoryStore
 
 
 class MemoryManager:
     """
-    High-level manager for memory entries.
+    High-level manager for memory operations.
+
+    The manager coordinates memory entry creation and delegates
+    storage operations to the configured memory store.
     """
 
-    def __init__(self) -> None:
-        self._registry = MemoryRegistry()
+    def __init__(
+        self,
+        store: InMemoryStore | None = None,
+    ) -> None:
+        self._store = store or InMemoryStore()
 
     @property
-    def registry(self) -> MemoryRegistry:
-        return self._registry
+    def store(self) -> InMemoryStore:
+        """Return the underlying memory store."""
+        return self._store
 
-    def register(self, entry: MemoryEntry) -> None:
-        self._registry.register(entry)
+    def create(
+        self,
+        memory_id: str,
+        content: Any,
+        *,
+        importance: int = 1,
+        memory_type: MemoryType = MemoryType.WORKING,
+        ttl: timedelta | None = None,
+    ) -> MemoryEntry:
+        """
+        Create and store a new memory entry.
+        """
+        entry = BaseMemoryEntry(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            memory_type=memory_type,
+            ttl=ttl,
+        )
 
-    def unregister(self, memory_id: str) -> None:
-        self._registry.unregister(memory_id)
+        self._store.add(entry)
 
-    def get(self, memory_id: str) -> MemoryEntry:
-        return self._registry.get(memory_id)
+        return entry
 
-    def exists(self, memory_id: str) -> bool:
-        return self._registry.exists(memory_id)
+    def get(
+        self,
+        memory_id: str,
+    ) -> MemoryEntry:
+        """
+        Retrieve a memory entry.
+        """
+        entry = self._store.get(memory_id)
 
-    def search(self, keyword: str) -> builtins.list[MemoryEntry]:
-        return self._registry.search(keyword)
+        if not entry.expired:
+            entry.touch()
 
-    def list(self) -> builtins.list[MemoryEntry]:
-        return self._registry.list()
+        return entry
+
+    def remove(
+        self,
+        memory_id: str,
+    ) -> None:
+        """
+        Permanently remove a memory entry.
+        """
+        self._store.remove(memory_id)
+
+    def exists(
+        self,
+        memory_id: str,
+    ) -> bool:
+        """Return whether a memory exists."""
+        return self._store.exists(memory_id)
+
+    def search(
+        self,
+        keyword: str,
+    ) -> list[MemoryEntry]:
+        """
+        Search stored memory entries.
+        """
+        return self._store.search(keyword)
+
+    def archive(
+        self,
+        memory_id: str,
+    ) -> MemoryEntry:
+        """
+        Archive a memory entry and return it.
+        """
+        entry = self._store.get(memory_id)
+        entry.archive()
+        return entry
+
+    def delete(
+        self,
+        memory_id: str,
+    ) -> MemoryEntry:
+        """
+        Mark a memory entry as deleted and return it.
+        """
+        entry = self._store.get(memory_id)
+        entry.delete()
+        return entry
 
     def clear(self) -> None:
-        self._registry.clear()
+        """Remove all memory entries."""
+        self._store.clear()
+
+    def list(self) -> list[MemoryEntry]:
+        """Return all stored memory entries."""
+        return self._store.list()
+
+    def __len__(self) -> int:
+        """Return the number of stored memory entries."""
+        return len(self._store)

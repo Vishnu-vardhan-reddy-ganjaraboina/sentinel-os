@@ -22,19 +22,37 @@ class BrainPlanner(Planner):
     ) -> dict[str, Any]:
         """
         Create an execution plan.
+
+        A capability can be supplied through the execution context
+        using the ``capability_id`` key. Additional capability
+        arguments can be supplied through ``capability_arguments``.
         """
+        capability_id = context.data.get("capability_id")
+        capability_arguments = context.data.get(
+            "capability_arguments",
+            {},
+        )
+
+        step: dict[str, Any] = {
+            "step": 1,
+            "action": "execute",
+            "completed": False,
+        }
+
+        if capability_id is not None:
+            step["capability_id"] = capability_id
+            step["arguments"] = (
+                capability_arguments.copy()
+                if isinstance(capability_arguments, dict)
+                else {}
+            )
+
         return {
             "request": request,
             "context_id": context.id,
             "context": context.data.copy(),
             "status": PlanStatus.CREATED,
-            "steps": [
-                {
-                    "step": 1,
-                    "action": "execute_request",
-                    "completed": False,
-                }
-            ],
+            "steps": [step],
         }
 
     def mark_ready(

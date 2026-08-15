@@ -68,11 +68,56 @@ def test_execution_service_stops_on_shutdown() -> None:
 
     kernel = application.start()
 
-    execution = kernel.get("execution")
-
+    assert kernel.get("execution") is not None
     assert kernel.running("execution") is True
 
     application.shutdown()
 
     assert application.running is False
     assert kernel.running("execution") is False
+
+def test_orchestration_service_is_registered() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.get("orchestration") is not None
+    assert kernel.running("orchestration") is True
+
+    application.shutdown()
+
+
+def test_orchestration_service_stops_on_shutdown() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.running("orchestration") is True
+
+    application.shutdown()
+
+    assert application.running is False
+    assert kernel.running("orchestration") is False
+
+def test_memory_service_is_registered() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.get("memory") is not None
+    assert kernel.running("memory") is True
+
+    application.shutdown()
+
+
+def test_memory_service_stops_on_shutdown() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.running("memory") is True
+
+    application.shutdown()
+
+    assert application.running is False
+    assert kernel.running("memory") is False

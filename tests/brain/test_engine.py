@@ -62,3 +62,28 @@ def test_multiple_executions():
     assert first["request"] == "one"
     assert second["request"] == "two"
     assert engine.state == BrainState.COMPLETED
+
+def test_capability_plan() -> None:
+    engine = BrainEngine()
+
+    context = BrainContext("ctx.1")
+    context.update(
+        capability_id="system.echo",
+        capability_arguments={
+            "message": "hello",
+        },
+    )
+
+    result = engine.execute(
+        "hello",
+        context,
+    )
+
+    step = result["plan"]["steps"][0]
+
+    assert step["action"] == "execute"
+    assert step["capability_id"] == "system.echo"
+    assert step["arguments"] == {
+        "message": "hello",
+    }
+    assert step["completed"] is True

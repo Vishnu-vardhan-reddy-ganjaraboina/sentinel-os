@@ -1,76 +1,147 @@
+from datetime import timedelta
+
 import pytest
 
-from sentinel.memory.entry import BaseMemoryEntry
-from sentinel.memory.exceptions import MemoryNotFoundError
+from sentinel.memory.constants import MemoryStatus, MemoryType
+from sentinel.memory.exceptions import MemoryAlreadyExistsError
 from sentinel.memory.manager import MemoryManager
 
 
-def test_register():
+def test_create() -> None:
     manager = MemoryManager()
 
-    entry = BaseMemoryEntry("memory.one", "Hello")
+    entry = manager.create(
+        "memory.1",
+        "hello",
+    )
 
-    manager.register(entry)
+    assert entry.id == "memory.1"
+    assert entry.content == "hello"
+    assert manager.exists("memory.1")
 
-    assert manager.exists(entry.id)
 
-
-def test_get():
+def test_create_with_options() -> None:
     manager = MemoryManager()
 
-    entry = BaseMemoryEntry("memory.one", "Hello")
+    entry = manager.create(
+        "memory.1",
+        {"value": 42},
+        importance=5,
+        memory_type=MemoryType.LONG_TERM,
+        ttl=timedelta(hours=1),
+    )
 
-    manager.register(entry)
+    assert entry.importance == 5
+    assert entry.memory_type == MemoryType.LONG_TERM
+    assert entry.expired is False
 
-    assert manager.get(entry.id) is entry
 
-
-def test_unregister():
+def test_duplicate_create_raises() -> None:
     manager = MemoryManager()
 
-    entry = BaseMemoryEntry("memory.one", "Hello")
+    manager.create("memory.1", "first")
 
-    manager.register(entry)
-
-    manager.unregister(entry.id)
-
-    assert not manager.exists(entry.id)
+    with pytest.raises(MemoryAlreadyExistsError):
+        manager.create("memory.1", "second")
 
 
-def test_search():
+def test_get() -> None:
     manager = MemoryManager()
 
-    manager.register(BaseMemoryEntry("1", "Sentinel AI"))
-    manager.register(BaseMemoryEntry("2", "Python"))
+    created = manager.create(
+        "memory.1",
+        "hello",
+    )
+
+    result = manager.get("memory.1")
+
+    assert result is created
+    assert result.content == "hello"
+
+
+def test_remove() -> None:
+    manager = MemoryManager()
+
+    manager.create(
+        "memory.1",
+        "hello",
+    )
+
+    manager.remove("memory.1")
+
+    assert not manager.exists("memory.1")
+
+
+def test_search() -> None:
+    manager = MemoryManager()
+
+    manager.create(
+        "memory.1",
+        "Sentinel operating system",
+    )
+    manager.create(
+        "memory.2",
+        "Python programming",
+    )
 
     results = manager.search("sentinel")
 
     assert len(results) == 1
-    assert results[0].id == "1"
+    assert results[0].id == "memory.1"
 
 
-def test_list():
+def test_archive() -> None:
     manager = MemoryManager()
 
-    manager.register(BaseMemoryEntry("1", "A"))
-    manager.register(BaseMemoryEntry("2", "B"))
+    manager.create(
+        "memory.1",
+        "hello",
+    )
 
-    assert len(manager.list()) == 2
+    entry = manager.archive("memory.1")
+
+    assert entry.status == MemoryStatus.ARCHIVED
 
 
-def test_clear():
+def test_delete() -> None:
     manager = MemoryManager()
 
-    manager.register(BaseMemoryEntry("1", "A"))
-    manager.register(BaseMemoryEntry("2", "B"))
+    manager.create(
+        "memory.1",
+        "hello",
+    )
+
+    entry = manager.delete("memory.1")
+
+    assert entry.status == MemoryStatus.DELETED
+
+
+def test_clear() -> None:
+    manager = MemoryManager()
+
+    manager.create("memory.1", "one")
+    manager.create("memory.2", "two")
 
     manager.clear()
 
-    assert len(manager.list()) == 0
+    assert len(manager) == 0
+    assert manager.list() == []
 
 
-def test_get_missing():
+def test_list() -> None:
     manager = MemoryManager()
 
-    with pytest.raises(MemoryNotFoundError):
-        manager.get("missing")
+    first = manager.create("memory.1", "one")
+    second = manager.create("memory.2", "two")
+
+    assert manager.list() == [first, second]
+
+
+def test_len() -> None:
+    manager = MemoryManager()
+
+    assert len(manager) == 0
+
+    manager.create("memory.1", "hello")
+
+    assert len(manager) == 1

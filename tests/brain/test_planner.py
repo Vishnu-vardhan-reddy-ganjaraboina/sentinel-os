@@ -3,7 +3,7 @@ from sentinel.brain.context import BrainContext
 from sentinel.brain.planner import BrainPlanner
 
 
-def test_create_plan():
+def test_create_plan() -> None:
     planner = BrainPlanner()
 
     context = BrainContext("ctx.1")
@@ -18,9 +18,74 @@ def test_create_plan():
     assert plan["context_id"] == "ctx.1"
     assert plan["status"] == PlanStatus.CREATED
     assert len(plan["steps"]) == 1
+    assert plan["steps"][0]["action"] == "execute"
+    assert plan["steps"][0]["completed"] is False
 
 
-def test_mark_ready():
+def test_create_capability_plan() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.1")
+    context.update(
+        capability_id="system.echo",
+        capability_arguments={
+            "message": "hello",
+        },
+    )
+
+    plan = planner.create_plan(
+        "hello",
+        context,
+    )
+
+    step = plan["steps"][0]
+
+    assert step["action"] == "execute"
+    assert step["capability_id"] == "system.echo"
+    assert step["arguments"] == {
+        "message": "hello",
+    }
+
+
+def test_capability_arguments_are_copied() -> None:
+    planner = BrainPlanner()
+
+    arguments = {
+        "message": "hello",
+    }
+
+    context = BrainContext("ctx.1")
+    context.update(
+        capability_id="system.echo",
+        capability_arguments=arguments,
+    )
+
+    plan = planner.create_plan(
+        "hello",
+        context,
+    )
+
+    arguments["message"] = "changed"
+
+    assert plan["steps"][0]["arguments"]["message"] == "hello"
+
+
+def test_missing_capability_id_creates_generic_step() -> None:
+    planner = BrainPlanner()
+
+    plan = planner.create_plan(
+        "hello",
+        BrainContext("ctx.1"),
+    )
+
+    step = plan["steps"][0]
+
+    assert step["action"] == "execute"
+    assert "capability_id" not in step
+    assert "arguments" not in step
+
+
+def test_mark_ready() -> None:
     planner = BrainPlanner()
 
     plan = planner.create_plan(
@@ -33,7 +98,7 @@ def test_mark_ready():
     assert plan["status"] == PlanStatus.READY
 
 
-def test_mark_completed():
+def test_mark_completed() -> None:
     planner = BrainPlanner()
 
     plan = planner.create_plan(
@@ -47,7 +112,7 @@ def test_mark_completed():
     assert plan["steps"][0]["completed"] is True
 
 
-def test_context_is_copied():
+def test_context_is_copied() -> None:
     planner = BrainPlanner()
 
     context = BrainContext("ctx.1")

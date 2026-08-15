@@ -7,6 +7,8 @@ from __future__ import annotations
 from sentinel.execution.runtime import ExecutionRuntimeService
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
+from sentinel.memory.runtime import MemoryRuntimeService
+from sentinel.orchestration.runtime import OrchestrationRuntimeService
 
 
 class Application:
@@ -27,6 +29,8 @@ class Application:
             else Bootstrap(
                 services=(
                     ExecutionRuntimeService(),
+                    OrchestrationRuntimeService(),
+                    MemoryRuntimeService(),
                 ),
             )
         )

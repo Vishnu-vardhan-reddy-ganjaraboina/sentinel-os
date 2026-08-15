@@ -2,18 +2,21 @@
 Constants for the Sentinel Memory subsystem.
 """
 
+from __future__ import annotations
+
+from datetime import timedelta
 from enum import StrEnum
 
 DEFAULT_MEMORY_VERSION = "1.0.0"
 
 DEFAULT_IMPORTANCE = 1
 
-DEFAULT_TTL = None
+DEFAULT_TTL: timedelta | None = None
 
 
 class MemoryType(StrEnum):
     """
-    Supported memory categories.
+    Types of memory stored by Sentinel.
     """
 
     WORKING = "working"
@@ -25,10 +28,9 @@ class MemoryType(StrEnum):
 
 class MemoryStatus(StrEnum):
     """
-    Status of a memory entry.
+    Lifecycle states for a memory entry.
     """
 
     ACTIVE = "active"
     ARCHIVED = "archived"
-    EXPIRED = "expired"
     DELETED = "deleted"

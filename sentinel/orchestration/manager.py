@@ -203,6 +203,7 @@ class OrchestrationManager:
         context_data = dict(request.context)
         context_data["memories"] = memory_context
         context_data["knowledge"] = knowledge_context
+        context_data["capabilities"] = self._get_capability_context()
 
         context = self._brain.create_context(
             context_id=request.id,
@@ -341,3 +342,26 @@ class OrchestrationManager:
             raise OrchestrationValidationError(
                 "Orchestration request ID cannot be empty."
             )
+
+    def _get_capability_context(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Return capability metadata for Brain planning.
+
+        Only descriptive metadata is exposed to the Brain.
+        Capability instances and executable methods are never placed
+        into the Brain context.
+        """
+        return [
+            {
+                "capability_id": capability.id,
+                "name": capability.name,
+                "description": capability.description,
+                "version": capability.version,
+                "enabled": capability.enabled,
+                "metadata": capability.metadata.to_dict(),
+            }
+            for capability in self._capabilities.list()
+            if capability.enabled
+        ]

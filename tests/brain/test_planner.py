@@ -150,6 +150,7 @@ def test_context_sources_are_recorded() -> None:
     assert plan["context_sources"] == {
         "memories": 2,
         "knowledge": 1,
+        "capabilities": 0,
     }
 
 
@@ -166,6 +167,7 @@ def test_context_sources_are_empty_when_not_provided() -> None:
     assert plan["context_sources"] == {
         "memories": 0,
         "knowledge": 0,
+        "capabilities": 0,
     }
 
 
@@ -187,4 +189,54 @@ def test_invalid_context_sources_are_treated_as_empty() -> None:
     assert plan["context_sources"] == {
         "memories": 0,
         "knowledge": 0,
+        "capabilities": 0,
     }
+
+def test_explicit_capability_disables_recommendation() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.explicit")
+
+    context.update(
+        capability_id="system.echo",
+        capabilities=[
+            {
+                "capability_id": "system.echo",
+                "name": "System Echo",
+                "description": "Returns the supplied message.",
+                "enabled": True,
+            },
+        ],
+    )
+
+    plan = planner.create_plan(
+        "echo message",
+        context,
+    )
+
+    assert plan["recommendation"] is None
+    assert plan["steps"][0]["capability_id"] == "system.echo"
+
+
+def test_disabled_capability_is_not_recommended() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.disabled")
+
+    context.update(
+        capabilities=[
+            {
+                "capability_id": "system.echo",
+                "name": "System Echo",
+                "description": "Returns messages.",
+                "enabled": False,
+            },
+        ],
+    )
+
+    plan = planner.create_plan(
+        "echo message",
+        context,
+    )
+
+    assert plan["recommendation"] is None

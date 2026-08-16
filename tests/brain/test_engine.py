@@ -111,4 +111,5 @@ def test_execute_preserves_context_sources_in_plan() -> None:
     assert result["plan"]["context_sources"] == {
         "memories": 1,
         "knowledge": 2,
+        "capabilities": 0,
     }

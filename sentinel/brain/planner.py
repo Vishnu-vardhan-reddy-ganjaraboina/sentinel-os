@@ -14,12 +14,11 @@ class BrainPlanner(Planner):
     """
     Default planner implementation.
 
-    The planner is deliberately deterministic. It does not execute
-    capabilities or infer arbitrary actions from contextual data.
+    The planner is deterministic and does not execute capabilities.
 
-    Context supplied by Memory and Knowledge is preserved in the plan
-    and summarized through the ``context_sources`` field so that the
-    resulting plan is explicit and auditable.
+    Explicit capability selections supplied through the context take
+    precedence. Available capability metadata may also be inspected
+    to produce a safe recommendation for the current request.
     """
 
     def create_plan(
@@ -30,14 +29,14 @@ class BrainPlanner(Planner):
         """
         Create an execution plan.
 
-        A capability can be supplied through the execution context
-        using the ``capability_id`` key. Additional capability
-        arguments can be supplied through ``capability_arguments``.
+        An explicit ``capability_id`` supplied through the context
+        takes precedence over automatic recommendation.
 
-        Memory and Knowledge context is preserved and explicitly
-        identified in the generated plan.
+        Automatic recommendation is informational only and does not
+        cause capability execution.
         """
         capability_id = context.data.get("capability_id")
+
         capability_arguments = context.data.get(
             "capability_arguments",
             {},
@@ -57,16 +56,120 @@ class BrainPlanner(Planner):
                 else {}
             )
 
-        context_sources = self._get_context_sources(context)
+        recommendation = self._recommend_capability(
+            request=request,
+            context=context,
+        )
 
         return {
             "request": request,
             "context_id": context.id,
             "context": context.data.copy(),
-            "context_sources": context_sources,
+            "context_sources": self._get_context_sources(context),
+            "recommendation": recommendation,
             "status": PlanStatus.CREATED,
             "steps": [step],
         }
+
+    def _recommend_capability(
+        self,
+        request: Any,
+        context: Context,
+    ) -> dict[str, Any] | None:
+        """
+        Recommend a capability using simple deterministic matching.
+
+        Explicit capability selection is never overridden.
+
+        The recommendation is informational and is not executed
+        automatically.
+        """
+        if context.data.get("capability_id") is not None:
+            return None
+
+        capabilities = context.data.get(
+            "capabilities",
+            [],
+        )
+
+        if not isinstance(capabilities, list):
+            return None
+
+        request_text = str(request).strip().lower()
+
+        if not request_text:
+            return None
+
+        best_match: dict[str, Any] | None = None
+        best_score = 0
+
+        for capability in capabilities:
+            if not isinstance(capability, dict):
+                continue
+
+            if capability.get("enabled") is not True:
+                continue
+
+            capability_id = capability.get("capability_id")
+
+            if not isinstance(capability_id, str):
+                continue
+
+            searchable_text = " ".join(
+                str(capability.get(field, ""))
+                for field in (
+                    "name",
+                    "description",
+                )
+            ).lower()
+
+            metadata = capability.get("metadata")
+
+            if isinstance(metadata, dict):
+                tags = metadata.get("tags", [])
+
+                if isinstance(tags, list):
+                    searchable_text += " " + " ".join(
+                        str(tag)
+                        for tag in tags
+                    ).lower()
+
+            score = self._calculate_match_score(
+                request_text,
+                searchable_text,
+            )
+
+            if score > best_score:
+                best_score = score
+                best_match = {
+                    "capability_id": capability_id,
+                    "score": score,
+                }
+
+        return best_match
+
+    def _calculate_match_score(
+        self,
+        request: str,
+        capability_text: str,
+    ) -> int:
+        """
+        Calculate a deterministic lexical match score.
+        """
+        words = {
+            word
+            for word in request.split()
+            if len(word) > 2
+        }
+
+        if not words:
+            return 0
+
+        return sum(
+            1
+            for word in words
+            if word in capability_text
+        )
 
     def _get_context_sources(
         self,
@@ -74,13 +177,10 @@ class BrainPlanner(Planner):
     ) -> dict[str, int]:
         """
         Identify available contextual information.
-
-        The planner records the number of Memory and Knowledge
-        entries supplied to it. It does not modify or interpret
-        those entries.
         """
         memories = context.data.get("memories", [])
         knowledge = context.data.get("knowledge", [])
+        capabilities = context.data.get("capabilities", [])
 
         return {
             "memories": (
@@ -93,15 +193,18 @@ class BrainPlanner(Planner):
                 if isinstance(knowledge, list)
                 else 0
             ),
+            "capabilities": (
+                len(capabilities)
+                if isinstance(capabilities, list)
+                else 0
+            ),
         }
 
     def mark_ready(
         self,
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Mark a plan as ready.
-        """
+        """Mark a plan as ready."""
         plan["status"] = PlanStatus.READY
         return plan
 
@@ -109,9 +212,7 @@ class BrainPlanner(Planner):
         self,
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Mark a plan as completed.
-        """
+        """Mark a plan as completed."""
         plan["status"] = PlanStatus.COMPLETED
 
         for step in plan["steps"]:

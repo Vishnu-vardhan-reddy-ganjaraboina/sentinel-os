@@ -271,6 +271,7 @@ class OrchestrationManager:
                 )
 
             self._authorize_capability(capability_id)
+            self._authorize_capability(capability_id)
 
             capability_result = self._capabilities.execute(
                 capability_id,
@@ -289,6 +290,30 @@ class OrchestrationManager:
             result["capability_results"] = capability_results
 
         return result
+
+    def _validate_capability(
+        self,
+        capability_id: str,
+    ) -> None:
+        """
+        Validate that a capability exists and is enabled.
+
+        Capability validation is deliberately performed before
+        authorization and execution.
+        """
+        if not self._capabilities.exists(capability_id):
+            raise OrchestrationExecutionError(
+                f"Capability '{capability_id}' is not registered."
+            )
+
+        capability = self._capabilities.registry.get(
+            capability_id,
+        )
+
+        if not capability.enabled:
+            raise OrchestrationExecutionError(
+                f"Capability '{capability_id}' is disabled."
+            )
 
     def _authorize_capability(
         self,

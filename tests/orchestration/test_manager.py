@@ -624,3 +624,48 @@ def test_knowledge_is_available_to_brain_context() -> None:
     context = result.data["context"]
 
     assert context["knowledge"] == []
+
+def test_execute_unknown_capability_fails_validation() -> None:
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.unknown.validation",
+        input="hello",
+        context={
+            "capability_id": "does.not.exist",
+        },
+    )
+
+    with pytest.raises(OrchestrationExecutionError):
+        manager.execute(request)
+
+def test_execute_disabled_capability_fails_validation() -> None:
+    capability = EchoCapability()
+    capability.disable()
+
+    capabilities = CapabilityManager()
+    capabilities.register(capability)
+
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.disabled",
+        input="hello",
+        context={
+            "capability_id": "system.echo",
+        },
+    )
+
+    with pytest.raises(OrchestrationExecutionError):
+        manager.execute(request)

@@ -7,6 +7,13 @@ from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.constants import CapabilityCategory
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.capabilities.metadata import CapabilityMetadata
+from sentinel.knowledge.chunker import FixedSizeChunker
+from sentinel.knowledge.document import Document
+from sentinel.knowledge.embeddings import DummyEmbeddingProvider
+from sentinel.knowledge.indexer import Indexer
+from sentinel.knowledge.knowledge_service import KnowledgeService
+from sentinel.knowledge.retriever import Retriever
+from sentinel.knowledge.vector_store import InMemoryVectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.orchestration.models import OrchestrationRequest
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
@@ -213,6 +220,70 @@ def test_application_orchestration_uses_shared_memory() -> None:
 
         assert stored.id == memory_id
         assert stored.content == result.to_dict()
+
+    finally:
+        application.shutdown()
+
+def test_application_orchestration_uses_shared_knowledge() -> None:
+    provider = DummyEmbeddingProvider()
+    store = InMemoryVectorStore()
+
+    knowledge = KnowledgeService(
+        indexer=Indexer(
+            chunker=FixedSizeChunker(),
+            embedding_provider=provider,
+            vector_store=store,
+        ),
+        retriever=Retriever(
+            embedding_provider=provider,
+            vector_store=store,
+        ),
+    )
+
+    knowledge.add_document(
+        Document(
+            id="integration.python",
+            text="Python powers Sentinel automation.",
+        )
+    )
+
+    application = Application(
+        knowledge=knowledge,
+    )
+
+    try:
+        kernel = application.start()
+
+        orchestration_service = cast(
+            OrchestrationRuntimeService,
+            kernel.get("orchestration"),
+        )
+
+        orchestration = orchestration_service.orchestration
+
+        assert orchestration.knowledge is knowledge
+
+        request = OrchestrationRequest(
+            request_id="integration.knowledge",
+            input="Python",
+        )
+
+        result = orchestration.execute(request)
+
+        assert result.success is True
+        assert isinstance(result.data, dict)
+
+        context = result.data["context"]
+
+        knowledge_context = context["knowledge"]
+
+        assert len(knowledge_context) == 1
+        assert knowledge_context[0]["document_id"] == (
+            "integration.python"
+        )
+        assert knowledge_context[0]["text"] == (
+            "Python powers Sentinel automation."
+        )
 
     finally:
         application.shutdown()

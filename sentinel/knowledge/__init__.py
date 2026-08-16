@@ -9,7 +9,9 @@ from sentinel.knowledge.embeddings import (
     EmbeddingProvider,
 )
 from sentinel.knowledge.knowledge_base import KnowledgeBase
+from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.knowledge.retriever import Retriever
+from sentinel.knowledge.runtime import KnowledgeRuntimeService
 from sentinel.knowledge.vector_store import (
     InMemoryVectorStore,
     VectorStore,
@@ -24,4 +26,6 @@ __all__ = [
     "InMemoryVectorStore",
     "Retriever",
     "KnowledgeBase",
+    "KnowledgeService",
+    "KnowledgeRuntimeService",
 ]

@@ -87,3 +87,28 @@ def test_capability_plan() -> None:
         "message": "hello",
     }
     assert step["completed"] is True
+
+def test_execute_preserves_context_sources_in_plan() -> None:
+    engine = BrainEngine()
+
+    context = BrainContext("ctx.sources")
+
+    context.update(
+        memories=[
+            {"id": "memory.1"},
+        ],
+        knowledge=[
+            {"id": "knowledge.1"},
+            {"id": "knowledge.2"},
+        ],
+    )
+
+    result = engine.execute(
+        "hello",
+        context,
+    )
+
+    assert result["plan"]["context_sources"] == {
+        "memories": 1,
+        "knowledge": 2,
+    }

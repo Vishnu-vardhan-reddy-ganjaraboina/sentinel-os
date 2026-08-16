@@ -126,3 +126,65 @@ def test_context_is_copied() -> None:
     context.update(value=200)
 
     assert plan["context"]["value"] == 100
+
+def test_context_sources_are_recorded() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.knowledge")
+
+    context.update(
+        memories=[
+            {"id": "memory.1"},
+            {"id": "memory.2"},
+        ],
+        knowledge=[
+            {"id": "knowledge.1"},
+        ],
+    )
+
+    plan = planner.create_plan(
+        "hello",
+        context,
+    )
+
+    assert plan["context_sources"] == {
+        "memories": 2,
+        "knowledge": 1,
+    }
+
+
+def test_context_sources_are_empty_when_not_provided() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.empty")
+
+    plan = planner.create_plan(
+        "hello",
+        context,
+    )
+
+    assert plan["context_sources"] == {
+        "memories": 0,
+        "knowledge": 0,
+    }
+
+
+def test_invalid_context_sources_are_treated_as_empty() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.invalid")
+
+    context.update(
+        memories="invalid",
+        knowledge=None,
+    )
+
+    plan = planner.create_plan(
+        "hello",
+        context,
+    )
+
+    assert plan["context_sources"] == {
+        "memories": 0,
+        "knowledge": 0,
+    }

@@ -105,17 +105,19 @@ class KnowledgeRuntimeService(Service):
         """
         Initialize knowledge resources.
 
-        The current vector-store implementations initialize during
-        construction, so no additional initialization is required.
+        In-memory stores treat this as a no-op.
+        Persistent stores connect their underlying backend.
         """
+        self._knowledge.retriever.vector_store.connect()
 
     def shutdown(self) -> None:
         """
-        Shut down knowledge resources.
+        Release knowledge resources.
 
-        Resource-owning implementations can expose lifecycle behavior
-        through the service in future deployments.
+        In-memory stores treat this as a no-op.
+        Persistent stores close their underlying backend.
         """
+        self._knowledge.retriever.vector_store.close()
 
     def health(self) -> dict[str, bool]:
         """Return knowledge service health information."""

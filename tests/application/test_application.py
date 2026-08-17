@@ -121,3 +121,28 @@ def test_memory_service_stops_on_shutdown() -> None:
 
     assert application.running is False
     assert kernel.running("memory") is False
+
+def test_knowledge_service_is_registered() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    knowledge = kernel.get("knowledge")
+
+    assert knowledge is not None
+    assert kernel.running("knowledge") is True
+
+    application.shutdown()
+
+
+def test_knowledge_service_stops_on_shutdown() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.running("knowledge") is True
+
+    application.shutdown()
+
+    assert application.running is False
+    assert kernel.running("knowledge") is False

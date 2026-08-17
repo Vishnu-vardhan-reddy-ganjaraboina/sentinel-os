@@ -71,6 +71,24 @@ class VectorStore(ABC):
     def clear(self) -> None:
         raise NotImplementedError
 
+    def connect(self) -> None:
+        """
+        Connect the vector store to its underlying resources.
+
+        In-memory stores do not require an explicit connection.
+        Persistent implementations can override this method.
+        """
+        return None
+
+    def close(self) -> None:
+        """
+        Release resources owned by the vector store.
+
+        In-memory stores do not require explicit cleanup.
+        Persistent implementations can override this method.
+        """
+        return None
+
     @abstractmethod
     def __len__(self) -> int:
         raise NotImplementedError

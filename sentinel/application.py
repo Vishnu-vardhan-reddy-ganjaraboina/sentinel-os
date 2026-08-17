@@ -10,6 +10,7 @@ from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
+from sentinel.knowledge.vector_store import VectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
@@ -34,6 +35,7 @@ class Application:
         identity: SecurityIdentity | None = None,
         memory: MemoryService | None = None,
         knowledge: KnowledgeService | None = None,
+        knowledge_vector_store: VectorStore | None = None,
     ) -> None:
         if bootstrap is not None:
             self._bootstrap = bootstrap
@@ -46,6 +48,7 @@ class Application:
 
             knowledge_runtime = KnowledgeRuntimeService(
                 knowledge=knowledge,
+                vector_store=knowledge_vector_store,
             )
 
             shared_knowledge = knowledge_runtime.knowledge

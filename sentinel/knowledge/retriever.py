@@ -22,6 +22,13 @@ class Retriever:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
 
+    @property
+    def vector_store(self) -> VectorStore:
+        """
+        Return the configured vector store.
+        """
+        return self._vector_store
+
     def retrieve(
         self,
         query: str,

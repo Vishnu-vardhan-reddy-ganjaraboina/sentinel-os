@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sentinel.application import Application
+from sentinel.core.exceptions import ConfigurationError
 from sentinel.infrastructure.configuration import Configuration
 from sentinel.knowledge.persistent_vector_store import (
     PersistentVectorStore,
@@ -19,25 +20,20 @@ def create_configuration(
     database_path: str | None = None,
 ) -> Configuration:
     """
-    Create an in-memory Configuration instance for testing.
+    Create Knowledge configuration for testing.
     """
-    configuration = Configuration()
-
-    data: dict[str, object] = {
-        "knowledge": {
-            "backend": backend,
-        },
+    knowledge: dict[str, object] = {
+        "backend": backend,
     }
 
     if database_path is not None:
-        data["knowledge"] = {
-            "backend": backend,
-            "database_path": database_path,
+        knowledge["database_path"] = database_path
+
+    return Configuration.from_dict(
+        {
+            "knowledge": knowledge,
         }
-
-    configuration._config = data
-
-    return configuration
+    )
 
 
 def test_default_application_uses_in_memory_knowledge() -> None:
@@ -97,13 +93,17 @@ def test_sqlite_backend_uses_persistent_vector_store(
         application.shutdown()
 
 
-def test_unknown_knowledge_backend_raises() -> None:
-    configuration = create_configuration(
-        "unsupported",
+def test_application_rejects_invalid_configuration() -> None:
+    configuration = Configuration.from_dict(
+        {
+            "knowledge": {
+                "backend": "unsupported",
+            },
+        }
     )
 
     with pytest.raises(
-        ValueError,
+        ConfigurationError,
         match="Unsupported knowledge backend",
     ):
         Application(

@@ -55,6 +55,8 @@ class Application:
         if bootstrap is not None:
             self._bootstrap = bootstrap
         else:
+            if configuration is not None:
+                configuration.validate()
             shared_memory = (
                 memory
                 if memory is not None

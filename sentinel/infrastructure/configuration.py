@@ -33,6 +33,22 @@ class Configuration:
         """Initialize an empty configuration."""
         self._config: dict[str, Any] = {}
 
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+    ) -> Configuration:
+        """
+        Create configuration from a dictionary.
+
+        The supplied data is deep-copied so callers cannot mutate
+        configuration state after construction.
+        """
+        configuration = cls()
+        configuration._config = deepcopy(data)
+
+        return configuration
+
     def load(self, file_path: str | Path) -> None:
         """
         Load a YAML configuration file.
@@ -129,3 +145,51 @@ class Configuration:
             A deep copy of the entire configuration dictionary.
         """
         return deepcopy(self._config)
+
+    def validate(self) -> None:
+        """
+        Validate known Sentinel configuration values.
+
+        Raises:
+            ConfigurationError:
+                If a configured value has an invalid type or value.
+        """
+        knowledge = self.get("knowledge", {})
+
+        if not isinstance(knowledge, dict):
+            raise ConfigurationError(
+                "The 'knowledge' configuration must be a mapping."
+            )
+
+        backend = knowledge.get(
+            "backend",
+            "memory",
+        )
+
+        if not isinstance(backend, str):
+            raise ConfigurationError(
+                "knowledge.backend must be a string."
+            )
+
+        backend = backend.strip().lower()
+
+        if backend not in {"memory", "sqlite"}:
+            raise ConfigurationError(
+                f"Unsupported knowledge backend: '{backend}'."
+            )
+
+        if backend == "sqlite":
+            database_path = knowledge.get(
+                "database_path",
+                "data/sentinel-knowledge.db",
+            )
+
+            if not isinstance(database_path, (str, Path)):
+                raise ConfigurationError(
+                    "knowledge.database_path must be a string or path."
+                )
+
+            if not str(database_path).strip():
+                raise ConfigurationError(
+                    "knowledge.database_path cannot be empty."
+                )

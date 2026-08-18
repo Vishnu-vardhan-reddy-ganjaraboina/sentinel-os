@@ -1,0 +1,3 @@
+knowledge:
+  backend: sqlite
+  database_path: data/sentinel-knowledge.db

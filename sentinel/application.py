@@ -4,18 +4,28 @@ Application lifecycle for Sentinel OS.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
+from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.knowledge.knowledge_service import KnowledgeService
+from sentinel.knowledge.persistent_vector_store import (
+    PersistentVectorStore,
+)
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
-from sentinel.knowledge.vector_store import VectorStore
+from sentinel.knowledge.vector_store import (
+    InMemoryVectorStore,
+    VectorStore,
+)
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
+from sentinel.storage.backends.sqlite import SQLiteBackend
 
 
 class Application:
@@ -24,6 +34,10 @@ class Application:
 
     The application owns the process-level lifecycle while
     Bootstrap owns Kernel creation and shutdown.
+
+    Dependencies can be explicitly injected for tests and advanced
+    deployments. Configuration can also be supplied to construct
+    production infrastructure automatically.
     """
 
     def __init__(
@@ -36,6 +50,7 @@ class Application:
         memory: MemoryService | None = None,
         knowledge: KnowledgeService | None = None,
         knowledge_vector_store: VectorStore | None = None,
+        configuration: Configuration | None = None,
     ) -> None:
         if bootstrap is not None:
             self._bootstrap = bootstrap
@@ -46,9 +61,17 @@ class Application:
                 else MemoryService()
             )
 
+            resolved_vector_store = (
+                knowledge_vector_store
+                if knowledge_vector_store is not None
+                else self._create_knowledge_vector_store(
+                    configuration,
+                )
+            )
+
             knowledge_runtime = KnowledgeRuntimeService(
                 knowledge=knowledge,
-                vector_store=knowledge_vector_store,
+                vector_store=resolved_vector_store,
             )
 
             shared_knowledge = knowledge_runtime.knowledge
@@ -74,6 +97,60 @@ class Application:
             )
 
         self._running = False
+
+    @staticmethod
+    def _create_knowledge_vector_store(
+        configuration: Configuration | None,
+    ) -> VectorStore:
+        """
+        Create the configured Knowledge vector store.
+
+        The default remains the in-memory implementation.
+
+        Supported configuration:
+
+            knowledge:
+                backend: memory
+
+        or:
+
+            knowledge:
+                backend: sqlite
+                database_path: data/sentinel-knowledge.db
+        """
+        if configuration is None:
+            return InMemoryVectorStore()
+
+        backend = str(
+            configuration.get(
+                "knowledge.backend",
+                "memory",
+            )
+        ).strip().lower()
+
+        if backend == "memory":
+            return InMemoryVectorStore()
+
+        if backend == "sqlite":
+            database_path = configuration.get(
+                "knowledge.database_path",
+                "data/sentinel-knowledge.db",
+            )
+
+            if not isinstance(database_path, (str, Path)):
+                raise ValueError(
+                    "knowledge.database_path must be a string or path."
+                )
+
+            return PersistentVectorStore(
+                backend=SQLiteBackend(
+                    Path(database_path),
+                ),
+            )
+
+        raise ValueError(
+            f"Unsupported knowledge backend: '{backend}'."
+        )
 
     @property
     def bootstrap(self) -> Bootstrap:
@@ -145,3 +222,22 @@ class Application:
         traceback: object | None,
     ) -> None:
         self.shutdown()
+    
+    @property
+    def knowledge(self) -> KnowledgeService:
+        """
+        Return the application's Knowledge service.
+
+        Raises:
+            RuntimeError:
+                If the application has not been started.
+            TypeError:
+                If the registered Knowledge service has an
+                unexpected type.
+        """
+        runtime = self.kernel.get_typed(
+            "knowledge",
+            KnowledgeRuntimeService,
+        )
+
+        return runtime.knowledge

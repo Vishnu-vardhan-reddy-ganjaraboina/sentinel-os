@@ -7,11 +7,15 @@ startup, and shutdown.
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 from sentinel.kernel.dependency_resolver import DependencyResolver
 from sentinel.kernel.event_bus import EventBus
 from sentinel.kernel.lifecycle import LifecycleManager
 from sentinel.kernel.registry import ServiceRegistry
 from sentinel.kernel.service import Service
+
+T = TypeVar("T", bound=Service)
 
 
 class Kernel:
@@ -77,6 +81,29 @@ class Kernel:
     ) -> Service:
         """Return a registered service."""
         return self._registry.get(name)
+
+    def get_typed(
+        self,
+        name: str,
+        service_type: type[T],
+    ) -> T:
+        """
+        Return a registered service validated against the expected type.
+
+        Raises:
+            TypeError:
+                If the registered service is not an instance of
+                the requested service type.
+        """
+        service = self.get(name)
+
+        if not isinstance(service, service_type):
+            raise TypeError(
+                f"Service '{name}' is not an instance of "
+                f"{service_type.__name__}."
+            )
+
+        return service
 
     def running(
         self,

@@ -1,7 +1,7 @@
 """
 Storage interfaces for Sentinel OS.
 
-Defines abstract contracts for all storage backends.
+Defines the contract implemented by all storage backends.
 """
 
 from __future__ import annotations
@@ -12,48 +12,61 @@ from typing import Any
 
 class StorageBackend(ABC):
     """
-    Base interface for all storage implementations.
+    Abstract storage backend.
+
+    Backends provide persistent or ephemeral key-value storage.
+
+    Lifecycle methods (`connect` and `disconnect`) have safe default
+    implementations so lightweight backends do not need to implement
+    meaningless lifecycle methods. Resource-backed implementations such
+    as SQLite may override them.
     """
 
-    @abstractmethod
-    def exists(
-        self,
-        key: str,
-    ) -> bool:
+    def connect(self) -> None:
         """
-        Return True if the key exists.
+        Initialize the backend and make it ready for operations.
+
+        Backends that do not require an explicit connection may use
+        this default no-op implementation.
+        """
+        return None
+
+    def disconnect(self) -> None:
+        """
+        Release backend resources.
+
+        Backends that do not own external resources may use this
+        default no-op implementation.
+        """
+        return None
+
+    @abstractmethod
+    def exists(self, key: str) -> bool:
+        """
+        Return whether a key exists.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def get(
-        self,
-        key: str,
-    ) -> Any:
+    def get(self, key: str) -> Any:
         """
         Retrieve a value.
 
         Raises:
-            StorageKeyNotFoundError
+            StorageKeyNotFoundError:
+                If the key does not exist.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def set(
-        self,
-        key: str,
-        value: Any,
-    ) -> None:
+    def set(self, key: str, value: Any) -> None:
         """
-        Store a value.
+        Store or replace a value.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def delete(
-        self,
-        key: str,
-    ) -> None:
+    def delete(self, key: str) -> None:
         """
         Delete a key.
         """
@@ -62,54 +75,30 @@ class StorageBackend(ABC):
     @abstractmethod
     def clear(self) -> None:
         """
-        Remove all stored data.
+        Remove all stored values.
         """
         raise NotImplementedError
 
     @abstractmethod
     def keys(self) -> list[str]:
         """
-        Return all keys.
+        Return all stored keys.
         """
         raise NotImplementedError
 
-    @abstractmethod
     def close(self) -> None:
         """
-        Shutdown the backend.
+        Backward-compatible alias for disconnect().
         """
-        raise NotImplementedError
+        self.disconnect()
 
-    def connect(self) -> None:
-        """
-        Connect to the storage backend.
-
-        Backends that require an explicit connection should override this.
-        """
-        return None
-
-    def disconnect(self) -> None:
-        """
-        Disconnect from the storage backend.
-
-        By default, this delegates to close().
-        """
-        self.close()
-
-    def save(
-        self,
-        key: str,
-        value: Any,
-    ) -> None:
+    def save(self, key: str, value: Any) -> None:
         """
         Backward-compatible alias for set().
         """
         self.set(key, value)
 
-    def load(
-        self,
-        key: str,
-    ) -> Any:
+    def load(self, key: str) -> Any:
         """
         Backward-compatible alias for get().
         """

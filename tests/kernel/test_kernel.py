@@ -6,6 +6,10 @@ from sentinel.kernel.service import Service
 
 
 class DummyService(Service):
+    """
+    Test service used to verify Kernel behavior.
+    """
+
     def __init__(
         self,
         name: str,
@@ -20,6 +24,22 @@ class DummyService(Service):
 
     def shutdown(self) -> None:
         self.stopped = True
+
+
+class OtherService(Service):
+    """
+    Different concrete Service type used for get_typed()
+    rejection testing.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+
+    def initialize(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
 
 
 def test_register_service() -> None:
@@ -44,7 +64,10 @@ def test_boot_starts_services_in_dependency_order() -> None:
 
     logger = DummyService("logger")
     database = DummyService("database", ("logger",))
-    application = DummyService("application", ("database",))
+    application = DummyService(
+        "application",
+        ("database",),
+    )
 
     kernel.register(application)
     kernel.register(database)
@@ -65,7 +88,10 @@ def test_shutdown_stops_services() -> None:
     kernel = Kernel()
 
     logger = DummyService("logger")
-    application = DummyService("application", ("logger",))
+    application = DummyService(
+        "application",
+        ("logger",),
+    )
 
     kernel.register(application)
     kernel.register(logger)
@@ -97,7 +123,24 @@ def test_get_typed_returns_expected_type() -> None:
 
     kernel.register(logger)
 
-    result = kernel.get_typed("logger", DummyService)
+    result = kernel.get_typed(
+        "logger",
+        DummyService,
+    )
+
+    assert result is logger
+
+
+def test_get_typed_accepts_parent_service_type() -> None:
+    kernel = Kernel()
+    logger = DummyService("logger")
+
+    kernel.register(logger)
+
+    result = kernel.get_typed(
+        "logger",
+        Service,
+    )
 
     assert result is logger
 
@@ -109,4 +152,7 @@ def test_get_typed_rejects_wrong_type() -> None:
     kernel.register(logger)
 
     with pytest.raises(TypeError):
-        kernel.get_typed("logger", Service)
+        kernel.get_typed(
+            "logger",
+            OtherService,
+        )

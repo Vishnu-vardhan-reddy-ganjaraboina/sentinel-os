@@ -1,3 +1,6 @@
+
+import pytest
+
 from sentinel.brain.constants import PlanStatus
 from sentinel.brain.context import BrainContext
 from sentinel.brain.planner import BrainPlanner
@@ -236,6 +239,72 @@ def test_disabled_capability_is_not_recommended() -> None:
 
     plan = planner.create_plan(
         "echo message",
+        context,
+    )
+
+    assert plan["recommendation"] is None
+
+def test_mark_ready_rejects_missing_status_target() -> None:
+    planner = BrainPlanner()
+
+    with pytest.raises((KeyError, ValueError, TypeError)):
+        planner.mark_ready(None)  # type: ignore[arg-type]
+
+
+def test_mark_completed_rejects_missing_steps() -> None:
+    planner = BrainPlanner()
+
+    with pytest.raises((KeyError, ValueError, TypeError)):
+        planner.mark_completed({
+            "status": PlanStatus.READY,
+        })
+
+def test_recommendation_chooses_highest_score() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.1")
+    context.update(
+        capabilities=[
+            {
+                "capability_id": "one",
+                "name": "Send message",
+                "description": "Sends a message.",
+                "enabled": True,
+            },
+            {
+                "capability_id": "two",
+                "name": "Send email message",
+                "description": "Sends an email message.",
+                "enabled": True,
+            },
+        ]
+    )
+
+    plan = planner.create_plan(
+        "send email message",
+        context,
+    )
+
+    assert plan["recommendation"]["capability_id"] == "two"
+
+
+def test_empty_request_has_no_recommendation() -> None:
+    planner = BrainPlanner()
+
+    context = BrainContext("ctx.1")
+    context.update(
+        capabilities=[
+            {
+                "capability_id": "system.echo",
+                "name": "System Echo",
+                "description": "Returns messages.",
+                "enabled": True,
+            },
+        ]
+    )
+
+    plan = planner.create_plan(
+        "",
         context,
     )
 

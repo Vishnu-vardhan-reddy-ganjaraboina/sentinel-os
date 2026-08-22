@@ -58,3 +58,17 @@ def test_empty_id():
 
     with pytest.raises(ValueError):
         BrainContext("")
+
+def test_nested_data_is_isolated() -> None:
+    context = BrainContext("ctx.1")
+
+    context.update(
+        profile={
+            "name": "Sentinel",
+        }
+    )
+
+    data = context.data
+    data["profile"]["name"] = "changed"
+
+    assert context.get("profile")["name"] == "Sentinel"

@@ -34,28 +34,37 @@ class BrainEngine(Engine):
         context: Context,
     ) -> dict[str, Any]:
         """
-        Execute a request using the planner.
+        Build and complete a Brain plan.
+
+        Brain is responsible for planning, not capability execution.
         """
         self._state = BrainState.THINKING
 
-        plan = self._planner.create_plan(
-            request=request,
-            context=context,
-        )
+        try:
+            plan = self._planner.create_plan(
+                request=request,
+                context=context,
+            )
 
-        self._state = BrainState.PLANNING
+            self._state = BrainState.PLANNING
 
-        self._planner.mark_ready(plan)
+            self._planner.mark_ready(plan)
 
-        self._state = BrainState.EXECUTING
+            self._state = BrainState.EXECUTING
 
-        result = {
-            "request": request,
-            "plan": self._planner.mark_completed(plan),
-            "context": context.to_dict(),
-            "success": True,
-        }
+            completed_plan = self._planner.mark_completed(plan)
 
-        self._state = BrainState.COMPLETED
+            result = {
+                "request": request,
+                "plan": completed_plan,
+                "context": context.to_dict(),
+                "success": True,
+            }
 
-        return result
+            self._state = BrainState.COMPLETED
+
+            return result
+
+        except Exception:
+            self._state = BrainState.FAILED
+            raise

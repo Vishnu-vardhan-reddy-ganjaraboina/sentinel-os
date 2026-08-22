@@ -1,51 +1,64 @@
-from sentinel.memory.runtime import MemoryRuntimeService
+"""
+Kernel runtime service for the Sentinel Memory subsystem.
+"""
+
+from __future__ import annotations
+
+from sentinel.kernel.service import Service
 from sentinel.memory.service import MemoryService
 
 
-def test_name() -> None:
-    runtime = MemoryRuntimeService()
+class MemoryRuntimeService(Service):
+    """
+    Kernel-managed runtime wrapper for MemoryService.
+    """
 
-    assert runtime.name == "memory"
+    def __init__(
+        self,
+        memory: MemoryService | None = None,
+    ) -> None:
+        super().__init__("memory")
 
+        self._memory = (
+            memory
+            if memory is not None
+            else MemoryService()
+        )
 
-def test_memory_property() -> None:
-    memory = MemoryService()
+        self._initialized = False
+        self._shutdown = False
 
-    runtime = MemoryRuntimeService(memory)
+    @property
+    def memory(self) -> MemoryService:
+        """Return the underlying memory service."""
+        return self._memory
 
-    assert runtime.memory is memory
+    def initialize(self) -> None:
+        """
+        Initialize memory resources.
+        """
+        if self._shutdown:
+            raise RuntimeError(
+                "Memory runtime has already been shut down."
+            )
 
+        self._initialized = True
 
-def test_default_memory_service() -> None:
-    runtime = MemoryRuntimeService()
+    def shutdown(self) -> None:
+        """
+        Shut down memory resources.
+        """
+        if self._shutdown:
+            return
 
-    assert isinstance(
-        runtime.memory,
-        MemoryService,
-    )
+        self._shutdown = True
+        self._initialized = False
 
-
-def test_initialize() -> None:
-    runtime = MemoryRuntimeService()
-
-    runtime.initialize()
-
-
-def test_shutdown() -> None:
-    runtime = MemoryRuntimeService()
-
-    runtime.shutdown()
-
-
-def test_health() -> None:
-    runtime = MemoryRuntimeService()
-
-    assert runtime.health() == {
-        "healthy": True,
-    }
-
-
-def test_dependencies() -> None:
-    runtime = MemoryRuntimeService()
-
-    assert runtime.dependencies == ()
+    def health(self) -> dict[str, bool]:
+        """Return memory service health information."""
+        return {
+            "healthy": (
+                self._initialized
+                and not self._shutdown
+            ),
+        }

@@ -1,5 +1,6 @@
 import pytest
 
+from sentinel.memory.constants import MemoryStatus
 from sentinel.memory.entry import BaseMemoryEntry
 from sentinel.memory.exceptions import (
     MemoryAlreadyExistsError,
@@ -103,3 +104,35 @@ def test_contains():
     store.add(entry)
 
     assert "memory.one" in store
+
+def test_concurrent_adds() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = MemoryStore()
+
+    def add_entry(index: int) -> None:
+        store.add(
+            BaseMemoryEntry(
+                memory_id=f"memory.{index}",
+                content=f"value-{index}",
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(add_entry, range(100)))
+
+    assert len(store) == 100
+
+def test_archive_then_delete() -> None:
+    entry = BaseMemoryEntry(
+        memory_id="memory.one",
+        content="Hello",
+    )
+
+    entry.archive()
+
+    assert entry.status == MemoryStatus.ARCHIVED
+
+    entry.delete()
+
+    assert entry.status == MemoryStatus.DELETED

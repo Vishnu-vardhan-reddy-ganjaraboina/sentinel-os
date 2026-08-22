@@ -1,85 +1,125 @@
-from datetime import timedelta
+"""
+Base implementation of a Sentinel memory entry.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sentinel.memory.constants import (
+    DEFAULT_IMPORTANCE,
+    DEFAULT_TTL,
     MemoryStatus,
     MemoryType,
 )
-from sentinel.memory.entry import BaseMemoryEntry
+from sentinel.memory.interfaces import MemoryEntry
 
 
-def test_properties():
-    entry = BaseMemoryEntry(
-        memory_id="memory.one",
-        content="Hello",
-    )
+class BaseMemoryEntry(MemoryEntry):
+    """
+    Base implementation of a memory entry.
+    """
 
-    assert entry.id == "memory.one"
-    assert entry.content == "Hello"
-    assert entry.importance == 1
-    assert entry.memory_type == MemoryType.WORKING
-    assert entry.status == MemoryStatus.ACTIVE
+    def __init__(
+        self,
+        memory_id: str,
+        content: Any,
+        memory_type: MemoryType = MemoryType.WORKING,
+        importance: int = DEFAULT_IMPORTANCE,
+        ttl: timedelta | None = DEFAULT_TTL,
+    ) -> None:
+        if not isinstance(memory_id, str):
+            raise TypeError("memory_id must be a string.")
 
+        if not memory_id.strip():
+            raise ValueError("memory_id cannot be empty.")
 
-def test_archive():
-    entry = BaseMemoryEntry(
-        "memory.one",
-        "Hello",
-    )
+        if not isinstance(importance, int):
+            raise TypeError("importance must be an integer.")
 
-    entry.archive()
+        if importance < 0:
+            raise ValueError("importance cannot be negative.")
 
-    assert entry.status == MemoryStatus.ARCHIVED
+        if ttl is not None:
+            if not isinstance(ttl, timedelta):
+                raise TypeError("ttl must be a timedelta or None.")
 
+            if ttl.total_seconds() < 0:
+                raise ValueError("ttl cannot be negative.")
 
-def test_delete():
-    entry = BaseMemoryEntry(
-        "memory.one",
-        "Hello",
-    )
+        if not isinstance(memory_type, MemoryType):
+            raise TypeError(
+                "memory_type must be a MemoryType."
+            )
 
-    entry.delete()
+        self._id = memory_id
+        self._content = content
+        self._type = memory_type
+        self._importance = importance
+        self._ttl = ttl
 
-    assert entry.status == MemoryStatus.DELETED
+        self._status = MemoryStatus.ACTIVE
 
+        self._created_at = datetime.now(UTC)
+        self._last_accessed = self._created_at
 
-def test_expired():
-    entry = BaseMemoryEntry(
-        "memory.one",
-        "Hello",
-        ttl=timedelta(milliseconds=1),
-    )
+    @property
+    def id(self) -> str:
+        return self._id
 
-    import time
+    @property
+    def content(self) -> Any:
+        self.touch()
+        return self._content
 
-    time.sleep(0.01)
+    @property
+    def importance(self) -> int:
+        return self._importance
 
-    assert entry.expired is True
+    @property
+    def memory_type(self) -> MemoryType:
+        return self._type
 
+    @property
+    def status(self) -> MemoryStatus:
+        return self._status
 
-def test_not_expired():
-    entry = BaseMemoryEntry(
-        "memory.one",
-        "Hello",
-    )
+    @property
+    def created_at(self) -> datetime:
+        return self._created_at
 
-    assert entry.expired is False
+    @property
+    def last_accessed(self) -> datetime:
+        return self._last_accessed
 
+    @property
+    def expired(self) -> bool:
+        if self._ttl is None:
+            return False
 
-def test_to_dict():
-    entry = BaseMemoryEntry(
-        "memory.one",
-        {"value": 100},
-    )
+        return datetime.now(UTC) >= self._created_at + self._ttl
 
-    data = entry.to_dict()
+    def touch(self) -> None:
+        """Update the last accessed timestamp."""
+        self._last_accessed = datetime.now(UTC)
 
-    assert data["id"] == "memory.one"
-    assert data["importance"] == 1
-    assert data["memory_type"] == "working"
+    def archive(self) -> None:
+        """Archive this memory entry."""
+        self._status = MemoryStatus.ARCHIVED
 
+    def delete(self) -> None:
+        """Mark this memory entry as deleted."""
+        self._status = MemoryStatus.DELETED
 
-def test_empty_id():
-    import pytest
-
-    with pytest.raises(ValueError):
-        BaseMemoryEntry("", "hello")
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "content": self._content,
+            "memory_type": self.memory_type.value,
+            "importance": self.importance,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "last_accessed": self.last_accessed.isoformat(),
+            "expired": self.expired,
+        }

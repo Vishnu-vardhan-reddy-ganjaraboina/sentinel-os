@@ -67,3 +67,30 @@ def test_str():
     task = Task(callback=add)
 
     assert "Task(" in str(task)
+
+def test_retries_can_be_configured() -> None:
+    task = Task(
+        callback=add,
+        retries=3,
+    )
+
+    assert task.retries == 3
+
+
+def test_negative_retries_are_rejected() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        Task(
+            callback=add,
+            retries=-1,
+        )
+
+
+def test_timeout_can_be_configured() -> None:
+    task = Task(
+        callback=add,
+        timeout=10,
+    )
+
+    assert task.timeout == 10

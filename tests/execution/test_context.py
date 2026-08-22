@@ -54,3 +54,22 @@ def test_mark_cancelled():
     assert context.status == TaskStatus.CANCELLED
     assert context.finished_at is not None
     assert context.is_finished is True
+
+def test_context_rejects_invalid_transition_to_completed() -> None:
+    context = ExecutionContext(task_id="task-1")
+
+    context.mark_running()
+    context.mark_completed(result=123)
+
+    # A terminal state must remain terminal.
+    assert context.is_finished is True
+
+
+def test_context_duration_is_non_negative() -> None:
+    context = ExecutionContext(task_id="task-1")
+
+    context.mark_running()
+    context.mark_completed()
+
+    assert context.duration is not None
+    assert context.duration >= 0

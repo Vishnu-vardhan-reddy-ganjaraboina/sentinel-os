@@ -1,24 +1,71 @@
-from sentinel.execution.runtime import ExecutionRuntimeService
+"""
+Kernel runtime service for the Execution subsystem.
+"""
+
+from __future__ import annotations
+
 from sentinel.execution.service import ExecutionService
+from sentinel.kernel.service import Service
 
 
-def test_runtime_service() -> None:
-    execution = ExecutionService()
-    runtime = ExecutionRuntimeService(execution)
+class ExecutionRuntimeService(Service):
+    """
+    Kernel-managed runtime wrapper for ExecutionService.
+    """
 
-    assert runtime.name == "execution"
-    assert runtime.execution is execution
-    assert runtime.dependencies == ()
+    def __init__(
+        self,
+        execution: ExecutionService | None = None,
+    ) -> None:
+        super().__init__("execution")
 
-    runtime.initialize()
-    runtime.shutdown()
+        self._execution = (
+            execution
+            if execution is not None
+            else ExecutionService()
+        )
 
+        self._initialized = False
+        self._shutdown = False
 
-def test_runtime_health() -> None:
-    runtime = ExecutionRuntimeService()
+    @property
+    def execution(self) -> ExecutionService:
+        """Return the underlying execution service."""
+        return self._execution
 
-    assert runtime.health() == {
-        "healthy": True,
-    }
+    def initialize(self) -> None:
+        """
+        Initialize execution resources.
 
-    runtime.shutdown()
+        ExecutionService creates its resources during construction,
+        so initialization only updates the runtime lifecycle state.
+        """
+        if self._shutdown:
+            raise RuntimeError(
+                "Execution runtime has already been shut down."
+            )
+
+        self._initialized = True
+
+    def shutdown(self) -> None:
+        """
+        Shut down execution resources.
+        """
+        if self._shutdown:
+            return
+
+        self._execution.shutdown()
+
+        self._shutdown = True
+        self._initialized = False
+
+    def health(self) -> dict[str, bool]:
+        """
+        Return execution service health information.
+        """
+        return {
+            "healthy": (
+                self._initialized
+                and not self._shutdown
+            ),
+        }

@@ -151,3 +151,104 @@ def test_custom_similarity():
     )
 
     assert len(result) == 1
+
+def test_search_with_non_positive_limit_returns_empty() -> None:
+    store = InMemoryVectorStore()
+
+    store.add(
+        Chunk(
+            id="chunk.1",
+            document_id="doc.1",
+            text="Hello",
+            index=0,
+        ),
+        [1.0, 0.0],
+    )
+
+    assert store.search([1.0, 0.0], limit=0) == []
+    assert store.search([1.0, 0.0], limit=-1) == []
+
+
+def test_replacing_chunk_replaces_embedding_and_chunk() -> None:
+    store = InMemoryVectorStore()
+
+    original = Chunk(
+        id="chunk.1",
+        document_id="doc.1",
+        text="Original",
+        index=0,
+    )
+
+    replacement = Chunk(
+        id="chunk.1",
+        document_id="doc.2",
+        text="Replacement",
+        index=1,
+    )
+
+    store.add(original, [1.0, 0.0])
+    store.add(replacement, [0.0, 1.0])
+
+    assert store.get("chunk.1") == replacement
+    assert len(store) == 1
+
+    result = store.search(
+        [0.0, 1.0],
+        limit=1,
+    )
+
+    assert result == [replacement]
+
+
+def test_delete_document_only_removes_matching_document() -> None:
+    store = InMemoryVectorStore()
+
+    store.add(
+        Chunk(
+            id="chunk.1",
+            document_id="doc.1",
+            text="One",
+            index=0,
+        ),
+        [1.0, 0.0],
+    )
+
+    store.add(
+        Chunk(
+            id="chunk.2",
+            document_id="doc.2",
+            text="Two",
+            index=0,
+        ),
+        [0.0, 1.0],
+    )
+
+    store.delete_document("doc.1")
+
+    assert store.exists("chunk.1") is False
+    assert store.exists("chunk.2") is True
+
+
+def test_missing_chunk_returns_none() -> None:
+    store = InMemoryVectorStore()
+
+    assert store.get("missing") is None
+
+
+def test_clear_removes_chunks_and_embeddings() -> None:
+    store = InMemoryVectorStore()
+
+    store.add(
+        Chunk(
+            id="chunk.1",
+            document_id="doc.1",
+            text="One",
+            index=0,
+        ),
+        [1.0, 0.0],
+    )
+
+    store.clear()
+
+    assert len(store) == 0
+    assert store.list_chunks() == []

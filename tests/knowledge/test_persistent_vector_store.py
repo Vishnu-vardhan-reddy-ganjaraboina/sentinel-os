@@ -2,7 +2,10 @@
 Tests for the persistent knowledge vector store.
 """
 
+import json
 from pathlib import Path
+
+import pytest
 
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.persistent_vector_store import (
@@ -208,3 +211,85 @@ def test_clear(
 
     assert len(store) == 0
     assert store.list_chunks() == []
+
+def test_search_with_non_positive_limit_returns_empty(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+
+    store.add(
+        Chunk(
+            id="chunk.1",
+            document_id="doc.1",
+            text="Hello",
+            index=0,
+        ),
+        [1.0, 0.0],
+    )
+
+    assert store.search([1.0, 0.0], limit=0) == []
+    assert store.search([1.0, 0.0], limit=-1) == []
+
+
+def test_missing_chunk_returns_none(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+
+    assert store.get("missing") is None
+
+
+def test_corrupt_json_is_rejected(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "knowledge.db"
+    store = create_store(database)
+
+    store.backend.set(
+        "knowledge:chunk:broken",
+        "{invalid-json",
+    )
+
+    with pytest.raises(ValueError, match="invalid JSON"):
+        store.get("broken")
+
+
+def test_invalid_payload_is_rejected(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "knowledge.db"
+    store = create_store(database)
+
+    store.backend.set(
+        "knowledge:chunk:broken",
+        json.dumps({"chunk": "invalid"}),
+    )
+
+    with pytest.raises(ValueError, match="Stored chunk"):
+        store.get("broken")
+
+
+def test_invalid_embedding_is_rejected(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "knowledge.db"
+    store = create_store(database)
+
+    store.backend.set(
+        "knowledge:chunk:broken",
+        json.dumps(
+            {
+                "chunk": {
+                    "id": "broken",
+                    "document_id": "doc.1",
+                    "text": "Hello",
+                    "index": 0,
+                    "metadata": {},
+                },
+                "embedding": "invalid",
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Stored embedding"):
+        store.get("broken")

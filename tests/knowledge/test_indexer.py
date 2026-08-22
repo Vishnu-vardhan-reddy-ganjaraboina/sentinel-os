@@ -79,3 +79,26 @@ def test_reindex_document():
 
     assert len(chunks) == 1
     assert chunks[0].text == "Version 2"
+
+def test_reindex_replaces_old_chunks() -> None:
+    indexer = create_indexer()
+
+    indexer.index(
+        Document(
+            id="doc1",
+            text="Old document",
+        )
+    )
+
+    indexer.reindex(
+        Document(
+            id="doc1",
+            text="New document",
+        )
+    )
+
+    chunks = indexer.vector_store.list_chunks()
+
+    assert len(chunks) == 1
+    assert chunks[0].document_id == "doc1"
+    assert chunks[0].text == "New document"

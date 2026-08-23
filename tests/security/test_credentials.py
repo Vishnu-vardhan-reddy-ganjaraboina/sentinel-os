@@ -83,3 +83,32 @@ def test_invalid_secret():
             "admin",
             "",
         )
+
+def test_verify_accepts_correct_secret() -> None:
+    credentials = SecurityCredentials(
+        "admin",
+        "password123",
+    )
+
+    assert credentials.verify("password123") is True
+
+
+def test_verify_rejects_wrong_secret() -> None:
+    credentials = SecurityCredentials(
+        "admin",
+        "password123",
+    )
+
+    assert credentials.verify("wrong-password") is False
+
+
+def test_repr_does_not_expose_secret() -> None:
+    credentials = SecurityCredentials(
+        "admin",
+        "password123",
+    )
+
+    representation = repr(credentials)
+
+    assert "password123" not in representation
+    assert "admin" in representation

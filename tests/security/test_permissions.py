@@ -106,3 +106,46 @@ def test_contains():
     )
 
     assert Role.USER in store
+
+def test_permissions_for_returns_isolated_set() -> None:
+    store = RolePermissionStore()
+
+    store.grant(
+        Role.ADMIN,
+        [Permission.READ],
+    )
+
+    permissions = store.permissions_for(Role.ADMIN)
+    permissions.add(Permission.WRITE)
+
+    assert Permission.WRITE not in store.permissions_for(
+        Role.ADMIN
+    )
+
+def test_concurrent_grants_are_safe() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = RolePermissionStore()
+
+    def grant(index: int) -> None:
+        store.grant(
+            Role.ADMIN,
+            [
+                Permission.READ
+                if index % 2 == 0
+                else Permission.WRITE
+            ],
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(
+            executor.map(
+                grant,
+                range(100),
+            )
+        )
+
+    permissions = store.permissions_for(Role.ADMIN)
+
+    assert Permission.READ in permissions
+    assert Permission.WRITE in permissions

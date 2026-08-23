@@ -89,3 +89,16 @@ def test_invalid_name():
             "user-1",
             "",
         )
+
+def test_roles_returns_isolated_set() -> None:
+    identity = SecurityIdentity(
+        "user-1",
+        "Sentinel",
+        {Role.USER},
+    )
+
+    roles = identity.roles
+    roles.add(Role.ADMIN)
+
+    assert identity.has_role(Role.ADMIN) is False
+    assert identity.has_role(Role.USER) is True

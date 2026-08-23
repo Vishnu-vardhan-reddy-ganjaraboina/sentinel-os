@@ -2,7 +2,11 @@ import pytest
 
 from sentinel.devices.constants import DeviceCategory
 from sentinel.devices.device import BaseDevice
-from sentinel.devices.exceptions import DeviceOperationError
+from sentinel.devices.exceptions import (
+    DeviceDisconnectedError,
+    DeviceNotFoundError,
+    DeviceOperationError,
+)
 from sentinel.devices.manager import DeviceManager
 from sentinel.devices.metadata import DeviceMetadata
 
@@ -110,3 +114,18 @@ def test_clear():
     manager.clear()
 
     assert len(manager.list()) == 0
+
+def test_disconnected_error_is_preserved() -> None:
+    manager = DeviceManager()
+
+    manager.register(EchoDevice())
+
+    with pytest.raises(DeviceDisconnectedError):
+        manager.execute("echo")
+
+
+def test_execute_unknown_device_raises_not_found() -> None:
+    manager = DeviceManager()
+
+    with pytest.raises(DeviceNotFoundError):
+        manager.execute("missing")

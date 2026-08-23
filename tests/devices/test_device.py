@@ -78,3 +78,20 @@ def test_metadata():
     device = DummyDevice()
 
     assert device.metadata.device_id == "dummy.device"
+
+def test_repeated_connect_is_idempotent() -> None:
+    device = DummyDevice()
+
+    device.connect()
+    device.connect()
+
+    assert device.connected is True
+
+
+def test_repeated_disconnect_is_idempotent() -> None:
+    device = DummyDevice()
+
+    device.disconnect()
+    device.disconnect()
+
+    assert device.connected is False

@@ -105,3 +105,18 @@ def test_clear():
     registry.clear()
 
     assert len(registry) == 0
+
+def test_registry_concurrent_registration() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    registry = CapabilityRegistry()
+
+    def register(index: int) -> None:
+        registry.register(
+            DummyCapability(f"capability.{index}")
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(register, range(100)))
+
+    assert len(registry) == 100

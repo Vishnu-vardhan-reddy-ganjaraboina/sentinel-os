@@ -64,3 +64,11 @@ def test_metadata():
     capability = DummyCapability()
 
     assert capability.metadata.capability_id == "dummy.echo"
+
+def test_disabled_error_is_not_transformed() -> None:
+    capability = DummyCapability()
+
+    capability.disable()
+
+    with pytest.raises(CapabilityDisabledError):
+        capability.execute()

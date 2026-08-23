@@ -8,6 +8,7 @@ from typing import Any
 
 from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.exceptions import (
+    CapabilityDisabledError,
     CapabilityExecutionError,
 )
 from sentinel.capabilities.registry import CapabilityRegistry
@@ -29,27 +30,21 @@ class CapabilityManager:
 
     @property
     def registry(self) -> CapabilityRegistry:
-        """
-        Return the capability registry.
-        """
+        """Return the capability registry."""
         return self._registry
 
     def register(
         self,
         capability: BaseCapability,
     ) -> None:
-        """
-        Register a capability.
-        """
+        """Register a capability."""
         self._registry.register(capability)
 
     def unregister(
         self,
         capability_id: str,
     ) -> None:
-        """
-        Unregister a capability.
-        """
+        """Unregister a capability."""
         self._registry.unregister(capability_id)
 
     def execute(
@@ -59,11 +54,17 @@ class CapabilityManager:
     ) -> Any:
         """
         Execute a registered capability.
+
+        Disabled capabilities preserve their specific exception type.
+        Other runtime failures are wrapped as CapabilityExecutionError.
         """
         capability = self._registry.get(capability_id)
 
         try:
             return capability.execute(**kwargs)
+
+        except CapabilityDisabledError:
+            raise
 
         except Exception as exc:
             raise CapabilityExecutionError(
@@ -71,22 +72,16 @@ class CapabilityManager:
             ) from exc
 
     def list(self) -> list[BaseCapability]:
-        """
-        Return all registered capabilities.
-        """
+        """Return all registered capabilities."""
         return self._registry.list()
 
     def exists(
         self,
         capability_id: str,
     ) -> bool:
-        """
-        Return True if the capability exists.
-        """
+        """Return True if the capability exists."""
         return self._registry.exists(capability_id)
 
     def clear(self) -> None:
-        """
-        Remove all registered capabilities.
-        """
+        """Remove all registered capabilities."""
         self._registry.clear()

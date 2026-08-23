@@ -3,6 +3,7 @@ import pytest
 from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.constants import CapabilityCategory
 from sentinel.capabilities.exceptions import (
+    CapabilityDisabledError,
     CapabilityExecutionError,
 )
 from sentinel.capabilities.manager import CapabilityManager
@@ -91,3 +92,14 @@ def test_clear():
     manager.clear()
 
     assert len(manager.list()) == 0
+
+def test_disabled_capability_preserves_disabled_error() -> None:
+    manager = CapabilityManager()
+
+    capability = EchoCapability()
+    capability.disable()
+
+    manager.register(capability)
+
+    with pytest.raises(CapabilityDisabledError):
+        manager.execute("echo")

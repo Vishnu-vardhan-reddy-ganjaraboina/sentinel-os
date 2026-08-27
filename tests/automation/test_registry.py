@@ -124,3 +124,18 @@ def test_iteration():
     ids = {workflow.id for workflow in registry}
 
     assert ids == {"one", "two"}
+
+def test_concurrent_registration():
+    from concurrent.futures import ThreadPoolExecutor
+
+    registry = WorkflowRegistry()
+
+    def register(index: int) -> None:
+        registry.register(
+            DummyWorkflow(f"workflow.{index}")
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(register, range(100)))
+
+    assert len(registry) == 100

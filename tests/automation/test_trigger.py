@@ -11,6 +11,14 @@ class DummyTrigger(BaseTrigger):
     def check(self, **kwargs):
         return kwargs.get("fire", False)
 
+class FailingTrigger(BaseTrigger):
+
+    def __init__(self):
+        super().__init__("failing.trigger")
+
+    def check(self, **kwargs):
+        raise RuntimeError("trigger failure")
+
 
 def test_properties():
     trigger = DummyTrigger()
@@ -62,3 +70,9 @@ def test_empty_id():
 def test_trigger_is_abstract():
     with pytest.raises(TypeError):
         BaseTrigger("test")
+
+def test_trigger_failure_propagates():
+    trigger = FailingTrigger()
+
+    with pytest.raises(RuntimeError, match="trigger failure"):
+        trigger.evaluate()

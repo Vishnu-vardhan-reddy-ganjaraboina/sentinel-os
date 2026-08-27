@@ -8,6 +8,7 @@ import builtins
 from typing import Any
 
 from sentinel.automation.exceptions import (
+    WorkflowDisabledError,
     WorkflowExecutionError,
 )
 from sentinel.automation.interfaces import Workflow
@@ -41,18 +42,30 @@ class WorkflowManager:
     def list(self) -> builtins.list[Workflow]:
         return self._registry.list()
 
-    def execute(self, workflow_id: str, **kwargs: Any) -> Any:
+    def execute(
+        self,
+        workflow_id: str,
+        **kwargs: Any,
+    ) -> Any:
         """
         Execute a workflow by ID.
+
+        Disabled workflows preserve their specific exception.
+        Other execution failures are wrapped as
+        WorkflowExecutionError.
         """
         workflow = self._registry.get(workflow_id)
 
         try:
             return workflow.execute(**kwargs)
-        except Exception as exc:
-            if isinstance(exc, WorkflowExecutionError):
-                raise
 
+        except WorkflowDisabledError:
+            raise
+
+        except WorkflowExecutionError:
+            raise
+
+        except Exception as exc:
             raise WorkflowExecutionError(
                 f"Workflow '{workflow_id}' execution failed."
             ) from exc

@@ -101,3 +101,13 @@ def test_empty_name():
 def test_workflow_is_abstract():
     with pytest.raises(TypeError):
         BaseWorkflow("id", "Test")
+
+def test_disabled_workflow_status_is_disabled():
+    workflow = EchoWorkflow()
+
+    workflow.disable()
+
+    with pytest.raises(WorkflowDisabledError):
+        workflow.execute()
+
+    assert workflow.status == WorkflowStatus.DISABLED

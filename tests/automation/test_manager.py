@@ -1,6 +1,9 @@
+from typing import Any
+
 import pytest
 
 from sentinel.automation.exceptions import (
+    WorkflowDisabledError,
     WorkflowExecutionError,
 )
 from sentinel.automation.manager import WorkflowManager
@@ -102,3 +105,14 @@ def test_clear():
     manager.clear()
 
     assert len(manager.list()) == 0
+
+def test_disabled_workflow_preserves_disabled_error():
+    manager = WorkflowManager()
+
+    workflow = EchoWorkflow()
+    manager.register(workflow)
+    manager.disable(workflow.id)
+
+    with pytest.raises(WorkflowDisabledError):
+        manager.execute(workflow.id)
+

@@ -137,6 +137,9 @@ class OrchestrationManager:
         except AuthorizationError:
             raise
 
+        except OrchestrationExecutionError:
+            raise
+
         except Exception as exc:
             raise OrchestrationExecutionError(
                 f"Orchestration request '{request.id}' failed."
@@ -270,12 +273,19 @@ class OrchestrationManager:
                     "must be a dictionary."
                 )
 
-            self._authorize_capability(capability_id)
+            self._validate_capability(
+                capability_id,
+            )
+
+            self._authorize_capability(
+                capability_id,
+            )
 
             capability_result = self._capabilities.execute(
                 capability_id,
                 **arguments,
             )
+            
 
             capability_results.append(
                 {

@@ -62,3 +62,57 @@ def test_result_to_dict() -> None:
         "data": {"value": 42},
         "error": None,
     }
+
+def test_request_context_isolated() -> None:
+    context = {
+        "user": "Sentinel",
+        "nested": {
+            "value": 1,
+        },
+    }
+
+    request = OrchestrationRequest(
+        request_id="req.1",
+        input="hello",
+        context=context,
+    )
+
+    context["user"] = "changed"
+    context["nested"]["value"] = 2
+
+    assert request.context["user"] == "Sentinel"
+    assert request.context["nested"]["value"] == 1
+
+
+def test_request_context_property_returns_copy() -> None:
+    request = OrchestrationRequest(
+        request_id="req.1",
+        input="hello",
+        context={
+            "user": "Sentinel",
+        },
+    )
+
+    returned = request.context
+    returned["user"] = "changed"
+
+    assert request.context["user"] == "Sentinel"
+
+def test_result_to_dict_is_isolated() -> None:
+    data = {
+        "nested": {
+            "value": 1,
+        },
+    }
+
+    result = OrchestrationResult(
+        request_id="req.1",
+        success=True,
+        data=data,
+    )
+
+    serialized = result.to_dict()
+
+    serialized["data"]["nested"]["value"] = 99
+
+    assert result.data["nested"]["value"] == 1

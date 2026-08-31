@@ -4,6 +4,7 @@ Concrete models for the Sentinel Orchestration subsystem.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from sentinel.orchestration.interfaces import (
@@ -23,10 +24,15 @@ class OrchestrationRequest(OrchestrationRequestInterface):
         input: Any,
         context: dict[str, Any] | None = None,
     ) -> None:
+        if not isinstance(request_id, str):
+            raise TypeError("request_id must be a string.")
+
         self._request_id = request_id
-        self._input = input
+        self._input = deepcopy(input)
         self._context = (
-            {} if context is None else dict(context)
+            {}
+            if context is None
+            else deepcopy(context)
         )
 
     @property
@@ -36,13 +42,13 @@ class OrchestrationRequest(OrchestrationRequestInterface):
 
     @property
     def input(self) -> Any:
-        """Return the original request input."""
-        return self._input
+        """Return an isolated copy of the original input."""
+        return deepcopy(self._input)
 
     @property
     def context(self) -> dict[str, Any]:
-        """Return request context."""
-        return self._context
+        """Return an isolated copy of the request context."""
+        return deepcopy(self._context)
 
 
 class OrchestrationResult(OrchestrationResultInterface):
@@ -55,9 +61,18 @@ class OrchestrationResult(OrchestrationResultInterface):
         data: Any = None,
         error: str | None = None,
     ) -> None:
+        if not isinstance(request_id, str):
+            raise TypeError("request_id must be a string.")
+
+        if not isinstance(success, bool):
+            raise TypeError("success must be a boolean.")
+
+        if error is not None and not isinstance(error, str):
+            raise TypeError("error must be a string or None.")
+
         self._request_id = request_id
         self._success = success
-        self._data = data
+        self._data = deepcopy(data)
         self._error = error
 
     @property
@@ -72,8 +87,8 @@ class OrchestrationResult(OrchestrationResultInterface):
 
     @property
     def data(self) -> Any:
-        """Return the resulting data."""
-        return self._data
+        """Return an isolated copy of the resulting data."""
+        return deepcopy(self._data)
 
     @property
     def error(self) -> str | None:
@@ -81,10 +96,10 @@ class OrchestrationResult(OrchestrationResultInterface):
         return self._error
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize the result."""
+        """Serialize the result without exposing mutable internals."""
         return {
             "request_id": self.request_id,
             "success": self.success,
-            "data": self.data,
+            "data": deepcopy(self._data),
             "error": self.error,
         }

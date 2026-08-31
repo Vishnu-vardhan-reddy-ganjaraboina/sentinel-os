@@ -669,3 +669,54 @@ def test_execute_disabled_capability_fails_validation() -> None:
 
     with pytest.raises(OrchestrationExecutionError):
         manager.execute(request)
+
+def test_execute_unknown_capability_fails_before_authorization() -> None:
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.validation-order",
+        input="hello",
+        context={
+            "capability_id": "does.not.exist",
+        },
+    )
+
+    with pytest.raises(
+        OrchestrationExecutionError,
+        match="not registered",
+    ):
+        manager.execute(request)
+
+def test_execute_disabled_capability_fails_before_authorization() -> None:
+    capability = EchoCapability()
+    capability.disable()
+
+    capabilities = CapabilityManager()
+    capabilities.register(capability)
+
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.validation-disabled",
+        input="hello",
+        context={
+            "capability_id": "system.echo",
+        },
+    )
+
+    with pytest.raises(
+        OrchestrationExecutionError,
+        match="disabled",
+    ):
+        manager.execute(request)

@@ -29,6 +29,14 @@ def test_runtime_default_service() -> None:
     )
 
 
+def test_runtime_health_before_initialize() -> None:
+    runtime = OrchestrationRuntimeService()
+
+    assert runtime.health() == {
+        "healthy": False,
+    }
+
+
 def test_runtime_initialize() -> None:
     runtime = OrchestrationRuntimeService()
 
@@ -46,5 +54,17 @@ def test_runtime_shutdown() -> None:
     runtime.shutdown()
 
     assert runtime.health() == {
-        "healthy": True,
+        "healthy": False,
+    }
+
+
+def test_runtime_shutdown_is_idempotent() -> None:
+    runtime = OrchestrationRuntimeService()
+
+    runtime.initialize()
+    runtime.shutdown()
+    runtime.shutdown()
+
+    assert runtime.health() == {
+        "healthy": False,
     }

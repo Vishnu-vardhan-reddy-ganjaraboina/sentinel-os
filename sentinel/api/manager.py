@@ -24,13 +24,22 @@ class APIManager:
         server: APIServer | None = None,
     ) -> None:
 
+        if router is not None and not isinstance(router, APIRouter):
+            raise TypeError("router must be an APIRouter")
+
+        if server is not None and not isinstance(server, APIServer):
+            raise TypeError("server must be an APIServer")
+
         self._router = router if router is not None else APIRouter()
 
-        self._server = (
-            server
-            if server is not None
-            else APIServer(self._router)
-        )
+        if server is not None:
+            if server.router is not self._router:
+                raise ValueError(
+                    "server must use the same router as the manager"
+                )
+            self._server = server
+        else:
+            self._server = APIServer(self._router)
 
     @property
     def router(self) -> APIRouter:

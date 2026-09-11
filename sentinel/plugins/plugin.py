@@ -11,12 +11,21 @@ from sentinel.plugins.constants import (
     PluginState,
     PluginType,
 )
+from sentinel.plugins.exceptions import (
+    PluginDisableError,
+    PluginEnableError,
+    PluginLoadError,
+    PluginUnloadError,
+)
 from sentinel.plugins.interfaces import Plugin
 
 
 class SentinelPlugin(Plugin):
     """
     Default implementation of a Sentinel plugin.
+
+    The plugin enforces its own lifecycle state transitions so direct
+    lifecycle calls cannot bypass the Plugin state machine.
     """
 
     def __init__(
@@ -26,13 +35,19 @@ class SentinelPlugin(Plugin):
         version: str = DEFAULT_PLUGIN_VERSION,
     ) -> None:
 
-        if not name:
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+
+        if not name.strip():
             raise ValueError("name cannot be empty")
 
         if not isinstance(plugin_type, PluginType):
             raise TypeError("plugin_type must be a PluginType")
 
-        if not version:
+        if not isinstance(version, str):
+            raise TypeError("version must be a string")
+
+        if not version.strip():
             raise ValueError("version cannot be empty")
 
         self._name = name
@@ -57,15 +72,54 @@ class SentinelPlugin(Plugin):
         return self._state
 
     def load(self) -> None:
+        """
+        Transition the plugin from REGISTERED to LOADED.
+        """
+        if self._state != PluginState.REGISTERED:
+            raise PluginLoadError(
+                f"Cannot load plugin in state "
+                f"'{self._state.value}'."
+            )
+
         self._state = PluginState.LOADED
 
     def enable(self) -> None:
+        """
+        Transition the plugin from LOADED to ENABLED.
+        """
+        if self._state != PluginState.LOADED:
+            raise PluginEnableError(
+                f"Cannot enable plugin in state "
+                f"'{self._state.value}'."
+            )
+
         self._state = PluginState.ENABLED
 
     def disable(self) -> None:
+        """
+        Transition the plugin from ENABLED to DISABLED.
+        """
+        if self._state != PluginState.ENABLED:
+            raise PluginDisableError(
+                f"Cannot disable plugin in state "
+                f"'{self._state.value}'."
+            )
+
         self._state = PluginState.DISABLED
 
     def unload(self) -> None:
+        """
+        Transition the plugin from LOADED or DISABLED to UNLOADED.
+        """
+        if self._state not in (
+            PluginState.LOADED,
+            PluginState.DISABLED,
+        ):
+            raise PluginUnloadError(
+                f"Cannot unload plugin in state "
+                f"'{self._state.value}'."
+            )
+
         self._state = PluginState.UNLOADED
 
     def to_dict(self) -> dict[str, Any]:

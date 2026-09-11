@@ -5,6 +5,13 @@ from sentinel.plugins.constants import (
     PluginState,
     PluginType,
 )
+
+from sentinel.plugins.exceptions import (
+    PluginDisableError,
+    PluginEnableError,
+    PluginLoadError,
+    PluginUnloadError,
+)
 from sentinel.plugins.plugin import SentinelPlugin
 
 
@@ -90,4 +97,69 @@ def test_invalid_version():
         SentinelPlugin(
             "plugin",
             version="",
+        )
+
+def test_invalid_lifecycle_transitions() -> None:
+    plugin = SentinelPlugin("sample")
+
+    with pytest.raises(PluginEnableError):
+        plugin.enable()
+
+    with pytest.raises(PluginDisableError):
+        plugin.disable()
+
+    with pytest.raises(PluginUnloadError):
+        plugin.unload()
+
+
+def test_cannot_load_twice() -> None:
+    plugin = SentinelPlugin("sample")
+
+    plugin.load()
+
+    with pytest.raises(PluginLoadError):
+        plugin.load()
+
+
+def test_cannot_enable_twice() -> None:
+    plugin = SentinelPlugin("sample")
+
+    plugin.load()
+    plugin.enable()
+
+    with pytest.raises(PluginEnableError):
+        plugin.enable()
+
+
+def test_cannot_disable_twice() -> None:
+    plugin = SentinelPlugin("sample")
+
+    plugin.load()
+    plugin.enable()
+    plugin.disable()
+
+    with pytest.raises(PluginDisableError):
+        plugin.disable()
+
+
+def test_cannot_unload_twice() -> None:
+    plugin = SentinelPlugin("sample")
+
+    plugin.load()
+    plugin.unload()
+
+    with pytest.raises(PluginUnloadError):
+        plugin.unload()
+
+
+def test_invalid_name_type() -> None:
+    with pytest.raises(TypeError):
+        SentinelPlugin(123)  # type: ignore[arg-type]
+
+
+def test_invalid_version_type() -> None:
+    with pytest.raises(TypeError):
+        SentinelPlugin(
+            "sample",
+            version=123,  # type: ignore[arg-type]
         )

@@ -22,6 +22,9 @@ class APIService:
         manager: APIManager | None = None,
     ) -> None:
 
+        if manager is not None and not isinstance(manager, APIManager):
+            raise TypeError("manager must be an APIManager")
+
         self._manager = (
             manager
             if manager is not None

@@ -48,3 +48,29 @@ def test_application_context_manager() -> None:
         assert kernel.running("memory") is True
 
     assert application.running is False
+
+def test_application_runtime_dependencies_are_declared() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    orchestration = kernel.get("orchestration")
+
+    assert orchestration.dependencies == (
+        "memory",
+        "knowledge",
+    )
+
+    application.shutdown()
+
+
+def test_application_runtime_dependencies_are_running() -> None:
+    application = Application()
+
+    kernel = application.start()
+
+    assert kernel.running("memory")
+    assert kernel.running("knowledge")
+    assert kernel.running("orchestration")
+
+    application.shutdown()

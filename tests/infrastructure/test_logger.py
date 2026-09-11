@@ -4,6 +4,7 @@ Unit tests for Sentinel logging.
 
 from __future__ import annotations
 
+import pytest
 import logging
 from pathlib import Path
 
@@ -60,3 +61,41 @@ def test_shutdown_logging(tmp_path: Path) -> None:
     logger = logging.getLogger("sentinel")
 
     assert logger.handlers == []
+
+def test_invalid_log_level(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Invalid logging level"):
+        configure_logging(
+            log_directory=tmp_path,
+            log_level="NOT_A_LEVEL",
+        )
+
+
+def test_invalid_log_size(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        configure_logging(
+            log_directory=tmp_path,
+            max_bytes=0,
+        )
+
+    with pytest.raises(ValueError):
+        configure_logging(
+            log_directory=tmp_path,
+            backup_count=-1,
+        )
+
+
+def test_get_logger_rejects_invalid_name() -> None:
+    with pytest.raises(TypeError):
+        get_logger(123)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError):
+        get_logger("   ")
+
+
+def test_shutdown_is_idempotent(tmp_path: Path) -> None:
+    configure_logging(log_directory=tmp_path)
+
+    shutdown_logging()
+    shutdown_logging()
+
+    assert logging.getLogger("sentinel").handlers == []

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from enum import Enum
 
+
 DEFAULT_API_VERSION = "1.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
@@ -53,4 +54,5 @@ class HTTPStatus(Enum):
     UNAUTHORIZED = 401
     FORBIDDEN = 403
     NOT_FOUND = 404
+    METHOD_NOT_ALLOWED = 405
     INTERNAL_SERVER_ERROR = 500

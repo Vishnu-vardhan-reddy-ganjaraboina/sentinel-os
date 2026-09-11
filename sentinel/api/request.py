@@ -4,6 +4,7 @@ Request model for the Sentinel API subsystem.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from sentinel.api.constants import HTTPMethod
@@ -23,16 +24,29 @@ class APIRequest(Request):
         body: Any = None,
     ) -> None:
 
-        if not path:
+        if not isinstance(path, str):
+            raise TypeError("path must be a string")
+
+        if not path.strip():
             raise ValueError("path cannot be empty")
 
         if not isinstance(method, HTTPMethod):
             raise TypeError("method must be an HTTPMethod")
 
+        if headers is not None:
+            if not isinstance(headers, dict):
+                raise TypeError("headers must be a dictionary")
+
+            if not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in headers.items()
+            ):
+                raise TypeError("headers must contain string keys and values")
+
         self._path = path
         self._method = method
-        self._headers = headers or {}
-        self._body = body
+        self._headers = deepcopy(headers) if headers is not None else {}
+        self._body = deepcopy(body)
 
     @property
     def path(self) -> str:
@@ -44,11 +58,11 @@ class APIRequest(Request):
 
     @property
     def headers(self) -> dict[str, str]:
-        return self._headers
+        return deepcopy(self._headers)
 
     @property
     def body(self) -> Any:
-        return self._body
+        return deepcopy(self._body)
 
     def to_dict(self) -> dict[str, Any]:
         return {

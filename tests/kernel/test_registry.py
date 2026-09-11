@@ -1,5 +1,7 @@
 import pytest
 
+import threading
+
 from sentinel.kernel.exceptions import (
     DuplicateServiceError,
     ServiceNotFoundError,
@@ -62,3 +64,61 @@ def test_registry_length():
     registry.register(DummyService("brain"))
 
     assert len(registry) == 2
+
+def test_register_rejects_invalid_service() -> None:
+    registry = ServiceRegistry()
+
+    with pytest.raises(TypeError):
+        registry.register(object())  # type: ignore[arg-type]
+
+
+def test_invalid_name_operations_are_rejected() -> None:
+    registry = ServiceRegistry()
+
+    with pytest.raises(ValueError):
+        registry.get("")
+
+    with pytest.raises(ValueError):
+        registry.unregister("")
+
+
+def test_iter_returns_snapshot() -> None:
+    registry = ServiceRegistry()
+
+    first = DummyService("first")
+    second = DummyService("second")
+
+    registry.register(first)
+
+    iterator = iter(registry)
+
+    registry.register(second)
+
+    services = tuple(iterator)
+
+    assert services == (first,)
+
+
+def test_concurrent_registration() -> None:
+    registry = ServiceRegistry()
+
+    def register(index: int) -> None:
+        registry.register(
+            DummyService(f"service-{index}")
+        )
+
+    threads = [
+        threading.Thread(
+            target=register,
+            args=(index,),
+        )
+        for index in range(25)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert len(registry) == 25

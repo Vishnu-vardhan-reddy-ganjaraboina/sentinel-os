@@ -108,3 +108,62 @@ def test_close():
 
     with pytest.raises(StorageBackendError):
         engine.backend()
+
+def test_register_rejects_invalid_name() -> None:
+    engine = StorageEngine()
+
+    with pytest.raises(TypeError):
+        engine.register(
+            123,  # type: ignore[arg-type]
+            MemoryStorage(),
+        )
+
+    with pytest.raises(ValueError):
+        engine.register(
+            "   ",
+            MemoryStorage(),
+        )
+
+
+def test_register_rejects_invalid_backend() -> None:
+    engine = StorageEngine()
+
+    with pytest.raises(TypeError):
+        engine.register(
+            "memory",
+            object(),  # type: ignore[arg-type]
+        )
+
+
+def test_operations_after_close_are_rejected() -> None:
+    engine = StorageEngine()
+
+    engine.register(
+        "memory",
+        MemoryStorage(),
+    )
+
+    engine.close()
+
+    with pytest.raises(StorageBackendError):
+        engine.register(
+            "other",
+            MemoryStorage(),
+        )
+
+    with pytest.raises(StorageBackendError):
+        engine.set_default("missing")
+
+
+def test_close_is_idempotent() -> None:
+    engine = StorageEngine()
+
+    engine.register(
+        "memory",
+        MemoryStorage(),
+    )
+
+    engine.close()
+    engine.close()
+
+    assert engine.registered_backends() == []

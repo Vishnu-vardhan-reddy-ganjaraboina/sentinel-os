@@ -4,7 +4,9 @@ Application lifecycle for Sentinel OS.
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Mapping
+from threading import RLock
+from typing import Any
 
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
@@ -12,20 +14,14 @@ from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.knowledge.knowledge_service import KnowledgeService
-from sentinel.knowledge.persistent_vector_store import (
-    PersistentVectorStore,
-)
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
-from sentinel.knowledge.vector_store import (
-    InMemoryVectorStore,
-    VectorStore,
-)
+from sentinel.knowledge.vector_store import VectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
+from sentinel.runtime import Runtime, RuntimeComposer
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
-from sentinel.storage.backends.sqlite import SQLiteBackend
 
 
 class Application:
@@ -34,6 +30,8 @@ class Application:
 
     The application owns the process-level lifecycle while
     Bootstrap owns Kernel creation and shutdown.
+
+    Runtime owns the composed runtime service graph.
 
     Dependencies can be explicitly injected for tests and advanced
     deployments. Configuration can also be supplied to construct
@@ -52,112 +50,53 @@ class Application:
         knowledge_vector_store: VectorStore | None = None,
         configuration: Configuration | None = None,
     ) -> None:
+        self._runtime: Runtime | None = None
+
         if bootstrap is not None:
             self._bootstrap = bootstrap
         else:
             if configuration is not None:
                 configuration.validate()
-            shared_memory = (
-                memory
-                if memory is not None
-                else MemoryService()
-            )
 
-            resolved_vector_store = (
-                knowledge_vector_store
-                if knowledge_vector_store is not None
-                else self._create_knowledge_vector_store(
-                    configuration,
-                )
-            )
-
-            knowledge_runtime = KnowledgeRuntimeService(
+            self._runtime = RuntimeComposer(
+                capabilities=capabilities,
+                security=security,
+                identity=identity,
+                memory=memory,
                 knowledge=knowledge,
-                vector_store=resolved_vector_store,
-            )
-
-            shared_knowledge = knowledge_runtime.knowledge
+                knowledge_vector_store=knowledge_vector_store,
+                configuration=configuration,
+            ).compose()
 
             self._bootstrap = Bootstrap(
-                services=(
-                    ExecutionRuntimeService(),
-
-                    OrchestrationRuntimeService(
-                        capabilities=capabilities,
-                        security=security,
-                        identity=identity,
-                        memory=shared_memory,
-                        knowledge=shared_knowledge,
-                    ),
-
-                    MemoryRuntimeService(
-                        memory=shared_memory,
-                    ),
-
-                    knowledge_runtime,
-                ),
+                services=self._runtime.services,
             )
 
         self._running = False
-
-    @staticmethod
-    def _create_knowledge_vector_store(
-        configuration: Configuration | None,
-    ) -> VectorStore:
-        """
-        Create the configured Knowledge vector store.
-
-        The default remains the in-memory implementation.
-
-        Supported configuration:
-
-            knowledge:
-                backend: memory
-
-        or:
-
-            knowledge:
-                backend: sqlite
-                database_path: data/sentinel-knowledge.db
-        """
-        if configuration is None:
-            return InMemoryVectorStore()
-
-        backend = str(
-            configuration.get(
-                "knowledge.backend",
-                "memory",
-            )
-        ).strip().lower()
-
-        if backend == "memory":
-            return InMemoryVectorStore()
-
-        if backend == "sqlite":
-            database_path = configuration.get(
-                "knowledge.database_path",
-                "data/sentinel-knowledge.db",
-            )
-
-            if not isinstance(database_path, (str, Path)):
-                raise ValueError(
-                    "knowledge.database_path must be a string or path."
-                )
-
-            return PersistentVectorStore(
-                backend=SQLiteBackend(
-                    Path(database_path),
-                ),
-            )
-
-        raise ValueError(
-            f"Unsupported knowledge backend: '{backend}'."
-        )
+        self._lock = RLock()
 
     @property
     def bootstrap(self) -> Bootstrap:
         """Return the application bootstrap."""
         return self._bootstrap
+
+    @property
+    def runtime(self) -> Runtime:
+        """
+        Return the composed runtime.
+
+        Raises:
+            RuntimeError:
+                If the application uses an externally supplied
+                Bootstrap and therefore has no composed Runtime.
+        """
+        if self._runtime is None:
+            raise RuntimeError(
+                "Runtime is not available for an externally supplied "
+                "bootstrap."
+            )
+
+        return self._runtime
 
     @property
     def kernel(self) -> Kernel:
@@ -173,7 +112,52 @@ class Application:
     @property
     def running(self) -> bool:
         """Return whether the application is running."""
-        return self._running
+        with self._lock:
+            return self._running
+
+    @property
+    def execution(self) -> ExecutionRuntimeService:
+        """
+        Return the application's Execution runtime service.
+
+        Raises:
+            RuntimeError:
+                If no composed Runtime is available.
+        """
+        return self.runtime.execution
+
+    @property
+    def orchestration(self) -> OrchestrationRuntimeService:
+        """
+        Return the application's Orchestration runtime service.
+
+        Raises:
+            RuntimeError:
+                If no composed Runtime is available.
+        """
+        return self.runtime.orchestration
+
+    @property
+    def memory(self) -> MemoryRuntimeService:
+        """
+        Return the application's Memory runtime service.
+
+        Raises:
+            RuntimeError:
+                If no composed Runtime is available.
+        """
+        return self.runtime.memory
+
+    @property
+    def knowledge_runtime(self) -> KnowledgeRuntimeService:
+        """
+        Return the application's Knowledge runtime service.
+
+        Raises:
+            RuntimeError:
+                If no composed Runtime is available.
+        """
+        return self.runtime.knowledge
 
     def start(self) -> Kernel:
         """
@@ -187,13 +171,16 @@ class Application:
             RuntimeError:
                 If the application is already running.
         """
-        if self._running:
-            raise RuntimeError(
-                "Sentinel application is already running."
-            )
+        with self._lock:
+            if self._running:
+                raise RuntimeError(
+                    "Sentinel application is already running."
+                )
 
         kernel = self._bootstrap.start()
-        self._running = True
+
+        with self._lock:
+            self._running = True
 
         return kernel
 
@@ -205,13 +192,16 @@ class Application:
             RuntimeError:
                 If the application is not running.
         """
-        if not self._running:
-            raise RuntimeError(
-                "Sentinel application is not running."
-            )
+        with self._lock:
+            if not self._running:
+                raise RuntimeError(
+                    "Sentinel application is not running."
+                )
 
         self._bootstrap.shutdown()
-        self._running = False
+
+        with self._lock:
+            self._running = False
 
     def __enter__(self) -> Application:
         self.start()
@@ -224,7 +214,7 @@ class Application:
         traceback: object | None,
     ) -> None:
         self.shutdown()
-    
+
     @property
     def knowledge(self) -> KnowledgeService:
         """
@@ -232,14 +222,25 @@ class Application:
 
         Raises:
             RuntimeError:
-                If the application has not been started.
+                If no composed Runtime is available.
             TypeError:
-                If the registered Knowledge service has an
+                If the runtime Knowledge service has an
                 unexpected type.
         """
-        runtime = self.kernel.get_typed(
-            "knowledge",
-            KnowledgeRuntimeService,
-        )
+        return self.knowledge_runtime.knowledge
 
-        return runtime.knowledge
+    @property
+    def health(self) -> Mapping[str, Any]:
+        """
+        Return application-wide health information.
+
+        Raises:
+            RuntimeError:
+                If the application has not been started.
+        """
+        if not self.running:
+            raise RuntimeError(
+                "Sentinel application is not running."
+            )
+
+        return self.kernel.health()

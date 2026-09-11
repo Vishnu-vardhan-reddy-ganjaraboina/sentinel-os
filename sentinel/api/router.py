@@ -5,6 +5,7 @@ Router implementation for the Sentinel API subsystem.
 from __future__ import annotations
 
 from collections.abc import Callable
+from threading import RLock
 from typing import Any
 
 from sentinel.api.constants import HTTPMethod
@@ -25,6 +26,7 @@ class APIRouter(Router):
             tuple[HTTPMethod, str],
             Callable[..., Any],
         ] = {}
+        self._lock = RLock()
 
     def add_route(
         self,
@@ -36,17 +38,24 @@ class APIRouter(Router):
         if not isinstance(method, HTTPMethod):
             raise MethodNotAllowedError("Invalid HTTP method.")
 
-        if not path:
+        if not isinstance(path, str):
+            raise TypeError("path must be a string")
+
+        if not path.strip():
             raise ValueError("path cannot be empty")
+
+        if not callable(handler):
+            raise TypeError("handler must be callable")
 
         key = (method, path)
 
-        if key in self._routes:
-            raise ValueError(
-                f"Route already exists: {method.value} {path}"
-            )
+        with self._lock:
+            if key in self._routes:
+                raise ValueError(
+                    f"Route already exists: {method.value} {path}"
+                )
 
-        self._routes[key] = handler
+            self._routes[key] = handler
 
     def resolve(
         self,
@@ -57,29 +66,37 @@ class APIRouter(Router):
         if not isinstance(method, HTTPMethod):
             raise MethodNotAllowedError("Invalid HTTP method.")
 
-        key = (method, path)
+        if not isinstance(path, str):
+            raise TypeError("path must be a string")
 
-        if key not in self._routes:
-            raise RouteNotFoundError(
-                f"Route not found: {method.value} {path}"
-            )
+        with self._lock:
+            key = (method, path)
 
-        return self._routes[key]
+            if key not in self._routes:
+                raise RouteNotFoundError(
+                    f"Route not found: {method.value} {path}"
+                )
+
+            return self._routes[key]
 
     @property
     def routes(
         self,
     ) -> dict[tuple[HTTPMethod, str], Callable[..., Any]]:
-        return self._routes
+        with self._lock:
+            return dict(self._routes)
 
     def clear(self) -> None:
-        self._routes.clear()
+        with self._lock:
+            self._routes.clear()
 
     def __contains__(
         self,
         item: tuple[HTTPMethod, str],
     ) -> bool:
-        return item in self._routes
+        with self._lock:
+            return item in self._routes
 
     def __len__(self) -> int:
-        return len(self._routes)
+        with self._lock:
+            return len(self._routes)

@@ -4,6 +4,7 @@ Manager for the Sentinel Plugin subsystem.
 
 from __future__ import annotations
 
+from sentinel.plugins.constants import PluginState
 from sentinel.plugins.interfaces import Plugin
 from sentinel.plugins.loader import SentinelPluginLoader
 from sentinel.plugins.registry import SentinelPluginRegistry
@@ -12,6 +13,9 @@ from sentinel.plugins.registry import SentinelPluginRegistry
 class PluginManager:
     """
     Coordinates plugin registration and lifecycle management.
+
+    The manager owns orchestration only. Registry synchronization and
+    lifecycle validation remain delegated to their respective components.
     """
 
     def __init__(
@@ -19,6 +23,21 @@ class PluginManager:
         registry: SentinelPluginRegistry | None = None,
         loader: SentinelPluginLoader | None = None,
     ) -> None:
+        if registry is not None and not isinstance(
+            registry,
+            SentinelPluginRegistry,
+        ):
+            raise TypeError(
+                "registry must be a SentinelPluginRegistry"
+            )
+
+        if loader is not None and not isinstance(
+            loader,
+            SentinelPluginLoader,
+        ):
+            raise TypeError(
+                "loader must be a SentinelPluginLoader"
+            )
 
         self._registry = (
             registry
@@ -73,6 +92,26 @@ class PluginManager:
         return self._registry.all()
 
     def clear(self) -> None:
+        """
+        Safely remove all plugins.
+
+        Loaded or disabled plugins are unloaded before registry removal.
+        Enabled plugins are disabled first, then unloaded.
+
+        Plugins already in REGISTERED or UNLOADED states are simply removed.
+        """
+        plugins = self._registry.all()
+
+        for plugin in plugins:
+            if plugin.state == PluginState.ENABLED:
+                self.disable(plugin.name)
+
+            if plugin.state in {
+                PluginState.LOADED,
+                PluginState.DISABLED,
+           }:
+                self.unload(plugin.name)
+
         self._registry.clear()
 
     def __len__(self) -> int:

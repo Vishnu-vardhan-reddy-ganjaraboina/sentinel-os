@@ -4,8 +4,12 @@ Kernel runtime service for the Sentinel Knowledge subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from sentinel.kernel.service import Service
+from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.chunker import DocumentChunker, FixedSizeChunker
+from sentinel.knowledge.document import Document
 from sentinel.knowledge.embeddings import (
     DummyEmbeddingProvider,
     EmbeddingProvider,
@@ -23,9 +27,8 @@ class KnowledgeRuntimeService(Service):
     """
     Kernel-managed runtime wrapper for KnowledgeService.
 
-    Dependencies are injected so the runtime can use different
-    embedding providers, chunkers, and vector stores in different
-    deployments.
+    The runtime service exposes the Knowledge subsystem API directly
+    while retaining Kernel lifecycle management.
     """
 
     def __init__(
@@ -36,7 +39,10 @@ class KnowledgeRuntimeService(Service):
         vector_store: VectorStore | None = None,
         chunker: DocumentChunker | None = None,
     ) -> None:
-        super().__init__("knowledge")
+        super().__init__(
+            "knowledge",
+            dependencies=(),
+        )
 
         self._knowledge = (
             knowledge
@@ -101,13 +107,51 @@ class KnowledgeRuntimeService(Service):
 
     @property
     def knowledge(self) -> KnowledgeService:
-        """Return the underlying knowledge service."""
+        """Return the underlying Knowledge service."""
         return self._knowledge
 
+    def add_document(
+        self,
+        document: Document,
+    ) -> list[Chunk]:
+        """Index a single document."""
+        return self._knowledge.add_document(document)
+
+    def add_documents(
+        self,
+        documents: Iterable[Document],
+    ) -> list[Chunk]:
+        """Index multiple documents."""
+        return self._knowledge.add_documents(documents)
+
+    def remove_document(
+        self,
+        document_id: str,
+    ) -> None:
+        """Remove a document from the knowledge base."""
+        self._knowledge.remove_document(document_id)
+
+    def reindex_document(
+        self,
+        document: Document,
+    ) -> list[Chunk]:
+        """Replace an indexed document."""
+        return self._knowledge.reindex_document(document)
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[Chunk]:
+        """Search indexed knowledge."""
+        return self._knowledge.search(
+            query,
+            limit=limit,
+        )
+
     def initialize(self) -> None:
-        """
-        Initialize knowledge resources.
-        """
+        """Initialize knowledge resources."""
         if self._shutdown:
             raise RuntimeError(
                 "Knowledge runtime has already been shut down."
@@ -134,9 +178,7 @@ class KnowledgeRuntimeService(Service):
         self._shutdown = True
 
     def health(self) -> dict[str, bool]:
-        """
-        Return knowledge service health information.
-        """
+        """Return knowledge service health information."""
         return {
             "healthy": (
                 self._initialized

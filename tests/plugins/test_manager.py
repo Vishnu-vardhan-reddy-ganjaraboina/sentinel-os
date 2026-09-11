@@ -1,3 +1,5 @@
+import pytest
+
 from sentinel.plugins.constants import PluginState
 from sentinel.plugins.manager import PluginManager
 from sentinel.plugins.plugin import SentinelPlugin
@@ -98,4 +100,47 @@ def test_clear():
 
     manager.clear()
 
+    assert len(manager) == 0
+
+
+def test_invalid_registry_rejected() -> None:
+    with pytest.raises(TypeError):
+        PluginManager(
+            registry=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_invalid_loader_rejected() -> None:
+    with pytest.raises(TypeError):
+        PluginManager(
+            loader=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_clear_unloads_loaded_plugin() -> None:
+    manager = PluginManager()
+
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+    manager.load("sample")
+
+    manager.clear()
+
+    assert plugin.state == PluginState.UNLOADED
+    assert len(manager) == 0
+
+
+def test_clear_disables_and_unloads_enabled_plugin() -> None:
+    manager = PluginManager()
+
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+    manager.load("sample")
+    manager.enable("sample")
+
+    manager.clear()
+
+    assert plugin.state == PluginState.UNLOADED
     assert len(manager) == 0

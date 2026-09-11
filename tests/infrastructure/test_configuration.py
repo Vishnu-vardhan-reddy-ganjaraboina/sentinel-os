@@ -126,3 +126,60 @@ def test_validate_rejects_empty_database_path() -> None:
         match="database_path cannot be empty",
     ):
         config.validate()
+
+def test_from_dict_rejects_non_mapping() -> None:
+    with pytest.raises(TypeError, match="dictionary"):
+        Configuration.from_dict([])  # type: ignore[arg-type]
+
+
+def test_get_returns_deep_copy() -> None:
+    config = Configuration.from_dict(
+        {
+            "database": {
+                "options": {
+                    "timeout": 30,
+                },
+            },
+        }
+    )
+
+    value = config.get("database.options")
+
+    value["timeout"] = 999
+
+    assert config.get("database.options")["timeout"] == 30
+
+
+def test_exists_handles_none_value() -> None:
+    config = Configuration.from_dict(
+        {
+            "feature": None,
+        }
+    )
+
+    assert config.exists("feature") is True
+
+
+def test_invalid_configuration_key() -> None:
+    config = Configuration()
+
+    with pytest.raises(ValueError):
+        config.get("")
+
+    with pytest.raises(ValueError):
+        config.get("database..host")
+
+
+def test_load_uses_copy() -> None:
+    config = Configuration.from_dict(
+        {
+            "feature": {
+                "enabled": True,
+            },
+        }
+    )
+
+    exported = config.as_dict()
+    exported["feature"]["enabled"] = False
+
+    assert config.get("feature.enabled") is True

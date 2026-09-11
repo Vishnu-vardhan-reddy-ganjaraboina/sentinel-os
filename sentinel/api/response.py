@@ -4,6 +4,7 @@ Response model for the Sentinel API subsystem.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from sentinel.api.constants import (
@@ -28,9 +29,19 @@ class APIResponse(Response):
         if not isinstance(status_code, HTTPStatus):
             raise TypeError("status_code must be an HTTPStatus")
 
+        if headers is not None:
+            if not isinstance(headers, dict):
+                raise TypeError("headers must be a dictionary")
+
+            if not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in headers.items()
+            ):
+                raise TypeError("headers must contain string keys and values")
+
         self._status_code = status_code.value
-        self._body = body
-        self._headers = headers.copy() if headers else {}
+        self._body = deepcopy(body)
+        self._headers = deepcopy(headers) if headers is not None else {}
 
         self._headers.setdefault(
             "Content-Type",
@@ -43,11 +54,11 @@ class APIResponse(Response):
 
     @property
     def headers(self) -> dict[str, str]:
-        return self._headers
+        return deepcopy(self._headers)
 
     @property
     def body(self) -> Any:
-        return self._body
+        return deepcopy(self._body)
 
     def to_dict(self) -> dict[str, Any]:
         return {

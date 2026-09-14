@@ -2,12 +2,16 @@
 Tests for the Sentinel platform coordinator.
 """
 
+from __future__ import annotations
+
 import pytest
 
 from sentinel.application import Application
 from sentinel.application_host import ApplicationHost
-from sentinel.platform import Platform
+from sentinel.application_manifest import ApplicationManifest
 from sentinel.application_state import ApplicationState
+
+from sentinel.platform import Platform
 
 
 class PlatformTestApplication(Application):
@@ -78,6 +82,26 @@ def test_register_and_get_application() -> None:
     )
 
 
+def test_register_application_with_manifest() -> None:
+    platform = Platform()
+    application = PlatformTestApplication()
+
+    manifest = ApplicationManifest(
+        name="test-app",
+        version="1.2.3",
+        dependencies=("database",),
+        permissions=("execute",),
+    )
+
+    platform.register_application(
+        "test-app",
+        application,
+        manifest,
+    )
+
+    assert platform.manager.manifest("test-app") is manifest
+
+
 def test_unregister_application() -> None:
     platform = Platform()
     application = PlatformTestApplication()
@@ -109,9 +133,12 @@ def test_platform_start() -> None:
     assert first.start_count == 1
     assert second.start_count == 1
 
+    platform.shutdown()
+
 
 def test_platform_start_is_protected() -> None:
     platform = Platform()
+
     platform.register_application(
         "test-app",
         PlatformTestApplication(),
@@ -130,10 +157,12 @@ def test_platform_start_is_protected() -> None:
 
 def test_register_while_running_is_rejected() -> None:
     platform = Platform()
+
     platform.register_application(
         "test-app",
         PlatformTestApplication(),
     )
+
     platform.start()
 
     with pytest.raises(
@@ -150,10 +179,12 @@ def test_register_while_running_is_rejected() -> None:
 
 def test_unregister_while_running_is_rejected() -> None:
     platform = Platform()
+
     platform.register_application(
         "test-app",
         PlatformTestApplication(),
     )
+
     platform.start()
 
     with pytest.raises(
@@ -249,7 +280,6 @@ def test_application_states_are_snapshot() -> None:
 
 def test_health() -> None:
     platform = Platform()
-
     application = PlatformTestApplication()
 
     platform.register_application(
@@ -266,9 +296,136 @@ def test_health() -> None:
     platform.shutdown()
 
 
+def test_platform_start_uses_application_dependencies() -> None:
+    events: list[str] = []
+
+    class RecordingApplication(PlatformTestApplication):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.application_name = name
+
+        def start(self):  # type: ignore[override]
+            events.append(self.application_name)
+            super().start()
+
+    platform = Platform()
+
+    frontend = RecordingApplication("frontend")
+    backend = RecordingApplication("backend")
+    database = RecordingApplication("database")
+
+    platform.register_application(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+
+    platform.register_application(
+        "backend",
+        backend,
+        ApplicationManifest(
+            name="backend",
+            dependencies=("database",),
+        ),
+    )
+
+    platform.register_application(
+        "database",
+        database,
+        ApplicationManifest(
+            name="database",
+        ),
+    )
+
+    started = platform.start()
+
+    assert started == (
+        database,
+        backend,
+        frontend,
+    )
+
+    assert events == [
+        "database",
+        "backend",
+        "frontend",
+    ]
+
+    platform.shutdown()
+
+
 def test_repr() -> None:
     platform = Platform()
 
     assert repr(platform) == (
         "Platform(applications=0, running=False)"
     )
+
+def test_platform_rejects_missing_application_dependency() -> None:
+    from sentinel.application_dependency_resolver import (
+        ApplicationDependencyMissingError,
+    )
+
+    platform = Platform()
+
+    frontend = PlatformTestApplication()
+
+    platform.register_application(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+
+    with pytest.raises(
+        ApplicationDependencyMissingError,
+        match="missing application 'backend'",
+    ):
+        platform.start()
+
+    assert not platform.running
+    assert frontend.start_count == 0
+
+
+def test_platform_rejects_application_dependency_cycle() -> None:
+    from sentinel.application_dependency_resolver import (
+        ApplicationDependencyCycleError,
+    )
+
+    platform = Platform()
+
+    one = PlatformTestApplication()
+    two = PlatformTestApplication()
+
+    platform.register_application(
+        "one",
+        one,
+        ApplicationManifest(
+            name="one",
+            dependencies=("two",),
+        ),
+    )
+
+    platform.register_application(
+        "two",
+        two,
+        ApplicationManifest(
+            name="two",
+            dependencies=("one",),
+        ),
+    )
+
+    with pytest.raises(
+        ApplicationDependencyCycleError,
+        match="dependency cycle",
+    ):
+        platform.start()
+
+    assert not platform.running
+    assert one.start_count == 0
+    assert two.start_count == 0

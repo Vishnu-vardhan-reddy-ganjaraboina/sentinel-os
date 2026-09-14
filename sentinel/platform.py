@@ -14,6 +14,7 @@ from sentinel.application_state import ApplicationState
 
 if TYPE_CHECKING:
     from sentinel.application import Application
+    from sentinel.application_manifest import ApplicationManifest
 
 
 class Platform:
@@ -65,6 +66,7 @@ class Platform:
         self,
         name: str,
         application: Application,
+        manifest: ApplicationManifest | None = None,
     ) -> None:
         """Register an application with the platform."""
         with self._lock:
@@ -73,7 +75,11 @@ class Platform:
                     "Cannot register applications while platform is running."
                 )
 
-        self._host.register(name, application)
+        self._host.register(
+            name,
+            application,
+            manifest,
+        )
 
     def unregister_application(
         self,

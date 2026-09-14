@@ -11,6 +11,7 @@ from typing import Any
 from sentinel.application import Application
 from sentinel.application_registry import ApplicationRegistry
 from sentinel.application_state import ApplicationState
+from sentinel.application_manifest import ApplicationManifest
 
 
 class ApplicationManager:
@@ -60,13 +61,13 @@ class ApplicationManager:
         self,
         name: str,
         application: Application,
+        manifest: ApplicationManifest | None = None,
     ) -> None:
         """
-        Register an application.
+        Register an application and its optional manifest.
 
-        Registry and lifecycle state are updated under the same manager
-        lock. If lifecycle bookkeeping unexpectedly fails after registry
-        insertion, the registry insertion is rolled back.
+        When no manifest is supplied, ApplicationRegistry creates a
+        default manifest from the registration name.
         """
         normalized_name = self._validate_name(name)
 
@@ -75,23 +76,25 @@ class ApplicationManager:
                 "application must be an Application instance."
             )
 
+        if manifest is not None and not isinstance(
+            manifest,
+            ApplicationManifest,
+        ):
+            raise TypeError(
+                "manifest must be an ApplicationManifest instance."
+            )
+
         with self._lock:
             self._registry.register(
                 normalized_name,
                 application,
+                manifest,
             )
 
-            try:
-                self._states[normalized_name] = (
-                    ApplicationState.REGISTERED
-                )
-                self._errors[normalized_name] = None
-            except Exception:
-                try:
-                    self._registry.unregister(normalized_name)
-                except Exception:
-                    pass
-                raise
+            self._states[normalized_name] = (
+                ApplicationState.REGISTERED
+            )
+            self._errors[normalized_name] = None
 
     def unregister(
         self,
@@ -384,3 +387,21 @@ class ApplicationManager:
             raise ValueError("name must not be empty.")
 
         return normalized_name
+
+    def manifest(
+        self,
+        name: str,
+    ) -> ApplicationManifest:
+        """Return the manifest for a registered application."""
+        normalized_name = self._validate_name(name)
+
+        with self._lock:
+            return self._registry.manifest(normalized_name)
+
+
+    def manifests(
+        self,
+    ) -> tuple[tuple[str, ApplicationManifest], ...]:
+        """Return a snapshot of all application manifests."""
+        with self._lock:
+            return self._registry.manifests()

@@ -9,6 +9,14 @@ from sentinel.application_host import ApplicationHost
 from sentinel.application_manager import ApplicationManager
 from sentinel.application_state import ApplicationState
 
+from sentinel.application_dependency_resolver import (
+    ApplicationDependencyCycleError,
+    ApplicationDependencyMissingError,
+    ApplicationDependencyResolver,
+)
+from sentinel.application_manifest import ApplicationManifest
+
+
 
 class HostTestApplication(Application):
     """Restartable test application for host tests."""
@@ -404,3 +412,412 @@ def test_stop_all_failure_resets_host_running_state() -> None:
         host.stop_all()
 
     assert not host.running
+
+def test_custom_dependency_resolver_is_used() -> None:
+    resolver = ApplicationDependencyResolver()
+    host = ApplicationHost(resolver=resolver)
+
+    assert host.resolver is resolver
+
+def test_invalid_dependency_resolver_is_rejected() -> None:
+    with pytest.raises(TypeError):
+        ApplicationHost(
+            resolver="invalid",  # type: ignore[arg-type]
+        )
+
+def test_start_all_uses_manifest_dependency_order() -> None:
+    events: list[str] = []
+
+    class RecordingApplication(HostTestApplication):
+        def __init__(
+            self,
+            name: str,
+        ) -> None:
+            super().__init__()
+            self.application_name = name
+
+        def start(self):  # type: ignore[override]
+            events.append(self.application_name)
+            super().start()
+
+        def shutdown(self) -> None:  # type: ignore[override]
+            events.append(f"stop:{self.application_name}")
+            super().shutdown()
+
+    host = ApplicationHost()
+
+    database = RecordingApplication("database")
+    backend = RecordingApplication("backend")
+    frontend = RecordingApplication("frontend")
+
+    host.register(
+        "frontend",
+        frontend,
+    )
+    host.register(
+        "backend",
+        backend,
+    )
+    host.register(
+        "database",
+        database,
+    )
+
+    # Current ApplicationHost registers through ApplicationManager,
+    # whose registry now owns manifests. We configure them directly
+    # through the manager registry for this contract test.
+    host.manager.registry.clear()
+
+    host.manager.registry.register(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+    host.manager.registry.register(
+        "backend",
+        backend,
+        ApplicationManifest(
+            name="backend",
+            dependencies=("database",),
+        ),
+    )
+    host.manager.registry.register(
+        "database",
+        database,
+        ApplicationManifest(
+            name="database",
+        ),
+    )
+
+    # Rebuild manager lifecycle state after direct registry setup.
+    host = ApplicationHost(
+        ApplicationManager(host.manager.registry),
+    )
+
+    for name in host.manager.names():
+        host.manager._states[name] = ApplicationState.REGISTERED
+        host.manager._errors[name] = None
+
+    host.start_all()
+
+    assert events == [
+        "database",
+        "backend",
+        "frontend",
+    ]
+
+    host.stop_all()
+
+
+def test_start_all_rejects_missing_application_dependency() -> None:
+    host = ApplicationHost()
+
+    application = HostTestApplication()
+
+    host.register(
+        "frontend",
+        application,
+    )
+
+    host.manager.registry.unregister("frontend")
+    host.manager.registry.register(
+        "frontend",
+        application,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+
+    host = ApplicationHost(
+        ApplicationManager(host.manager.registry),
+    )
+
+    host.manager._states["frontend"] = ApplicationState.REGISTERED
+    host.manager._errors["frontend"] = None
+
+    with pytest.raises(
+        ApplicationDependencyMissingError,
+        match="missing application 'backend'",
+    ):
+        host.start_all()
+
+    assert not host.running
+
+
+def test_start_all_rejects_dependency_cycle() -> None:
+    host = ApplicationHost()
+
+    first = HostTestApplication()
+    second = HostTestApplication()
+
+    host.register(
+        "one",
+        first,
+        ApplicationManifest(
+            name="one",
+            dependencies=("two",),
+        ),
+    )
+
+    host.register(
+        "two",
+        second,
+        ApplicationManifest(
+            name="two",
+            dependencies=("one",),
+        ),
+    )
+
+    with pytest.raises(
+        ApplicationDependencyCycleError,
+        match="dependency cycle",
+    ):
+        host.start_all()
+
+    assert not host.running
+    assert first.start_count == 0
+    assert second.start_count == 0
+
+def test_start_all_uses_manifest_dependency_order() -> None:
+    events: list[str] = []
+
+    class RecordingApplication(HostTestApplication):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.application_name = name
+
+        def start(self):  # type: ignore[override]
+            events.append(self.application_name)
+            super().start()
+
+        def shutdown(self) -> None:  # type: ignore[override]
+            events.append(f"stop:{self.application_name}")
+            super().shutdown()
+
+    host = ApplicationHost()
+
+    frontend = RecordingApplication("frontend")
+    backend = RecordingApplication("backend")
+    database = RecordingApplication("database")
+
+    host.register(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+    host.register(
+        "backend",
+        backend,
+        ApplicationManifest(
+            name="backend",
+            dependencies=("database",),
+        ),
+    )
+    host.register(
+        "database",
+        database,
+        ApplicationManifest(
+            name="database",
+        ),
+    )
+
+    host.start_all()
+
+    assert events == [
+        "database",
+        "backend",
+        "frontend",
+    ]
+
+    host.stop_all()
+
+
+def test_start_all_rejects_missing_application_dependency() -> None:
+    host = ApplicationHost()
+
+    frontend = HostTestApplication()
+
+    host.register(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+
+    with pytest.raises(
+        ApplicationDependencyMissingError,
+        match="missing application 'backend'",
+    ):
+        host.start_all()
+
+    assert not host.running
+    assert frontend.start_count == 0
+
+
+def test_start_all_rejects_application_dependency_cycle() -> None:
+    host = ApplicationHost()
+
+    first = HostTestApplication()
+    second = HostTestApplication()
+
+    host.register(
+        "one",
+        first,
+        ApplicationManifest(
+            name="one",
+            dependencies=("two",),
+        ),
+    )
+    host.register(
+        "two",
+        second,
+        ApplicationManifest(
+            name="two",
+            dependencies=("one",),
+        ),
+    )
+
+    with pytest.raises(
+        ApplicationDependencyCycleError,
+        match="dependency cycle",
+    ):
+        host.start_all()
+
+    assert not host.running
+    assert first.start_count == 0
+    assert second.start_count == 0
+
+
+def test_stop_all_uses_reverse_dependency_order() -> None:
+    events: list[str] = []
+
+    class RecordingApplication(HostTestApplication):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.application_name = name
+
+        def start(self):  # type: ignore[override]
+            super().start()
+
+        def shutdown(self) -> None:
+            events.append(self.application_name)
+            super().shutdown()
+
+    host = ApplicationHost()
+
+    frontend = RecordingApplication("frontend")
+    backend = RecordingApplication("backend")
+    database = RecordingApplication("database")
+
+    host.register(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend",),
+        ),
+    )
+    host.register(
+        "backend",
+        backend,
+        ApplicationManifest(
+            name="backend",
+            dependencies=("database",),
+        ),
+    )
+    host.register(
+        "database",
+        database,
+        ApplicationManifest(
+            name="database",
+        ),
+    )
+
+    host.start_all()
+    host.stop_all()
+
+    assert events == [
+        "frontend",
+        "backend",
+        "database",
+    ]
+
+def test_start_all_handles_shared_dependencies() -> None:
+    events: list[str] = []
+
+    class RecordingApplication(HostTestApplication):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.application_name = name
+
+        def start(self):  # type: ignore[override]
+            events.append(self.application_name)
+            super().start()
+
+    host = ApplicationHost()
+
+    database = RecordingApplication("database")
+    backend = RecordingApplication("backend")
+    cache = RecordingApplication("cache")
+    frontend = RecordingApplication("frontend")
+
+    host.register(
+        "frontend",
+        frontend,
+        ApplicationManifest(
+            name="frontend",
+            dependencies=("backend", "cache"),
+        ),
+    )
+
+    host.register(
+        "backend",
+        backend,
+        ApplicationManifest(
+            name="backend",
+            dependencies=("database",),
+        ),
+    )
+
+    host.register(
+        "cache",
+        cache,
+        ApplicationManifest(
+            name="cache",
+        ),
+    )
+
+    host.register(
+        "database",
+        database,
+        ApplicationManifest(
+            name="database",
+        ),
+    )
+
+    started = host.start_all()
+
+    assert started == (
+        database,
+        backend,
+        cache,
+        frontend,
+    )
+
+    assert events == [
+        "database",
+        "backend",
+        "cache",
+        "frontend",
+    ]
+
+    host.stop_all()

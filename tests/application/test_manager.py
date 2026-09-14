@@ -10,6 +10,7 @@ from sentinel.application import Application
 from sentinel.application_manager import ApplicationManager
 from sentinel.application_registry import ApplicationRegistry
 from sentinel.application_state import ApplicationState
+from sentinel.application_manifest import ApplicationManifest
 
 
 def create_application() -> Application:
@@ -569,3 +570,66 @@ def test_concurrent_registration_rejects_duplicate_name() -> None:
         for error in errors
     )
     assert len(manager) == 1
+
+def test_register_with_manifest() -> None:
+    manager = ApplicationManager()
+    application = Application()
+
+    manifest = ApplicationManifest(
+        name="test-app",
+        version="1.2.3",
+        dependencies=("database",),
+        permissions=("execute",),
+    )
+
+    manager.register(
+        "test-app",
+        application,
+        manifest,
+    )
+
+    assert manager.manifest("test-app") is manifest
+
+
+def test_register_rejects_invalid_manifest() -> None:
+    manager = ApplicationManager()
+
+    with pytest.raises(TypeError):
+        manager.register(
+            "test-app",
+            Application(),
+            "invalid",  # type: ignore[arg-type]
+        )
+
+
+def test_manager_manifest_lookup() -> None:
+    manager = ApplicationManager()
+
+    manager.register(
+        "test-app",
+        Application(),
+        ApplicationManifest(
+            name="test-app",
+            version="2.0.0",
+        ),
+    )
+
+    manifest = manager.manifest("test-app")
+
+    assert manifest.name == "test-app"
+    assert manifest.version == "2.0.0"
+
+
+def test_manager_manifests_snapshot() -> None:
+    manager = ApplicationManager()
+
+    first = ApplicationManifest(name="first")
+    second = ApplicationManifest(name="second")
+
+    manager.register("first", Application(), first)
+    manager.register("second", Application(), second)
+
+    assert manager.manifests() == (
+        ("first", first),
+        ("second", second),
+    )

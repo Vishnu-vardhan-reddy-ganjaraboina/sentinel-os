@@ -72,8 +72,17 @@ class Application:
                 services=self._runtime.services,
             )
 
+        from sentinel.platform import Platform
+
+        self._platform = Platform()
         self._running = False
         self._lock = RLock()
+
+    @property
+    def platform(self) -> Platform:
+        """Return the application platform coordinator."""
+        return self._platform
+
 
     @property
     def bootstrap(self) -> Bootstrap:

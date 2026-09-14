@@ -295,3 +295,26 @@ def test_application_exposes_knowledge_runtime() -> None:
     application = Application()
 
     assert application.knowledge_runtime is application.runtime.knowledge
+
+def test_application_exposes_platform() -> None:
+    application = Application()
+
+    assert application.platform is not None
+
+
+def test_application_platform_is_stable() -> None:
+    application = Application()
+
+    assert application.platform is application.platform
+
+
+def test_application_platform_can_manage_applications() -> None:
+    application = Application()
+    managed = Application()
+
+    application.platform.register_application(
+        "managed",
+        managed,
+    )
+
+    assert application.platform.application("managed") is managed

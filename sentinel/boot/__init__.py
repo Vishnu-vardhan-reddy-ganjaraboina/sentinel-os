@@ -2,6 +2,7 @@
 Public API for the Sentinel boot subsystem.
 """
 
+from sentinel.boot.configuration import BootConfiguration
 from sentinel.boot.exceptions import (
     BootConfigurationError,
     BootError,
@@ -12,8 +13,10 @@ from sentinel.boot.exceptions import (
 from sentinel.boot.manager import BootManager
 from sentinel.boot.profile import BootProfile
 from sentinel.boot.result import BootResult
+from sentinel.boot.system_factory import SystemFactory
 
 __all__ = [
+    "BootConfiguration",
     "BootConfigurationError",
     "BootError",
     "BootManager",
@@ -22,4 +25,5 @@ __all__ = [
     "BootResult",
     "BootStartupError",
     "BootStateError",
+    "SystemFactory",
 ]

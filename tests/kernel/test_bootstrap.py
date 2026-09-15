@@ -117,3 +117,48 @@ def test_failed_start_can_be_retried() -> None:
 
     with pytest.raises(RuntimeError, match="boot failed"):
         bootstrap.start()
+
+def test_create_kernel_creates_configured_kernel_without_starting() -> None:
+    service = DummyService()
+
+    bootstrap = Bootstrap(
+        services=(service,),
+    )
+
+    kernel = bootstrap.create_kernel()
+
+    assert isinstance(kernel, Kernel)
+    assert bootstrap.kernel is kernel
+    assert kernel.running("dummy") is False
+    assert service.initialized is False
+    assert bootstrap.services == (service,)
+
+    kernel.boot()
+
+    assert kernel.running("dummy") is True
+
+    bootstrap.shutdown()
+
+    assert service.stopped is True
+
+    with pytest.raises(
+        RuntimeError,
+        match="not been started",
+    ):
+        bootstrap.kernel
+
+
+def test_create_kernel_rejects_when_kernel_already_exists() -> None:
+    bootstrap = Bootstrap(
+        services=(DummyService(),),
+    )
+
+    bootstrap.start()
+
+    with pytest.raises(
+        RuntimeError,
+        match="already running",
+    ):
+        bootstrap.create_kernel()
+
+    bootstrap.shutdown()

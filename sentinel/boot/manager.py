@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from threading import RLock
 from typing import Any
 
+from sentinel.boot.configuration import BootConfiguration
 from sentinel.boot.exceptions import (
     BootShutdownError,
     BootStartupError,
@@ -15,6 +16,7 @@ from sentinel.boot.exceptions import (
 )
 from sentinel.boot.profile import BootProfile
 from sentinel.boot.result import BootResult
+from sentinel.boot.system_factory import SystemFactory
 from sentinel.system import System
 
 
@@ -24,25 +26,12 @@ class BootManager:
 
     Lifecycle:
 
-        STOPPED
-           |
-           v
-        STARTING
-           |
-           v
-        RUNNING
-           |
-           v
-        STOPPING
-           |
-           v
-        STOPPED
+        STOPPED -> STARTING -> RUNNING -> STOPPING -> STOPPED
 
-    A failed startup returns to STOPPED because System is responsible
-    for rolling back a partially completed startup.
+    A failed startup returns to STOPPED because System performs its own
+    rollback.
 
-    A failed shutdown enters FAILED because the system may be left
-    partially active and requires explicit recovery handling.
+    A failed shutdown enters FAILED because recovery may be required.
     """
 
     STOPPED = "stopped"
@@ -55,6 +44,8 @@ class BootManager:
         self,
         system: System,
         profile: BootProfile | None = None,
+        *,
+        factory: SystemFactory | None = None,
     ) -> None:
         if not isinstance(system, System):
             raise TypeError("system must be a System instance.")
@@ -65,16 +56,57 @@ class BootManager:
         ):
             raise TypeError("profile must be a BootProfile instance.")
 
+        if factory is not None and not isinstance(
+            factory,
+            SystemFactory,
+        ):
+            raise TypeError("factory must be a SystemFactory instance.")
+
         self._system = system
         self._profile = (
             profile
             if profile is not None
             else BootProfile()
         )
+        self._factory = factory
 
         self._state = self.STOPPED
         self._last_result: BootResult | None = None
         self._lock = RLock()
+
+    @classmethod
+    def from_configuration(
+        cls,
+        configuration: BootConfiguration,
+        profile: BootProfile | None = None,
+    ) -> BootManager:
+        """
+        Compose a System from boot configuration and return a BootManager.
+
+        The system is composed but not started.
+        """
+        if not isinstance(
+            configuration,
+            BootConfiguration,
+        ):
+            raise TypeError(
+                "configuration must be a BootConfiguration instance."
+            )
+
+        if profile is not None and not isinstance(
+            profile,
+            BootProfile,
+        ):
+            raise TypeError("profile must be a BootProfile instance.")
+
+        factory = SystemFactory(configuration)
+        system = factory.create()
+
+        return cls(
+            system,
+            profile,
+            factory=factory,
+        )
 
     @property
     def system(self) -> System:
@@ -85,6 +117,11 @@ class BootManager:
     def profile(self) -> BootProfile:
         """Return the active boot profile."""
         return self._profile
+
+    @property
+    def factory(self) -> SystemFactory | None:
+        """Return the SystemFactory used for composition, if any."""
+        return self._factory
 
     @property
     def state(self) -> str:
@@ -105,11 +142,7 @@ class BootManager:
             return self._last_result
 
     def start(self) -> BootResult:
-        """
-        Boot Sentinel OS.
-
-        Only one startup transition may execute at a time.
-        """
+        """Boot Sentinel OS."""
         with self._lock:
             if self._state == self.RUNNING:
                 raise BootStateError(
@@ -181,11 +214,7 @@ class BootManager:
         return result
 
     def stop(self) -> BootResult:
-        """
-        Shut down Sentinel OS.
-
-        Only one shutdown transition may execute at a time.
-        """
+        """Shut down Sentinel OS."""
         with self._lock:
             if self._state != self.RUNNING:
                 raise BootStateError(
@@ -242,9 +271,7 @@ class BootManager:
         return result
 
     def health(self) -> dict[str, Any]:
-        """
-        Return combined boot-manager and system health.
-        """
+        """Return combined boot-manager and system health."""
         with self._lock:
             state = self._state
             last_result = self._last_result

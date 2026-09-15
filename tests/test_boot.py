@@ -16,6 +16,7 @@ from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.platform import Platform
 from sentinel.system import System
+from sentinel.boot import BootConfiguration
 
 
 class BootTestService(Service):
@@ -315,3 +316,63 @@ def test_concurrent_stop_allows_only_one_transition() -> None:
 
     assert sorted(outcomes) == ["rejected", "stopped"]
     assert manager.running is False
+
+def test_from_configuration() -> None:
+    configuration = BootConfiguration()
+    configuration.load("configs/development.yaml")
+
+    manager = BootManager.from_configuration(configuration)
+
+    assert isinstance(manager.system, System)
+    assert manager.factory is not None
+    assert manager.state == BootManager.STOPPED
+    assert manager.running is False
+
+
+def test_from_configuration_accepts_profile() -> None:
+    configuration = BootConfiguration()
+    configuration.load("configs/development.yaml")
+
+    profile = BootProfile(
+        name="development",
+        metadata={"debug": True},
+    )
+
+    manager = BootManager.from_configuration(
+        configuration,
+        profile,
+    )
+
+    assert manager.profile is profile
+    assert manager.profile.name == "development"
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    [None, object(), "invalid"],
+)
+def test_from_configuration_rejects_invalid_configuration(
+    configuration: object,
+) -> None:
+    with pytest.raises(TypeError):
+        BootManager.from_configuration(
+            configuration,  # type: ignore[arg-type]
+        )
+
+
+def test_from_configuration_can_boot_and_shutdown() -> None:
+    configuration = BootConfiguration()
+    configuration.load("configs/development.yaml")
+
+    manager = BootManager.from_configuration(configuration)
+
+    result = manager.start()
+
+    assert result.success is True
+    assert manager.running is True
+    assert manager.system.running is True
+
+    manager.stop()
+
+    assert manager.running is False
+    assert manager.system.running is False

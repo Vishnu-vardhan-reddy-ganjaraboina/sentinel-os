@@ -1,19 +1,11 @@
 """
-Sentinel OS application entry point.
+Sentinel OS module entry point.
 """
 
 from __future__ import annotations
 
-from sentinel.application import Application
-
-
-def main() -> None:
-    """
-    Start Sentinel OS.
-    """
-    application = Application()
-    application.start()
+from sentinel.cli.main import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

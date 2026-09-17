@@ -15,6 +15,9 @@ authors = [
 
 dependencies = []
 
+[project.scripts]
+sentinel = "sentinel.cli.main:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0",

@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 
 from sentinel.control_plane.audit import ControlAuditEvent
 
+from sentinel.control_plane.audit_query import ControlAuditQuery
+
 
 class ControlAuditStore(ABC):
     """
@@ -25,5 +27,15 @@ class ControlAuditStore(ABC):
     def events(self) -> tuple[ControlAuditEvent, ...]:
         """
         Return all persisted audit events in chronological order.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def query(
+        self,
+        query: ControlAuditQuery,
+    ) -> tuple[ControlAuditEvent, ...]:
+        """
+        Return audit events matching the supplied query.
         """
         raise NotImplementedError

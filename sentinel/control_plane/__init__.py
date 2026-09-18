@@ -11,6 +11,7 @@ from sentinel.control_plane.permissions import ControlPermission
 from sentinel.control_plane.policy import ControlPolicy
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
+from sentinel.control_plane.audit_query import ControlAuditQuery
 
 __all__ = [
     "ControlAuthorizer",

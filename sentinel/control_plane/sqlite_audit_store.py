@@ -12,6 +12,7 @@ from threading import RLock
 
 from sentinel.control_plane.audit import ControlAuditEvent
 from sentinel.control_plane.audit_store import ControlAuditStore
+from sentinel.control_plane.audit_query import ControlAuditQuery
 
 
 class SQLiteControlAuditStore(ControlAuditStore):
@@ -182,4 +183,79 @@ class SQLiteControlAuditStore(ControlAuditStore):
             success=bool(success),
             data=json.loads(str(data)),
             error=None if error is None else str(error),
+        )
+
+    def query(
+        self,
+        query: ControlAuditQuery,
+    ) -> tuple[ControlAuditEvent, ...]:
+        """
+        Return persisted audit events matching the supplied query.
+        """
+        if not isinstance(query, ControlAuditQuery):
+            raise TypeError(
+                "query must be a ControlAuditQuery."
+            )
+
+        sql = """
+            SELECT
+                timestamp,
+                caller_id,
+                caller_type,
+                command,
+                success,
+                data,
+                error
+            FROM control_audit_events
+        """
+
+        conditions: list[str] = []
+        parameters: list[object] = []
+
+        if query.caller_id is not None:
+            conditions.append("caller_id = ?")
+            parameters.append(query.caller_id)
+
+        if query.caller_type is not None:
+           conditions.append("caller_type = ?")
+           parameters.append(query.caller_type)
+
+        if query.command is not None:
+            conditions.append("command = ?")
+            parameters.append(query.command)
+
+        if query.success is not None:
+            conditions.append("success = ?")
+            parameters.append(int(query.success))
+
+        if query.since is not None:
+            conditions.append("timestamp >= ?")
+            parameters.append(query.since.isoformat())
+
+        if query.until is not None:
+            conditions.append("timestamp <= ?")
+            parameters.append(query.until.isoformat())
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        sql += " ORDER BY id ASC"
+
+        if query.limit is not None:
+            sql += " LIMIT ?"
+            parameters.append(query.limit)
+
+        with self._lock:
+            connection = self._ensure_connected()
+
+            cursor = connection.execute(
+                sql,
+                tuple(parameters),
+            )
+
+            rows = cursor.fetchall()
+
+        return tuple(
+            self._event_from_row(row)
+            for row in rows
         )

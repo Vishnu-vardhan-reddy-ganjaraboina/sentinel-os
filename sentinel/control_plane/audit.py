@@ -7,6 +7,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from sentinel.control_plane.audit_store import ControlAuditStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,3 +122,32 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
         Remove all recorded events.
         """
         self._events.clear()
+
+class PersistentControlAuditRecorder(ControlAuditRecorder):
+    """
+    Record Control Plane audit events using a persistent audit store.
+    """
+
+    def __init__(self, store: "ControlAuditStore") -> None:
+        self._store = store
+
+    @property
+    def store(self) -> "ControlAuditStore":
+        """
+        Return the configured audit store.
+        """
+        return self._store
+
+    def record(
+        self,
+        event: ControlAuditEvent,
+    ) -> None:
+        """
+        Persist an audit event.
+        """
+        if not isinstance(event, ControlAuditEvent):
+            raise TypeError(
+                "event must be a ControlAuditEvent."
+            )
+
+        self._store.append(event)

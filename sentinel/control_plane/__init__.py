@@ -22,4 +22,21 @@ __all__ = [
     "KernelCommand",
     "KernelControlTarget",
     "KernelController",
+    "ControlAuditEvent",
+    "ControlAuditRecorder",
+    "ControlAuditStore",
+    "InMemoryControlAuditRecorder",
+    "PersistentControlAuditRecorder",
+    "SQLiteControlAuditStore",
 ]
+
+from sentinel.control_plane.audit import (
+    ControlAuditEvent,
+    ControlAuditRecorder,
+    InMemoryControlAuditRecorder,
+    PersistentControlAuditRecorder,
+)
+from sentinel.control_plane.audit_store import ControlAuditStore
+from sentinel.control_plane.sqlite_audit_store import (
+    SQLiteControlAuditStore,
+)

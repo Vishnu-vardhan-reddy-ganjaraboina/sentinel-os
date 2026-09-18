@@ -9,6 +9,9 @@ from sentinel.control_plane.audit import (
     InMemoryControlAuditRecorder,
 )
 
+from sentinel.control_plane.audit import (
+    PersistentControlAuditRecorder,
+)
 
 def test_audit_event_defaults() -> None:
     event = ControlAuditEvent(
@@ -195,3 +198,39 @@ def test_in_memory_recorder_clear() -> None:
     recorder.clear()
 
     assert recorder.events == ()
+
+def test_persistent_recorder_uses_store() -> None:
+    class StubStore:
+        def __init__(self) -> None:
+            self.events = []
+
+        def append(self, event: ControlAuditEvent) -> None:
+            self.events.append(event)
+
+    store = StubStore()
+
+    recorder = PersistentControlAuditRecorder(store)
+
+    event = ControlAuditEvent(
+        caller_id="user-1",
+        caller_type="user",
+        command="system.status",
+        success=True,
+    )
+
+    recorder.record(event)
+
+    assert store.events == [event]
+
+
+def test_persistent_recorder_rejects_invalid_event() -> None:
+    class StubStore:
+        def append(self, event: ControlAuditEvent) -> None:
+            pass
+
+    recorder = PersistentControlAuditRecorder(
+        StubStore()
+    )
+
+    with pytest.raises(TypeError):
+        recorder.record("invalid")  # type: ignore[arg-type]

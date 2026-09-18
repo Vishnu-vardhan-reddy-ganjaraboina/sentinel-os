@@ -11,6 +11,7 @@ from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.policy import ControlPolicy
+from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
 from sentinel.core.exceptions import SentinelError
@@ -18,7 +19,7 @@ from sentinel.core.exceptions import SentinelError
 
 class KernelController:
     """
-    Execute Kernel Control Plane commands against a control target.
+    Execute Kernel Control Plane requests against a control target.
 
     Authorization is evaluated before a command is executed.
     """
@@ -47,7 +48,7 @@ class KernelController:
 
     @property
     def context(self) -> ControlContext:
-        """Return the caller context used for authorization."""
+        """Return the caller context."""
         return self._context
 
     def execute(
@@ -56,16 +57,34 @@ class KernelController:
         data: Mapping[str, Any] | None = None,
     ) -> ControlResult:
         """
-        Authorize and execute a Kernel Control Plane command.
+        Execute a command using the controller's configured context.
         """
-        command_data = dict(data or {})
+        request = ControlRequest(
+            command=command,
+            context=self._context,
+            data=data or {},
+        )
+
+        return self.execute_request(request)
+
+    def execute_request(
+        self,
+        request: ControlRequest,
+    ) -> ControlResult:
+        """
+        Authorize and execute a structured Control Plane request.
+        """
+        command = request.command
 
         try:
             permission = ControlPolicy.required_permission(command)
+
             self._authorizer.require(
-                self._context,
+                request.context,
                 permission,
             )
+
+            command_data = dict(request.data)
 
             if command is KernelCommand.SYSTEM_STATUS:
                 return self._system_status(command)

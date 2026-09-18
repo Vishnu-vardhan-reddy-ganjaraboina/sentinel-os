@@ -8,6 +8,7 @@ from sentinel.control_plane.permissions import ControlPermission
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.request import ControlRequest
 
 
 class StubService(Service):
@@ -196,3 +197,50 @@ def test_unknown_service_still_returns_failure() -> None:
     assert result.success is False
     assert result.error is not None
     assert "does-not-exist" in result.error
+
+def test_execute_builds_request_from_controller_context() -> None:
+    _, controller = create_controller({ControlPermission.READ})
+
+    result = controller.execute(
+        KernelCommand.SYSTEM_STATUS,
+    )
+
+    assert result.success is True
+    assert controller.context.caller_id == "test-caller"
+    assert controller.context.caller_type == "test"
+
+
+def test_execute_request_uses_request_context() -> None:
+    _, controller = create_controller({ControlPermission.READ})
+
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_HEALTH,
+        context=ControlContext(
+            caller_id="explicit-caller",
+            caller_type="test",
+        ),
+    )
+
+    result = controller.execute_request(request)
+
+    assert result.success is True
+
+
+def test_execute_request_enforces_request_context_permission() -> None:
+    _, controller = create_controller({ControlPermission.READ})
+
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_START,
+        context=ControlContext(
+            caller_id="unprivileged-caller",
+            caller_type="test",
+        ),
+        data={"service": "memory"},
+    )
+
+    result = controller.execute_request(request)
+
+    assert result.success is False
+    assert result.error == (
+        "Permission denied: 'control' permission required."
+    )

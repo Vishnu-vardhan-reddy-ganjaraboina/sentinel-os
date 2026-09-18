@@ -9,6 +9,9 @@ from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.request import ControlRequest
+from sentinel.control_plane.audit import (
+    InMemoryControlAuditRecorder,
+)
 
 
 class StubService(Service):
@@ -244,3 +247,127 @@ def test_execute_request_enforces_request_context_permission() -> None:
     assert result.error == (
         "Permission denied: 'control' permission required."
     )
+
+def test_successful_request_is_audited() -> None:
+    recorder = InMemoryControlAuditRecorder()
+
+    kernel = Kernel()
+    kernel.register(StubService("memory"))
+
+    adapter = KernelAdapter(kernel)
+
+    authorizer = ControlAuthorizer(
+        {
+            ControlPermission.READ,
+        }
+    )
+
+    context = ControlContext(
+        caller_id="audit-user",
+        caller_type="user",
+    )
+
+    controller = KernelController(
+        adapter,
+        authorizer,
+        context,
+        audit_recorder=recorder,
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_STATUS,
+        {"service": "memory"},
+    )
+
+    assert result.success is True
+    assert len(recorder.events) == 1
+
+    event = recorder.events[0]
+
+    assert event.caller_id == "audit-user"
+    assert event.caller_type == "user"
+    assert event.command == str(KernelCommand.SERVICE_STATUS)
+    assert event.success is True
+    assert event.data == {"service": "memory"}
+    assert event.error is None
+
+
+def test_denied_request_is_audited() -> None:
+    recorder = InMemoryControlAuditRecorder()
+
+    kernel, controller = create_controller(
+        {ControlPermission.READ}
+    )
+
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_START,
+        {"service": "memory"},
+    )
+
+    assert result.success is False
+    assert len(recorder.events) == 1
+
+    event = recorder.events[0]
+
+    assert event.caller_id == "test-caller"
+    assert event.caller_type == "test"
+    assert event.command == str(KernelCommand.SERVICE_START)
+    assert event.success is False
+    assert event.data == {"service": "memory"}
+    assert event.error == (
+        "Permission denied: 'control' permission required."
+    )
+
+    assert kernel.running("memory") is False
+
+
+def test_failed_request_is_audited() -> None:
+    recorder = InMemoryControlAuditRecorder()
+
+    kernel, controller = create_controller(
+        {ControlPermission.READ}
+    )
+
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_STATUS,
+        {"service": "does-not-exist"},
+    )
+
+    assert result.success is False
+    assert len(recorder.events) == 1
+
+    event = recorder.events[0]
+
+    assert event.command == str(KernelCommand.SERVICE_STATUS)
+    assert event.success is False
+    assert event.data == {"service": "does-not-exist"}
+    assert event.error is not None
+    assert "does-not-exist" in event.error
+
+
+def test_audit_recorder_is_optional() -> None:
+    _, controller = create_controller(
+        {ControlPermission.READ}
+    )
+
+    assert controller.audit_recorder is None
+
+    result = controller.execute(
+        KernelCommand.SYSTEM_STATUS,
+    )
+
+    assert result.success is True

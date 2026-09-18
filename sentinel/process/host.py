@@ -263,6 +263,9 @@ class ProcessHost:
         """
         Wait until the process receives a shutdown request.
 
+        The wait is performed in short intervals so that foreground
+        applications remain responsive to KeyboardInterrupt (Ctrl+C).
+
         Returns True when shutdown has been requested, otherwise False
         when the optional timeout expires.
         """
@@ -276,6 +279,15 @@ class ProcessHost:
                 raise ValueError(
                     "timeout cannot be negative."
                 )
+
+        if timeout == 0:
+            return self._stop_event.is_set()
+
+        if timeout is None:
+            while not self._stop_event.wait(0.5):
+                pass
+
+            return True
 
         return self._stop_event.wait(timeout)
 

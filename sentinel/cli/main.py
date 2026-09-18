@@ -173,7 +173,21 @@ class CLI:
 
             print(result.message)
 
-            process.wait()
+            try:
+                process.wait()
+            except KeyboardInterrupt:
+                print("Shutdown requested.")
+
+                if process.running:
+                    try:
+                        process.stop()
+                    except Exception as exc:
+                        print(
+                            f"Sentinel OS shutdown failed: {exc}"
+                        )
+                        return 1
+
+                return 0
 
             if process.running:
                 process.stop()

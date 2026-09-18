@@ -6,7 +6,10 @@ import pytest
 
 from pathlib import Path
 
-from sentinel.control import ControlEndpointRegistry
+from sentinel.control import (
+    ControlEndpoint,
+    ControlEndpointRegistry,
+)
 
 from sentinel.boot import (
     BootManager,
@@ -497,3 +500,94 @@ def test_failed_endpoint_publication_rolls_back_start(
 
     assert host.running is False
     assert host.control_server.running is False
+
+def test_start_recovers_from_stale_endpoint(
+    tmp_path: Path,
+) -> None:
+    import socket
+
+    registry = ControlEndpointRegistry(
+        tmp_path / "control.json",
+    )
+
+    # Simulate an old Sentinel process that died
+    # without removing its endpoint file.
+    server = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+    )
+
+    server.bind(("127.0.0.1", 0))
+    stale_port = server.getsockname()[1]
+    server.close()
+
+    registry.save(
+        ControlEndpoint(
+            host="127.0.0.1",
+            port=stale_port,
+        )
+    )
+
+    host = ProcessHost(
+        make_boot_manager(),
+        endpoint_registry=registry,
+    )
+
+    result = host.start()
+
+    try:
+        assert result.success is True
+        assert host.running is True
+        assert registry.exists() is True
+
+        endpoint = registry.load()
+
+        assert endpoint.port != stale_port
+        assert endpoint.port == host.control_server.port
+
+    finally:
+        host.stop()
+
+def test_process_can_restart_after_clean_shutdown(
+    tmp_path: Path,
+) -> None:
+    registry = ControlEndpointRegistry(
+        tmp_path / "control.json",
+    )
+
+    host = ProcessHost(
+        make_boot_manager(),
+        endpoint_registry=registry,
+    )
+
+    first_result = host.start()
+
+    assert first_result.success is True
+    assert host.running is True
+    assert registry.exists() is True
+
+    first_endpoint = registry.load()
+
+    host.stop()
+
+    assert host.running is False
+    assert registry.exists() is False
+
+    second_result = host.start()
+
+    try:
+        assert second_result.success is True
+        assert host.running is True
+        assert registry.exists() is True
+
+        second_endpoint = registry.load()
+
+        assert second_endpoint.port == host.control_server.port
+
+        # With an ephemeral control port, a restart normally gets
+        # a new port, but the important contract is that it is valid.
+        assert second_endpoint.port != 0
+        assert first_endpoint.port != 0
+
+    finally:
+        host.stop()

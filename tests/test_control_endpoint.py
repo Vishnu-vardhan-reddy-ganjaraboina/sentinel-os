@@ -207,3 +207,95 @@ def test_registry_repr(tmp_path: Path) -> None:
     )
 
     assert "ControlEndpointRegistry" in repr(registry)
+
+def test_clear_if_stale_removes_dead_endpoint(tmp_path: Path) -> None:
+    import socket
+
+    registry = ControlEndpointRegistry(
+        tmp_path / "control.json",
+    )
+
+    # Reserve a temporary local port and then release it.
+    server = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+    )
+
+    server.bind(("127.0.0.1", 0))
+    port = server.getsockname()[1]
+    server.close()
+
+    registry.save(
+        ControlEndpoint(port=port),
+    )
+
+    assert registry.exists() is True
+
+    removed = registry.clear_if_stale()
+
+    assert removed is True
+    assert registry.exists() is False
+
+
+def test_clear_if_stale_keeps_active_endpoint(tmp_path: Path) -> None:
+    import socket
+
+    server = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+    )
+
+    server.setsockopt(
+        socket.SOL_SOCKET,
+        socket.SO_REUSEADDR,
+        1,
+    )
+
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    try:
+        port = server.getsockname()[1]
+
+        registry = ControlEndpointRegistry(
+            tmp_path / "control.json",
+        )
+
+        registry.save(
+            ControlEndpoint(port=port),
+        )
+
+        removed = registry.clear_if_stale()
+
+        assert removed is False
+        assert registry.exists() is True
+
+    finally:
+        server.close()
+
+
+def test_clear_if_stale_is_safe_when_registry_missing(
+    tmp_path: Path,
+) -> None:
+    registry = ControlEndpointRegistry(
+        tmp_path / "control.json",
+    )
+
+    assert registry.clear_if_stale() is False
+    assert registry.exists() is False
+
+
+def test_clear_if_stale_is_safe_for_invalid_registry(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "control.json"
+
+    path.write_text(
+        "invalid json",
+        encoding="utf-8",
+    )
+
+    registry = ControlEndpointRegistry(path)
+
+    assert registry.clear_if_stale() is False
+    assert registry.exists() is True

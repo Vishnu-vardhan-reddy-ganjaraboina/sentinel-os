@@ -4,7 +4,6 @@ Tests for the Sentinel Orchestration runtime service.
 
 from __future__ import annotations
 
-import pytest
 
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.kernel.service import Service
@@ -171,17 +170,16 @@ def test_runtime_shutdown_is_idempotent() -> None:
     }
 
 
-def test_runtime_initialize_after_shutdown_raises() -> None:
+def test_runtime_initialize_after_shutdown_restarts() -> None:
     runtime = OrchestrationRuntimeService()
 
     runtime.initialize()
     runtime.shutdown()
+    runtime.initialize()
 
-    with pytest.raises(
-        RuntimeError,
-        match="already been shut down",
-    ):
-        runtime.initialize()
+    assert runtime.health() == {
+        "healthy": True,
+    }
 
 
 def test_runtime_can_execute_delegates() -> None:

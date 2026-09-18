@@ -53,7 +53,6 @@ class OrchestrationRuntimeService(Service):
         )
 
         self._initialized = False
-        self._shutdown = False
 
     @property
     def orchestration(self) -> OrchestrationService:
@@ -110,12 +109,10 @@ class OrchestrationRuntimeService(Service):
     def initialize(self) -> None:
         """
         Initialize orchestration resources.
-        """
-        if self._shutdown:
-            raise RuntimeError(
-                "Orchestration runtime has already been shut down."
-            )
 
+        The current orchestration service owns no external resources,
+        so initialization only updates lifecycle state.
+        """
         if self._initialized:
             return
 
@@ -128,17 +125,13 @@ class OrchestrationRuntimeService(Service):
         Shutdown is idempotent because the current service owns
         no external resources.
         """
-        if self._shutdown:
+        if not self._initialized:
             return
 
         self._initialized = False
-        self._shutdown = True
 
     def health(self) -> dict[str, bool]:
         """Return orchestration service health information."""
         return {
-            "healthy": (
-                self._initialized
-                and not self._shutdown
-            ),
+            "healthy": self._initialized,
         }

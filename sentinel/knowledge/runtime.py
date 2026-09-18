@@ -55,7 +55,6 @@ class KnowledgeRuntimeService(Service):
         )
 
         self._initialized = False
-        self._shutdown = False
 
     @staticmethod
     def _create_default_service(
@@ -151,12 +150,12 @@ class KnowledgeRuntimeService(Service):
         )
 
     def initialize(self) -> None:
-        """Initialize knowledge resources."""
-        if self._shutdown:
-            raise RuntimeError(
-                "Knowledge runtime has already been shut down."
-            )
+        """
+        Initialize knowledge resources.
 
+        Persistent vector stores may override connect() to acquire
+        their underlying resources. In-memory stores simply no-op.
+        """
         if self._initialized:
             return
 
@@ -169,19 +168,14 @@ class KnowledgeRuntimeService(Service):
 
         Shutdown is idempotent.
         """
-        if self._shutdown:
+        if not self._initialized:
             return
 
         self._knowledge.retriever.vector_store.close()
-
         self._initialized = False
-        self._shutdown = True
 
     def health(self) -> dict[str, bool]:
         """Return knowledge service health information."""
         return {
-            "healthy": (
-                self._initialized
-                and not self._shutdown
-            ),
+            "healthy": self._initialized,
         }

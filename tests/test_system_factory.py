@@ -124,3 +124,94 @@ def test_repr_after_composition() -> None:
     factory.create()
 
     assert repr(factory) == "SystemFactory(composed=True)"
+
+def test_create_registers_runtime_services_in_kernel() -> None:
+    factory = SystemFactory()
+
+    system = factory.create()
+
+    services = system.kernel.services()
+
+    assert {service.name for service in services} == {
+        "execution",
+        "memory",
+        "knowledge",
+        "orchestration",
+    }
+
+def test_created_system_can_control_individual_kernel_services() -> None:
+    factory = SystemFactory()
+    system = factory.create()
+
+    system.start()
+
+    assert system.kernel.running("memory")
+    assert system.kernel.running("knowledge")
+    assert system.kernel.running("execution")
+    assert system.kernel.running("orchestration")
+
+    system.kernel.stop("orchestration")
+
+    assert not system.kernel.running("orchestration")
+    assert system.kernel.running("memory")
+    assert system.kernel.running("knowledge")
+    assert system.kernel.running("execution")
+
+    system.kernel.start("orchestration")
+
+    assert system.kernel.running("orchestration")
+
+    system.shutdown()
+
+def test_created_system_preserves_orchestration_dependencies() -> None:
+    factory = SystemFactory()
+    system = factory.create()
+
+    system.start()
+
+    system.kernel.stop("orchestration")
+
+    system.kernel.stop("memory")
+
+    assert not system.kernel.running("memory")
+    assert not system.kernel.running("orchestration")
+    assert system.kernel.running("knowledge")
+
+    system.kernel.start("orchestration")
+
+    assert system.kernel.running("memory")
+    assert system.kernel.running("knowledge")
+    assert system.kernel.running("orchestration")
+
+    system.shutdown()
+
+def test_created_system_restart_orchestration_preserves_dependencies() -> None:
+    factory = SystemFactory()
+    system = factory.create()
+
+    system.start()
+
+    memory = system.kernel.get("memory")
+    knowledge = system.kernel.get("knowledge")
+
+    system.kernel.restart("orchestration")
+
+    assert system.kernel.get("memory") is memory
+    assert system.kernel.get("knowledge") is knowledge
+    assert system.kernel.running("memory")
+    assert system.kernel.running("knowledge")
+    assert system.kernel.running("orchestration")
+
+    system.shutdown()
+
+def test_system_shutdown_after_individual_kernel_service_stop() -> None:
+    factory = SystemFactory()
+    system = factory.create()
+
+    system.start()
+
+    system.kernel.stop("orchestration")
+
+    system.shutdown()
+
+    assert system.running is False

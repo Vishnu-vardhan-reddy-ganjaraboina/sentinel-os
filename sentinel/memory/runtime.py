@@ -37,7 +37,6 @@ class MemoryRuntimeService(Service):
         )
 
         self._initialized = False
-        self._shutdown = False
 
     @property
     def memory(self) -> MemoryService:
@@ -119,12 +118,10 @@ class MemoryRuntimeService(Service):
     def initialize(self) -> None:
         """
         Initialize memory resources.
-        """
-        if self._shutdown:
-            raise RuntimeError(
-                "Memory runtime has already been shut down."
-            )
 
+        MemoryService currently owns no resources that require
+        initialization, so initialization only updates lifecycle state.
+        """
         if self._initialized:
             return
 
@@ -136,17 +133,13 @@ class MemoryRuntimeService(Service):
 
         Shutdown is idempotent.
         """
-        if self._shutdown:
+        if not self._initialized:
             return
 
         self._initialized = False
-        self._shutdown = True
 
     def health(self) -> dict[str, bool]:
         """Return memory service health information."""
         return {
-            "healthy": (
-                self._initialized
-                and not self._shutdown
-            ),
+            "healthy": self._initialized,
         }

@@ -7,7 +7,6 @@ from __future__ import annotations
 import sys
 import time
 
-import pytest
 
 from sentinel.execution.command import CommandResult
 from sentinel.execution.context import ExecutionContext
@@ -100,17 +99,20 @@ def test_runtime_shutdown_is_idempotent() -> None:
     }
 
 
-def test_runtime_initialize_after_shutdown_raises() -> None:
+def test_runtime_initialize_after_shutdown_restarts() -> None:
     runtime = ExecutionRuntimeService()
+
+    first_execution = runtime.execution
 
     runtime.initialize()
     runtime.shutdown()
 
-    with pytest.raises(
-        RuntimeError,
-        match="already been shut down",
-    ):
-        runtime.initialize()
+    runtime.initialize()
+
+    assert runtime.health() == {
+        "healthy": True,
+    }
+    assert runtime.execution is not first_execution
 
 
 def test_runtime_exposes_underlying_service_components() -> None:

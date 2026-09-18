@@ -20,6 +20,9 @@ class ExecutionRuntimeService(Service):
 
     The runtime service exposes the Execution subsystem API directly
     while retaining Kernel lifecycle management.
+
+    ExecutionService owns disposable executor resources, so a stopped
+    runtime creates a fresh ExecutionService when started again.
     """
 
     def __init__(
@@ -38,7 +41,7 @@ class ExecutionRuntimeService(Service):
         )
 
         self._initialized = False
-        self._shutdown = False
+        self._started_once = False
 
     @property
     def execution(self) -> ExecutionService:
@@ -119,18 +122,19 @@ class ExecutionRuntimeService(Service):
         """
         Initialize execution resources.
 
-        ExecutionService creates its resources during construction,
-        so initialization only updates the runtime lifecycle state.
+        ExecutionService creates its executor resources during
+        construction. A runtime restart therefore creates a fresh
+        ExecutionService after the previous execution service has
+        been shut down.
         """
-        if self._shutdown:
-            raise RuntimeError(
-                "Execution runtime has already been shut down."
-            )
-
         if self._initialized:
             return
 
+        if self._started_once:
+            self._execution = ExecutionService()
+
         self._initialized = True
+        self._started_once = True
 
     def shutdown(self) -> None:
         """
@@ -138,19 +142,14 @@ class ExecutionRuntimeService(Service):
 
         Shutdown is idempotent.
         """
-        if self._shutdown:
+        if not self._initialized:
             return
 
         self._execution.shutdown()
-
         self._initialized = False
-        self._shutdown = True
 
     def health(self) -> dict[str, bool]:
         """Return execution service health information."""
         return {
-            "healthy": (
-                self._initialized
-                and not self._shutdown
-            ),
+            "healthy": self._initialized,
         }

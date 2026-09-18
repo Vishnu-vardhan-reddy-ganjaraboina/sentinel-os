@@ -9,6 +9,7 @@ from typing import Any
 
 from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.policy import ControlPolicy
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
@@ -22,15 +23,17 @@ class KernelController:
     Authorization is evaluated before a command is executed.
     """
 
-    __slots__ = ("_target", "_authorizer")
+    __slots__ = ("_target", "_authorizer", "_context")
 
     def __init__(
         self,
         target: KernelControlTarget,
         authorizer: ControlAuthorizer,
+        context: ControlContext,
     ) -> None:
         self._target = target
         self._authorizer = authorizer
+        self._context = context
 
     @property
     def target(self) -> KernelControlTarget:
@@ -41,6 +44,11 @@ class KernelController:
     def authorizer(self) -> ControlAuthorizer:
         """Return the configured authorizer."""
         return self._authorizer
+
+    @property
+    def context(self) -> ControlContext:
+        """Return the caller context used for authorization."""
+        return self._context
 
     def execute(
         self,
@@ -54,7 +62,10 @@ class KernelController:
 
         try:
             permission = ControlPolicy.required_permission(command)
-            self._authorizer.require(permission)
+            self._authorizer.require(
+                self._context,
+                permission,
+            )
 
             if command is KernelCommand.SYSTEM_STATUS:
                 return self._system_status(command)

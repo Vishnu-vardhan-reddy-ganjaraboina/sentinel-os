@@ -3,7 +3,15 @@ from __future__ import annotations
 import pytest
 
 from sentinel.control_plane.authorizer import ControlAuthorizer
+from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.permissions import ControlPermission
+
+
+def create_context() -> ControlContext:
+    return ControlContext(
+        caller_id="local-cli",
+        caller_type="cli",
+    )
 
 
 def test_authorizer_stores_permissions() -> None:
@@ -27,7 +35,10 @@ def test_authorizer_allows_granted_permission() -> None:
         }
     )
 
-    assert authorizer.is_allowed(ControlPermission.READ) is True
+    assert authorizer.is_allowed(
+        create_context(),
+        ControlPermission.READ,
+    ) is True
 
 
 def test_authorizer_denies_missing_permission() -> None:
@@ -37,7 +48,10 @@ def test_authorizer_denies_missing_permission() -> None:
         }
     )
 
-    assert authorizer.is_allowed(ControlPermission.CONTROL) is False
+    assert authorizer.is_allowed(
+        create_context(),
+        ControlPermission.CONTROL,
+    ) is False
 
 
 def test_require_allows_granted_permission() -> None:
@@ -47,7 +61,10 @@ def test_require_allows_granted_permission() -> None:
         }
     )
 
-    authorizer.require(ControlPermission.CONTROL)
+    authorizer.require(
+        create_context(),
+        ControlPermission.CONTROL,
+    )
 
 
 def test_require_raises_for_missing_permission() -> None:
@@ -61,7 +78,10 @@ def test_require_raises_for_missing_permission() -> None:
         PermissionError,
         match="Permission denied: 'control' permission required.",
     ):
-        authorizer.require(ControlPermission.CONTROL)
+        authorizer.require(
+            create_context(),
+            ControlPermission.CONTROL,
+        )
 
 
 def test_authorizer_permissions_are_immutable() -> None:
@@ -73,3 +93,21 @@ def test_authorizer_permissions_are_immutable() -> None:
     assert authorizer.permissions == {
         ControlPermission.READ,
     }
+
+
+def test_identity_does_not_automatically_grant_permission() -> None:
+    authorizer = ControlAuthorizer(
+        {
+            ControlPermission.READ,
+        }
+    )
+
+    privileged_identity = ControlContext(
+        caller_id="sentinel-agent",
+        caller_type="system_agent",
+    )
+
+    assert authorizer.is_allowed(
+        privileged_identity,
+        ControlPermission.CONTROL,
+    ) is False

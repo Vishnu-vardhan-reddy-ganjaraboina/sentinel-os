@@ -7,6 +7,7 @@ from sentinel.control_plane.controller import KernelController
 from sentinel.control_plane.permissions import ControlPermission
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
+from sentinel.control_plane.context import ControlContext
 
 
 class StubService(Service):
@@ -55,8 +56,16 @@ def create_controller(
         }
     )
 
-    return kernel, KernelController(adapter, authorizer)
+    context = ControlContext(
+        caller_id="test-caller",
+        caller_type="test",
+    )
 
+    return kernel, KernelController(
+        adapter,
+        authorizer,
+        context,
+    )
 
 def test_system_status_requires_read_permission() -> None:
     _, controller = create_controller({ControlPermission.READ})

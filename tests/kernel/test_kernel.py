@@ -3,6 +3,7 @@ import pytest
 from sentinel.kernel.exceptions import ServiceNotFoundError
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
+from sentinel.kernel.service_state import ServiceState
 
 
 class DummyService(Service):
@@ -324,3 +325,138 @@ def test_health_is_unhealthy_after_services_stop() -> None:
 
     assert health["healthy"] is False
     assert health["services"]["logger"]["healthy"] is True
+
+def test_start_service_with_dependencies() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+    database = DummyService(
+        "database",
+        ("logger",),
+    )
+    application = DummyService(
+        "application",
+        ("database",),
+    )
+
+    kernel.register(application)
+    kernel.register(database)
+    kernel.register(logger)
+
+    kernel.start("application")
+
+    assert kernel.running("logger")
+    assert kernel.running("database")
+    assert kernel.running("application")
+
+    assert logger.initialized
+    assert database.initialized
+    assert application.initialized
+
+
+def test_start_service_does_not_restart_running_dependencies() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+    database = DummyService(
+        "database",
+        ("logger",),
+    )
+
+    kernel.register(database)
+    kernel.register(logger)
+
+    kernel.start("logger")
+
+    logger.initialized = False
+
+    kernel.start("database")
+
+    assert logger.initialized is False
+    assert kernel.running("logger")
+    assert kernel.running("database")
+
+
+def test_stop_service() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+    kernel.register(logger)
+
+    kernel.start("logger")
+    kernel.stop("logger")
+
+    assert logger.stopped
+    assert not kernel.running("logger")
+
+
+def test_stop_service_does_not_stop_dependents() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+    application = DummyService(
+        "application",
+        ("logger",),
+    )
+
+    kernel.register(application)
+    kernel.register(logger)
+
+    kernel.boot()
+
+    kernel.stop("logger")
+
+    assert not kernel.running("logger")
+    assert kernel.running("application")
+
+
+def test_restart_service() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+    kernel.register(logger)
+
+    kernel.start("logger")
+
+    logger.initialized = False
+    logger.stopped = False
+
+    kernel.restart("logger")
+
+    assert logger.stopped
+    assert logger.initialized
+    assert kernel.running("logger")
+
+
+def test_state_returns_service_state() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+    kernel.register(logger)
+
+    assert kernel.state("logger") is ServiceState.CREATED
+
+    kernel.start("logger")
+
+    assert kernel.state("logger") is ServiceState.RUNNING
+
+
+def test_start_missing_service_raises() -> None:
+    kernel = Kernel()
+
+    with pytest.raises(ServiceNotFoundError):
+        kernel.start("missing")
+
+
+def test_stop_missing_service_raises() -> None:
+    kernel = Kernel()
+
+    with pytest.raises(ServiceNotFoundError):
+        kernel.stop("missing")
+
+
+def test_restart_missing_service_raises() -> None:
+    kernel = Kernel()
+
+    with pytest.raises(ServiceNotFoundError):
+        kernel.restart("missing")

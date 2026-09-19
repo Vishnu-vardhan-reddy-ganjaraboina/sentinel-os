@@ -8,6 +8,8 @@ from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.platform import Platform
 from sentinel.system import System
+from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.service import ControlPlane
 
 
 def test_default_factory() -> None:
@@ -215,3 +217,53 @@ def test_system_shutdown_after_individual_kernel_service_stop() -> None:
     system.shutdown()
 
     assert system.running is False
+
+def test_create_composes_control_plane() -> None:
+    factory = SystemFactory()
+
+    system = factory.create()
+
+    assert isinstance(system.control_plane, ControlPlane)
+
+def test_control_plane_targets_system_kernel() -> None:
+    factory = SystemFactory()
+
+    system = factory.create()
+
+    assert system.control_plane is not None
+    assert system.control_plane.controller.target.kernel is system.kernel
+
+def test_control_plane_uses_system_context() -> None:
+    factory = SystemFactory()
+
+    system = factory.create()
+
+    assert system.control_plane is not None
+    assert system.control_plane.context.caller_id == "system"
+    assert system.control_plane.context.caller_type == "system"
+
+def test_control_plane_can_query_kernel() -> None:
+    factory = SystemFactory()
+
+    system = factory.create()
+
+    assert system.control_plane is not None
+
+    result = system.control_plane.execute(
+        KernelCommand.SERVICE_LIST,
+    )
+
+    assert result.success is True
+    assert set(result.data["services"]) == {
+        "execution",
+        "memory",
+        "knowledge",
+        "orchestration",
+    }
+def test_control_plane_composition_does_not_start_kernel() -> None:
+    factory = SystemFactory()
+
+    system = factory.create()
+
+    assert system.running is False
+    assert system.kernel.health()["healthy"] is False

@@ -10,6 +10,7 @@ from typing import Any
 
 from sentinel.application import Application
 from sentinel.application_host import ApplicationHost
+from sentinel.control_plane.service import ControlPlane
 from sentinel.kernel.kernel import Kernel
 from sentinel.platform import Platform
 
@@ -27,6 +28,7 @@ class System:
         self,
         kernel: Kernel,
         platform: Platform | None = None,
+        control_plane: ControlPlane | None = None,
     ) -> None:
         if not isinstance(kernel, Kernel):
             raise TypeError(
@@ -41,12 +43,21 @@ class System:
                 "platform must be a Platform instance."
             )
 
+        if control_plane is not None and not isinstance(
+            control_plane,
+            ControlPlane,
+        ):
+            raise TypeError(
+                "control_plane must be a ControlPlane instance."
+            )
+
         self._kernel = kernel
         self._platform = (
             platform
             if platform is not None
             else Platform()
         )
+        self._control_plane = control_plane
 
         self._running = False
         self._lock = RLock()
@@ -60,6 +71,11 @@ class System:
     def platform(self) -> Platform:
         """Return the application platform."""
         return self._platform
+
+    @property
+    def control_plane(self) -> ControlPlane | None:
+        """Return the system control plane."""
+        return self._control_plane
 
     @property
     def host(self) -> ApplicationHost:

@@ -4,6 +4,7 @@ from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.controller import KernelController
 from sentinel.control_plane.permissions import ControlPermission
 from sentinel.control_plane.service import ControlPlane
+from sentinel.control_plane.request import ControlRequest
 
 
 class FakeTarget:
@@ -119,3 +120,38 @@ def test_control_plane_preserves_controller_context() -> None:
     control_plane = create_control_plane()
 
     assert control_plane.context is control_plane.controller.context
+
+def test_control_plane_executes_structured_request() -> None:
+    control_plane = create_control_plane()
+
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_LIST,
+        context=control_plane.context,
+    )
+
+    result = control_plane.execute_request(request)
+
+    assert result.success is True
+    assert result.command == KernelCommand.SERVICE_LIST.value
+    assert result.data["services"] == (
+        "memory",
+        "execution",
+    )
+
+def test_control_plane_preserves_request_context() -> None:
+    control_plane = create_control_plane()
+
+    request_context = ControlContext(
+        caller_id="request-user",
+        caller_type="automation",
+    )
+
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_LIST,
+        context=request_context,
+    )
+
+    result = control_plane.execute_request(request)
+
+    assert result.success is True
+    assert control_plane.context.caller_id == "test-user"

@@ -4,8 +4,9 @@ from typing import Any, Mapping
 
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.controller import KernelController
-from sentinel.control_plane.result import ControlResult
+
 
 
 class ControlPlane:
@@ -49,3 +50,15 @@ class ControlPlane:
             command,
             data,
         )
+
+    def execute_request(
+        self,
+        request: ControlRequest,
+    ) -> ControlResult:
+        """
+        Execute a complete structured Control Plane request.
+
+        Authorization and audit recording remain owned by
+        KernelController.
+        """
+        return self._controller.execute_request(request)

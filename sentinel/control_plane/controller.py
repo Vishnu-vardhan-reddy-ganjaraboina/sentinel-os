@@ -1,16 +1,18 @@
 """
-Command controller for the Sentinel Kernel Control Plane.
+Kernel controller for the Sentinel Kernel Control Plane.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Mapping
+
 
 from sentinel.control_plane.audit import (
     ControlAuditEvent,
     ControlAuditRecorder,
 )
+
+from sentinel.control_plane.audit import ControlAuditEvent
 from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
@@ -18,16 +20,24 @@ from sentinel.control_plane.policy import ControlPolicy
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
-from sentinel.core.exceptions import SentinelError
+from sentinel.control_plane.validator import ControlRequestValidator
+
 
 
 class KernelController:
     """
-    Execute Kernel Control Plane requests against a control target.
+    Execute and authorize Kernel Control Plane requests.
 
-    Authorization is evaluated before a command is executed.
-    Successful and failed requests are recorded by the configured
-    audit recorder.
+    The controller is responsible for:
+
+    1. Building ControlRequest objects.
+    2. Validating requests.
+    3. Authorizing commands.
+    4. Executing commands against the Kernel target.
+    5. Converting execution failures into ControlResult objects.
+    6. Recording audit events.
+
+    The controller does not own Kernel lifecycle or service lifecycle.
     """
 
     __slots__ = (
@@ -51,17 +61,17 @@ class KernelController:
 
     @property
     def target(self) -> KernelControlTarget:
-        """Return the configured control target."""
+        """Return the control target."""
         return self._target
 
     @property
     def authorizer(self) -> ControlAuthorizer:
-        """Return the configured authorizer."""
+        """Return the authorization component."""
         return self._authorizer
 
     @property
     def context(self) -> ControlContext:
-        """Return the caller context."""
+        """Return the default controller context."""
         return self._context
 
     @property
@@ -75,12 +85,12 @@ class KernelController:
         data: Mapping[str, Any] | None = None,
     ) -> ControlResult:
         """
-        Execute a command using the controller's configured context.
+        Execute a command using the controller's default context.
         """
         request = ControlRequest(
             command=command,
             context=self._context,
-            data=data or {},
+            data={} if data is None else data,
         )
 
         return self.execute_request(request)
@@ -90,172 +100,164 @@ class KernelController:
         request: ControlRequest,
     ) -> ControlResult:
         """
-        Authorize and execute a structured Control Plane request.
+        Validate, authorize, execute, and audit a control request.
         """
-        command = request.command
-
         try:
-            permission = ControlPolicy.required_permission(command)
-
-            self._authorizer.require(
-                request.context,
-                permission,
+            ControlRequestValidator.validate(
+                request.command,
+                request.data,
             )
 
-            command_data = dict(request.data)
+            self._authorize(request)
 
-            if command is KernelCommand.SYSTEM_STATUS:
-                return self._execute_and_audit(
-                    request,
-                    self._system_status(command),
-                )
-
-            if command is KernelCommand.SYSTEM_HEALTH:
-                return self._execute_and_audit(
-                    request,
-                    self._system_health(command),
-                )
-
-            if command is KernelCommand.SERVICE_LIST:
-                return self._execute_and_audit(
-                    request,
-                    self._service_list(command),
-                )
-
-            if command is KernelCommand.SERVICE_STATUS:
-                return self._execute_and_audit(
-                    request,
-                    self._service_status(command, command_data),
-                )
-
-            if command is KernelCommand.SERVICE_START:
-                return self._execute_and_audit(
-                    request,
-                    self._service_start(command, command_data),
-                )
-
-            if command is KernelCommand.SERVICE_STOP:
-                return self._execute_and_audit(
-                    request,
-                    self._service_stop(command, command_data),
-                )
-
-            if command is KernelCommand.SERVICE_RESTART:
-                return self._execute_and_audit(
-                    request,
-                    self._service_restart(command, command_data),
-                )
-
-            result = ControlResult(
-                success=False,
-                command=str(command),
-                error=f"Unsupported command: {command}",
-            )
-
-            self._record_audit(request, result)
-
-            return result
+            return self._execute_and_audit(request)
 
         except PermissionError as exc:
             result = ControlResult(
                 success=False,
-                command=str(command),
+                command=request.command.value,
                 error=str(exc),
             )
-
             self._record_audit(request, result)
-
             return result
 
-        except SentinelError as exc:
+        except (TypeError, ValueError) as exc:
             result = ControlResult(
                 success=False,
-                command=str(command),
+                command=request.command.value,
                 error=str(exc),
             )
-
             self._record_audit(request, result)
-
             return result
 
         except Exception as exc:
             result = ControlResult(
                 success=False,
-                command=str(command),
+                command=request.command.value,
                 error=str(exc),
             )
-
             self._record_audit(request, result)
-
             return result
+
+    def _authorize(
+        self,
+        request: ControlRequest,
+    ) -> None:
+        """
+        Authorize a control request using the command policy.
+        """
+        permission = ControlPolicy.required_permission(
+            request.command,
+        )
+
+        self._authorizer.require(
+            request.context,
+            permission,
+        )
 
     def _execute_and_audit(
         self,
         request: ControlRequest,
-        result: ControlResult,
     ) -> ControlResult:
         """
-        Record a command result and return it unchanged.
+        Execute a validated and authorized request, then audit it.
         """
+        try:
+            result = self._dispatch(
+                request.command,
+                request.data,
+            )
+        except PermissionError as exc:
+            result = ControlResult(
+                success=False,
+                command=request.command.value,
+                error=str(exc),
+            )
+        except Exception as exc:
+            result = ControlResult(
+                success=False,
+                command=request.command.value,
+                error=str(exc),
+            )
+
         self._record_audit(request, result)
+
         return result
 
-    def _record_audit(
-        self,
-        request: ControlRequest,
-        result: ControlResult,
-    ) -> None:
-        """
-        Record an audit event when an audit recorder is configured.
-        """
-        if self._audit_recorder is None:
-            return
-
-        self._audit_recorder.record(
-            ControlAuditEvent(
-                caller_id=request.context.caller_id,
-                caller_type=request.context.caller_type,
-                command=str(request.command),
-                success=result.success,
-                data=dict(request.data),
-                error=result.error,
-            )
-        )
-
-    def _system_status(
+    def _dispatch(
         self,
         command: KernelCommand,
+        data: Mapping[str, Any],
     ) -> ControlResult:
+        """
+        Dispatch a command to its corresponding handler.
+        """
+        if command is KernelCommand.SYSTEM_STATUS:
+            return self._system_status()
+
+        if command is KernelCommand.SYSTEM_HEALTH:
+            return self._system_health()
+
+        if command is KernelCommand.SERVICE_LIST:
+            return self._service_list()
+
+        if command is KernelCommand.SERVICE_STATUS:
+            return self._service_status(data)
+
+        if command is KernelCommand.SERVICE_START:
+            return self._service_start(data)
+
+        if command is KernelCommand.SERVICE_STOP:
+            return self._service_stop(data)
+
+        if command is KernelCommand.SERVICE_RESTART:
+            return self._service_restart(data)
+
+        raise ValueError(
+            f"Unsupported control command: '{command.value}'."
+        )
+
+    def _system_status(self) -> ControlResult:
+        """
+        Return the current Kernel service status.
+        """
         services = self._target.service_names()
 
         return ControlResult(
             success=True,
-            command=str(command),
+            command=KernelCommand.SYSTEM_STATUS.value,
             data={
                 "services": services,
                 "service_count": len(services),
             },
         )
 
-    def _system_health(
-        self,
-        command: KernelCommand,
-    ) -> ControlResult:
+    def _system_health(self) -> ControlResult:
+        """
+        Return the current Kernel health information.
+
+        A health result indicating an unhealthy system is still a
+        successfully executed control command. Therefore, the command
+        result remains successful while the actual health state is
+        represented by data["healthy"].
+        """
+        health = self._target.health()
+
         return ControlResult(
             success=True,
-            command=str(command),
-            data=dict(self._target.health()),
+            command=KernelCommand.SYSTEM_HEALTH.value,
+            data=dict(health),
         )
 
-    def _service_list(
-        self,
-        command: KernelCommand,
-    ) -> ControlResult:
+    def _service_list(self) -> ControlResult:
+        """
+        Return all registered service names.
+        """
         services = self._target.service_names()
 
         return ControlResult(
             success=True,
-            command=str(command),
+            command=KernelCommand.SERVICE_LIST.value,
             data={
                 "services": services,
             },
@@ -263,91 +265,118 @@ class KernelController:
 
     def _service_status(
         self,
-        command: KernelCommand,
         data: Mapping[str, Any],
     ) -> ControlResult:
-        name = self._require_service_name(data)
-        state = self._target.service_state(name)
+        """
+        Return the state of a specific service.
+        """
+        service = self._service_name(data)
+
+        state = self._target.service_state(service)
 
         return ControlResult(
             success=True,
-            command=str(command),
+            command=KernelCommand.SERVICE_STATUS.value,
             data={
-                "service": name,
+                "service": service,
                 "state": state.value,
-                "running": state.value == "running",
             },
         )
 
     def _service_start(
         self,
-        command: KernelCommand,
         data: Mapping[str, Any],
     ) -> ControlResult:
-        name = self._require_service_name(data)
+        """
+        Start a specific service.
+        """
+        service = self._service_name(data)
 
-        self._target.start_service(name)
-
-        state = self._target.service_state(name)
+        self._target.start_service(service)
 
         return ControlResult(
             success=True,
-            command=str(command),
+            command=KernelCommand.SERVICE_START.value,
             data={
-                "service": name,
-                "state": state.value,
+                "service": service,
+                "state": self._target.service_state(service).value,
             },
         )
 
     def _service_stop(
         self,
-        command: KernelCommand,
         data: Mapping[str, Any],
     ) -> ControlResult:
-        name = self._require_service_name(data)
+        """
+        Stop a specific service.
+        """
+        service = self._service_name(data)
 
-        self._target.stop_service(name)
-
-        state = self._target.service_state(name)
+        self._target.stop_service(service)
 
         return ControlResult(
             success=True,
-            command=str(command),
+            command=KernelCommand.SERVICE_STOP.value,
             data={
-                "service": name,
-                "state": state.value,
+                "service": service,
+                "state": self._target.service_state(service).value,
             },
         )
 
     def _service_restart(
         self,
-        command: KernelCommand,
         data: Mapping[str, Any],
     ) -> ControlResult:
-        name = self._require_service_name(data)
+        """
+        Restart a specific service.
+        """
+        service = self._service_name(data)
 
-        self._target.restart_service(name)
-
-        state = self._target.service_state(name)
+        self._target.restart_service(service)
 
         return ControlResult(
             success=True,
-            command=str(command),
+            command=KernelCommand.SERVICE_RESTART.value,
             data={
-                "service": name,
-                "state": state.value,
+                "service": service,
+                "state": self._target.service_state(service).value,
             },
         )
 
     @staticmethod
-    def _require_service_name(
+    def _service_name(
         data: Mapping[str, Any],
     ) -> str:
-        name = data.get("service")
+        """
+        Extract a validated service name from command data.
+        """
+        service = data["service"]
 
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(
-                "Command requires a non-empty 'service' value."
+        if not isinstance(service, str):
+            raise TypeError(
+                "Service value must be a string."
             )
 
-        return name
+        return service
+
+    def _record_audit(
+        self,
+        request: ControlRequest,
+        result: ControlResult,
+    ) -> None:
+        """
+        Record a control-plane audit event when an audit recorder exists.
+        """
+        if self._audit_recorder is None:
+            return
+
+        event = ControlAuditEvent(
+            caller_id=request.context.caller_id,
+            caller_type=request.context.caller_type,
+            command=request.command.value,
+            success=result.success,
+            data=request.data,
+            error=result.error,
+        )
+
+        self._audit_recorder.record(event)

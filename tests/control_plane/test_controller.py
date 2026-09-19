@@ -409,7 +409,7 @@ def test_ai_agent_cannot_control_service() -> None:
 
     result = controller.execute(
         KernelCommand.SERVICE_START,
-        {"name": "memory"},
+        {"service": "memory"},
     )
 
     assert result.success is False

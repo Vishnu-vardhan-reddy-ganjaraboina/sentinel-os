@@ -6,14 +6,12 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-
 from sentinel.control_plane.audit import (
     ControlAuditEvent,
     ControlAuditRecorder,
 )
-
-from sentinel.control_plane.audit import ControlAuditEvent
 from sentinel.control_plane.authorizer import ControlAuthorizer
+from sentinel.control_plane.callers import ControlCallerType
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.policy import ControlPolicy
@@ -23,19 +21,18 @@ from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.validator import ControlRequestValidator
 
 
-
 class KernelController:
     """
     Execute and authorize Kernel Control Plane requests.
 
-    The controller is responsible for:
+    Responsibilities:
 
-    1. Building ControlRequest objects.
-    2. Validating requests.
-    3. Authorizing commands.
-    4. Executing commands against the Kernel target.
-    5. Converting execution failures into ControlResult objects.
-    6. Recording audit events.
+    1. Build ControlRequest objects.
+    2. Validate requests.
+    3. Authorize commands.
+    4. Dispatch commands to the Kernel control target.
+    5. Convert execution failures into ControlResult objects.
+    6. Record audit events.
 
     The controller does not own Kernel lifecycle or service lifecycle.
     """
@@ -66,12 +63,12 @@ class KernelController:
 
     @property
     def authorizer(self) -> ControlAuthorizer:
-        """Return the authorization component."""
+        """Return the configured authorizer."""
         return self._authorizer
 
     @property
     def context(self) -> ControlContext:
-        """Return the default controller context."""
+        """Return the controller's default context."""
         return self._context
 
     @property
@@ -100,7 +97,7 @@ class KernelController:
         request: ControlRequest,
     ) -> ControlResult:
         """
-        Validate, authorize, execute, and audit a control request.
+        Validate, authorize, execute, and audit a structured request.
         """
         try:
             ControlRequestValidator.validate(
@@ -118,7 +115,9 @@ class KernelController:
                 command=request.command.value,
                 error=str(exc),
             )
+
             self._record_audit(request, result)
+
             return result
 
         except (TypeError, ValueError) as exc:
@@ -127,7 +126,9 @@ class KernelController:
                 command=request.command.value,
                 error=str(exc),
             )
+
             self._record_audit(request, result)
+
             return result
 
         except Exception as exc:
@@ -136,7 +137,9 @@ class KernelController:
                 command=request.command.value,
                 error=str(exc),
             )
+
             self._record_audit(request, result)
+
             return result
 
     def _authorize(
@@ -144,35 +147,74 @@ class KernelController:
         request: ControlRequest,
     ) -> None:
         """
-        Authorize a control request using the command policy.
+        Authorize the requested command.
+
+        Requests using the controller's own context use the configured
+        authorizer.
+
+        Requests carrying a different known Sentinel caller type use
+        the permissions associated with that caller type.
+
+        Unknown/custom caller types fall back to the configured
+        authorizer so existing application-specific contexts remain
+        compatible.
         """
         permission = ControlPolicy.required_permission(
             request.command,
         )
 
-        self._authorizer.require(
+        authorizer = self._authorizer_for_request(request)
+
+        authorizer.require(
             request.context,
             permission,
         )
+
+    def _authorizer_for_request(
+        self,
+        request: ControlRequest,
+    ) -> ControlAuthorizer:
+        """
+        Resolve the authorizer for a request.
+
+        The controller's configured authorizer is used when:
+
+        - the request uses the controller's own context, or
+        - the request uses an unknown/custom caller type.
+
+        Known Sentinel caller types use their caller-specific
+        permissions.
+        """
+        if request.context is self._context:
+            return self._authorizer
+
+        if isinstance(request.context.caller_type, ControlCallerType):
+            return ControlAuthorizer.from_context(
+                request.context,
+            )
+
+        return self._authorizer
 
     def _execute_and_audit(
         self,
         request: ControlRequest,
     ) -> ControlResult:
         """
-        Execute a validated and authorized request, then audit it.
+        Execute a validated and authorized request and audit the result.
         """
         try:
             result = self._dispatch(
                 request.command,
                 request.data,
             )
+
         except PermissionError as exc:
             result = ControlResult(
                 success=False,
                 command=request.command.value,
                 error=str(exc),
             )
+
         except Exception as exc:
             result = ControlResult(
                 success=False,
@@ -180,7 +222,10 @@ class KernelController:
                 error=str(exc),
             )
 
-        self._record_audit(request, result)
+        self._record_audit(
+            request,
+            result,
+        )
 
         return result
 
@@ -190,7 +235,7 @@ class KernelController:
         data: Mapping[str, Any],
     ) -> ControlResult:
         """
-        Dispatch a command to its corresponding handler.
+        Dispatch a validated and authorized command.
         """
         if command is KernelCommand.SYSTEM_STATUS:
             return self._system_status()
@@ -236,10 +281,9 @@ class KernelController:
         """
         Return the current Kernel health information.
 
-        A health result indicating an unhealthy system is still a
-        successfully executed control command. Therefore, the command
-        result remains successful while the actual health state is
-        represented by data["healthy"].
+        An unhealthy system is still a successfully executed health
+        command. The actual health state is represented by
+        data["healthy"].
         """
         health = self._target.health()
 
@@ -348,7 +392,7 @@ class KernelController:
         data: Mapping[str, Any],
     ) -> str:
         """
-        Extract a validated service name from command data.
+        Extract a validated service name.
         """
         service = data["service"]
 
@@ -365,7 +409,7 @@ class KernelController:
         result: ControlResult,
     ) -> None:
         """
-        Record a control-plane audit event when an audit recorder exists.
+        Record an audit event when an audit recorder is configured.
         """
         if self._audit_recorder is None:
             return

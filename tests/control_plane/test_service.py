@@ -155,3 +155,22 @@ def test_control_plane_preserves_request_context() -> None:
 
     assert result.success is True
     assert control_plane.context.caller_id == "test-user"
+
+def test_control_plane_request_context_controls_authorization() -> None:
+    control_plane = create_control_plane()
+
+    request_context = ControlContext(
+        caller_id="ai-agent",
+        caller_type="ai_agent",
+    )
+
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_START,
+        context=request_context,
+        data={"service": "memory"},
+    )
+
+    result = control_plane.execute_request(request)
+
+    assert result.success is False
+    assert "permission" in result.error.lower()

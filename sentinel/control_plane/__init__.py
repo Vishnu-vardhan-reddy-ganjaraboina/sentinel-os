@@ -12,6 +12,7 @@ from sentinel.control_plane.policy import ControlPolicy
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.audit_query import ControlAuditQuery
+from sentinel.control_plane.service import ControlPlane
 
 __all__ = [
     "ControlAuthorizer",
@@ -29,6 +30,8 @@ __all__ = [
     "InMemoryControlAuditRecorder",
     "PersistentControlAuditRecorder",
     "SQLiteControlAuditStore",
+    "ControlAuditQuery",
+    "ControlPlane",
 ]
 
 from sentinel.control_plane.audit import (

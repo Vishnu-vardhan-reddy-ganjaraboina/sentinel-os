@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.callers import ControlCallerType
 
 
 def test_control_context_stores_identity() -> None:
@@ -82,3 +83,29 @@ def test_control_context_is_immutable() -> None:
 
     with pytest.raises(AttributeError):
         context.caller_id = "other"  # type: ignore[misc]
+
+def test_context_accepts_caller_type_enum() -> None:
+    context = ControlContext(
+        caller_id="test",
+        caller_type=ControlCallerType.AI_AGENT,
+    )
+
+    assert context.caller_type is ControlCallerType.AI_AGENT
+
+
+def test_context_accepts_caller_type_enum() -> None:
+    context = ControlContext(
+        caller_id="test",
+        caller_type=ControlCallerType.AI_AGENT,
+    )
+
+    assert context.caller_type is ControlCallerType.AI_AGENT
+
+
+def test_context_preserves_unknown_caller_type() -> None:
+    context = ControlContext(
+        caller_id="test",
+        caller_type="system_agent",
+    )
+
+    assert context.caller_type == "system_agent"

@@ -10,12 +10,12 @@ from sentinel.control_plane.adapter import KernelAdapter
 from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.controller import KernelController
-from sentinel.control_plane.permissions import ControlPermission
 from sentinel.control_plane.service import ControlPlane
 from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.platform import Platform
 from sentinel.system import System
+
 
 class SystemFactory:
     """
@@ -107,20 +107,19 @@ class SystemFactory:
 
         adapter = KernelAdapter(kernel)
 
-        authorizer = ControlAuthorizer(
-            permissions={
-                ControlPermission.READ,
-                ControlPermission.CONTROL,
-           }
+        context = ControlContext(
+            caller_id="system",
+            caller_type="system",
+        )
+
+        authorizer = ControlAuthorizer.from_context(
+            context,
         )
 
         controller = KernelController(
             target=adapter,
             authorizer=authorizer,
-            context=ControlContext(
-                caller_id="system",
-                caller_type="system",
-           ),
+            context=context,
         )
 
         control_plane = ControlPlane(controller)

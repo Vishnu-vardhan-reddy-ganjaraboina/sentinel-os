@@ -8,6 +8,7 @@ from sentinel.control_plane.permissions import ControlPermission
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.callers import ControlCallerType
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.audit import (
     InMemoryControlAuditRecorder,
@@ -371,3 +372,46 @@ def test_audit_recorder_is_optional() -> None:
     )
 
     assert result.success is True
+
+def test_controller_can_use_context_derived_authorizer() -> None:
+    context = ControlContext(
+        caller_id="ai-agent",
+        caller_type=ControlCallerType.AI_AGENT,
+    )
+
+    authorizer = ControlAuthorizer.from_context(context)
+
+    controller = KernelController(
+        target=KernelAdapter(Kernel()),
+        authorizer=authorizer,
+        context=context,
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_LIST,
+    )
+
+    assert result.success is True
+
+def test_ai_agent_cannot_control_service() -> None:
+    context = ControlContext(
+        caller_id="ai-agent",
+        caller_type=ControlCallerType.AI_AGENT,
+    )
+
+    authorizer = ControlAuthorizer.from_context(context)
+
+    controller = KernelController(
+        target=KernelAdapter(Kernel()),
+        authorizer=authorizer,
+        context=context,
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_START,
+        {"name": "memory"},
+    )
+
+    assert result.success is False
+    assert result.error is not None
+    assert "permission" in result.error.lower()

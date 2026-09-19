@@ -8,6 +8,7 @@ from collections.abc import Collection
 
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.permissions import ControlPermission
+from sentinel.control_plane.caller_policy import ControlCallerPolicy
 
 
 class ControlAuthorizer:
@@ -65,3 +66,17 @@ class ControlAuthorizer:
             raise PermissionError(
                 f"Permission denied: '{permission.value}' permission required."
             )
+
+    @classmethod
+    def from_context(
+        cls,
+        context: ControlContext,
+    ) -> ControlAuthorizer:
+        """
+        Create an authorizer using the default permissions for the caller type.
+        """
+        return cls(
+            permissions=ControlCallerPolicy.permissions_for(
+                context.caller_type
+            )
+        )

@@ -5,6 +5,7 @@ import pytest
 from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.permissions import ControlPermission
+from sentinel.control_plane.callers import ControlCallerType
 
 
 def create_context() -> ControlContext:
@@ -111,3 +112,33 @@ def test_identity_does_not_automatically_grant_permission() -> None:
         privileged_identity,
         ControlPermission.CONTROL,
     ) is False
+
+def test_from_context_uses_caller_policy() -> None:
+    context = ControlContext(
+        caller_id="test-ai",
+        caller_type=ControlCallerType.AI_AGENT,
+    )
+
+    authorizer = ControlAuthorizer.from_context(context)
+
+    assert authorizer.permissions == frozenset(
+        {
+            ControlPermission.READ,
+        }
+    )
+
+
+def test_from_context_allows_system_control() -> None:
+    context = ControlContext(
+        caller_id="system",
+        caller_type=ControlCallerType.SYSTEM,
+    )
+
+    authorizer = ControlAuthorizer.from_context(context)
+
+    assert authorizer.permissions == frozenset(
+        {
+            ControlPermission.READ,
+            ControlPermission.CONTROL,
+        }
+    )

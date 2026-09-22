@@ -174,3 +174,35 @@ def test_control_plane_request_context_controls_authorization() -> None:
 
     assert result.success is False
     assert "permission" in result.error.lower()
+
+def test_control_plane_executes_system_status() -> None:
+    control_plane = create_control_plane()
+
+    result = control_plane.execute(
+        KernelCommand.SYSTEM_STATUS,
+    )
+
+    assert result.success is True
+    assert result.command == KernelCommand.SYSTEM_STATUS.value
+    assert result.data == {
+        "services": (
+            "memory",
+            "execution",
+        ),
+        "service_count": 2,
+    }
+
+
+def test_control_plane_executes_system_health() -> None:
+    control_plane = create_control_plane()
+
+    result = control_plane.execute(
+        KernelCommand.SYSTEM_HEALTH,
+    )
+
+    assert result.success is True
+    assert result.command == KernelCommand.SYSTEM_HEALTH.value
+    assert result.data == {
+        "healthy": True,
+        "services": {},
+    }

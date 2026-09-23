@@ -10,6 +10,10 @@ from typing import Any
 
 from sentinel.application import Application
 from sentinel.application_host import ApplicationHost
+from sentinel.control_plane.endpoint_registry import (
+    ControlPlaneEndpoint,
+    ControlPlaneEndpointRegistry,
+)
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport_server import (
     ControlPlaneTransportServer,
@@ -26,6 +30,7 @@ class System:
     Platform owns applications.
     Control Plane owns privileged system control.
     Control Plane transport exposes that control plane to external clients.
+    Endpoint registry publishes the runtime Control Plane endpoint.
 
     System coordinates their startup and shutdown order.
     """
@@ -36,6 +41,7 @@ class System:
         platform: Platform | None = None,
         control_plane: ControlPlane | None = None,
         control_transport: ControlPlaneTransportServer | None = None,
+        endpoint_registry: ControlPlaneEndpointRegistry | None = None,
     ) -> None:
         if not isinstance(kernel, Kernel):
             raise TypeError(
@@ -67,6 +73,15 @@ class System:
                 "ControlPlaneTransportServer instance."
             )
 
+        if endpoint_registry is not None and not isinstance(
+            endpoint_registry,
+            ControlPlaneEndpointRegistry,
+        ):
+            raise TypeError(
+                "endpoint_registry must be a "
+                "ControlPlaneEndpointRegistry instance."
+            )
+
         if (
             control_transport is not None
             and control_plane is not None
@@ -78,49 +93,48 @@ class System:
             )
 
         self._kernel = kernel
-
         self._platform = (
             platform
             if platform is not None
             else Platform()
         )
-
         self._control_plane = control_plane
         self._control_transport = control_transport
+        self._endpoint_registry = endpoint_registry
 
         self._running = False
         self._lock = RLock()
 
     @property
     def kernel(self) -> Kernel:
-        """Return the system kernel."""
         return self._kernel
 
     @property
     def platform(self) -> Platform:
-        """Return the application platform."""
         return self._platform
 
     @property
     def control_plane(self) -> ControlPlane | None:
-        """Return the system control plane."""
         return self._control_plane
 
     @property
     def control_transport(
         self,
     ) -> ControlPlaneTransportServer | None:
-        """Return the Control Plane transport server."""
         return self._control_transport
 
     @property
+    def endpoint_registry(
+        self,
+    ) -> ControlPlaneEndpointRegistry | None:
+        return self._endpoint_registry
+
+    @property
     def host(self) -> ApplicationHost:
-        """Return the application host."""
         return self._platform.host
 
     @property
     def running(self) -> bool:
-        """Return whether the complete system is running."""
         with self._lock:
             return self._running
 
@@ -130,7 +144,6 @@ class System:
         application: Application,
         manifest: Any | None = None,
     ) -> None:
-        """Register an application before system startup."""
         with self._lock:
             if self._running:
                 raise RuntimeError(
@@ -154,6 +167,8 @@ class System:
             Platform
                 ↓
             Control Plane transport
+                ↓
+            Endpoint registry
 
         If any later startup stage fails, earlier stages are rolled back.
         """
@@ -171,7 +186,28 @@ class System:
             if self._control_transport is not None:
                 self._control_transport.start()
 
+            if self._endpoint_registry is not None:
+                if self._control_transport is None:
+                    raise RuntimeError(
+                        "Endpoint registry requires a "
+                        "Control Plane transport."
+                    )
+
+                endpoint = ControlPlaneEndpoint(
+                    version=1,
+                    host=self._control_transport.host,
+                    port=self._control_transport.port,
+                )
+
+                self._endpoint_registry.publish(endpoint)
+
         except Exception:
+            try:
+                if self._endpoint_registry is not None:
+                    self._endpoint_registry.clear()
+            except Exception:
+                pass
+
             try:
                 if (
                     self._control_transport is not None
@@ -202,6 +238,8 @@ class System:
 
         Shutdown order:
 
+            Endpoint registry
+                ↓
             Control Plane transport
                 ↓
             Platform
@@ -220,10 +258,17 @@ class System:
         first_error: Exception | None = None
 
         try:
+            if self._endpoint_registry is not None:
+                self._endpoint_registry.clear()
+        except Exception as exc:
+            first_error = exc
+
+        try:
             if self._control_transport is not None:
                 self._control_transport.stop()
         except Exception as exc:
-            first_error = exc
+            if first_error is None:
+                first_error = exc
 
         try:
             self._platform.shutdown()
@@ -244,7 +289,6 @@ class System:
             raise first_error
 
     def health(self) -> Mapping[str, Any]:
-        """Return system-wide health information."""
         kernel_health = self._kernel.health()
         platform_health = self._platform.health()
 
@@ -269,11 +313,32 @@ class System:
                 ),
             }
 
+        endpoint_registry_health: Mapping[str, Any]
+
+        if self._endpoint_registry is None:
+            endpoint_registry_health = {
+                "configured": False,
+                "registered": False,
+                "healthy": True,
+            }
+        else:
+            endpoint_registry_health = {
+                "configured": True,
+                "registered": self._endpoint_registry.registered,
+                "path": str(self._endpoint_registry.path),
+                "healthy": (
+                    self._endpoint_registry.registered
+                    if self.running
+                    else True
+                ),
+            }
+
         return {
             "running": self.running,
             "kernel": kernel_health,
             "platform": platform_health,
             "control_transport": control_transport_health,
+            "endpoint_registry": endpoint_registry_health,
             "healthy": (
                 self.running
                 and kernel_health.get("healthy") is True
@@ -282,11 +347,11 @@ class System:
                     for health in platform_health.values()
                 )
                 and control_transport_health.get("healthy") is True
+                and endpoint_registry_health.get("healthy") is True
             ),
         }
 
     def __repr__(self) -> str:
-        """Return a useful system representation."""
         return (
             "System("
             f"running={self.running}, "

@@ -18,6 +18,9 @@ from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.platform import Platform
 from sentinel.system import System
+from sentinel.control_plane.endpoint_registry import (
+    ControlPlaneEndpointRegistry,
+)
 
 
 class SystemFactory:
@@ -135,12 +138,20 @@ class SystemFactory:
             host="127.0.0.1",
             port=0,
         )
+        control_transport = ControlPlaneTransportServer(
+            control_plane=control_plane,
+            host="127.0.0.1",
+            port=0,
+        )
+
+        endpoint_registry = ControlPlaneEndpointRegistry()
 
         system = System(
             kernel=kernel,
             platform=platform,
             control_plane=control_plane,
             control_transport=control_transport,
+            endpoint_registry=endpoint_registry,
         )
 
         self._bootstrap = bootstrap

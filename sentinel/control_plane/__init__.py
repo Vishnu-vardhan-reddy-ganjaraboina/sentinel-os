@@ -13,6 +13,8 @@ from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.audit_query import ControlAuditQuery
 from sentinel.control_plane.service import ControlPlane
+from .security_authorizer import SecurityControlAuthorizer
+from .interfaces import ControlAuthorizerProtocol
 
 __all__ = [
     "ControlAuthorizer",

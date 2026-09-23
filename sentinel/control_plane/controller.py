@@ -14,6 +14,7 @@ from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.callers import ControlCallerType
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.interfaces import ControlAuthorizerProtocol
 from sentinel.control_plane.policy import ControlPolicy
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
@@ -42,19 +43,22 @@ class KernelController:
         "_authorizer",
         "_context",
         "_audit_recorder",
+        "_use_caller_policy",
     )
 
     def __init__(
         self,
         target: KernelControlTarget,
-        authorizer: ControlAuthorizer,
+        authorizer: ControlAuthorizerProtocol,
         context: ControlContext,
         audit_recorder: ControlAuditRecorder | None = None,
+        use_caller_policy: bool = True,
     ) -> None:
         self._target = target
         self._authorizer = authorizer
         self._context = context
         self._audit_recorder = audit_recorder
+        self._use_caller_policy = use_caller_policy
 
     @property
     def target(self) -> KernelControlTarget:
@@ -62,7 +66,7 @@ class KernelController:
         return self._target
 
     @property
-    def authorizer(self) -> ControlAuthorizer:
+    def authorizer(self) -> ControlAuthorizerProtocol:
         """Return the configured authorizer."""
         return self._authorizer
 
@@ -75,6 +79,11 @@ class KernelController:
     def audit_recorder(self) -> ControlAuditRecorder | None:
         """Return the configured audit recorder."""
         return self._audit_recorder
+
+    @property
+    def use_caller_policy(self) -> bool:
+        """Return whether caller-type policy resolution is enabled."""
+        return self._use_caller_policy
 
     def execute(
         self,
@@ -149,15 +158,9 @@ class KernelController:
         """
         Authorize the requested command.
 
-        Requests using the controller's own context use the configured
-        authorizer.
-
-        Requests carrying a different known Sentinel caller type use
-        the permissions associated with that caller type.
-
-        Unknown/custom caller types fall back to the configured
-        authorizer so existing application-specific contexts remain
-        compatible.
+        The required Control Plane permission is determined by
+        ControlPolicy. The appropriate authorizer is then resolved
+        for the request.
         """
         permission = ControlPolicy.required_permission(
             request.command,
@@ -173,18 +176,22 @@ class KernelController:
     def _authorizer_for_request(
         self,
         request: ControlRequest,
-    ) -> ControlAuthorizer:
+    ) -> ControlAuthorizerProtocol:
         """
         Resolve the authorizer for a request.
 
-        The controller's configured authorizer is used when:
+        When caller-policy resolution is enabled, known Sentinel
+        caller types use their caller-specific permissions.
 
-        - the request uses the controller's own context, or
-        - the request uses an unknown/custom caller type.
+        When caller-policy resolution is disabled, the configured
+        authorizer is always used directly.
 
-        Known Sentinel caller types use their caller-specific
-        permissions.
+        The latter mode allows external authorization backends such
+        as SecurityControlAuthorizer to remain authoritative.
         """
+        if not self._use_caller_policy:
+            return self._authorizer
+
         if request.context is self._context:
             return self._authorizer
 

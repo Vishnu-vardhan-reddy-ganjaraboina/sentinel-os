@@ -6,17 +6,23 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from sentinel.boot import (
     BootConfiguration,
     BootManager,
     BootProfile,
 )
+from sentinel.cli.kernel_control import CLIKernelControl
 from sentinel.control import (
     ControlClient,
     ControlEndpointRegistry,
 )
+from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.endpoint_registry import (
+    ControlPlaneEndpointRegistry,
+)
+from sentinel.control_plane.result import ControlResult
 from sentinel.process import ProcessHost
 
 
@@ -30,6 +36,9 @@ class CLI:
         self,
         *,
         endpoint_registry: ControlEndpointRegistry | None = None,
+        kernel_endpoint_registry: (
+            ControlPlaneEndpointRegistry | None
+        ) = None,
     ) -> None:
         if endpoint_registry is not None and not isinstance(
             endpoint_registry,
@@ -40,11 +49,25 @@ class CLI:
                 "ControlEndpointRegistry instance."
             )
 
+        if kernel_endpoint_registry is not None and not isinstance(
+            kernel_endpoint_registry,
+            ControlPlaneEndpointRegistry,
+        ):
+            raise TypeError(
+                "kernel_endpoint_registry must be a "
+                "ControlPlaneEndpointRegistry instance."
+            )
+
         self._process: ProcessHost | None = None
+
         self._endpoint_registry = (
             endpoint_registry
             if endpoint_registry is not None
             else ControlEndpointRegistry()
+        )
+
+        self._kernel_control = CLIKernelControl(
+            endpoint_registry=kernel_endpoint_registry,
         )
 
     @property
@@ -62,10 +85,18 @@ class CLI:
 
     @property
     def endpoint_registry(self) -> ControlEndpointRegistry:
-        """Return the control endpoint registry."""
+        """Return the process control endpoint registry."""
         return self._endpoint_registry
 
-    def run(self, argv: Sequence[str] | None = None) -> int:
+    @property
+    def kernel_control(self) -> CLIKernelControl:
+        """Return the Kernel Control Plane CLI adapter."""
+        return self._kernel_control
+
+    def run(
+        self,
+        argv: Sequence[str] | None = None,
+    ) -> int:
         """Parse arguments and execute the requested command."""
         parser = self._build_parser()
         args = parser.parse_args(argv)
@@ -85,7 +116,20 @@ class CLI:
         if args.command == "health":
             return self._health()
 
-        parser.error(f"Unknown command: {args.command}")
+        if args.command == "system":
+            return self._kernel_system_command(
+                args.system_command,
+            )
+
+        if args.command == "service":
+            return self._kernel_service_command(
+                args.service_command,
+                getattr(args, "name", None),
+            )
+
+        parser.error(
+            f"Unknown command: {args.command}"
+        )
         return 2
 
     @staticmethod
@@ -101,10 +145,15 @@ class CLI:
             required=True,
         )
 
+        # ------------------------------------------------------------------
+        # Process-level commands
+        # ------------------------------------------------------------------
+
         start_parser = subparsers.add_parser(
             "start",
             help="Start Sentinel OS.",
         )
+
         start_parser.add_argument(
             "--config",
             type=Path,
@@ -114,6 +163,7 @@ class CLI:
                 f"(default: {DEFAULT_CONFIG})."
             ),
         )
+
         start_parser.add_argument(
             "--profile",
             default="default",
@@ -127,15 +177,101 @@ class CLI:
 
         subparsers.add_parser(
             "status",
-            help="Show Sentinel OS status.",
+            help="Show Sentinel OS process status.",
         )
 
         subparsers.add_parser(
             "health",
-            help="Show Sentinel OS health.",
+            help="Show Sentinel OS process health.",
+        )
+
+        # ------------------------------------------------------------------
+        # Kernel Control Plane commands
+        # ------------------------------------------------------------------
+
+        system_parser = subparsers.add_parser(
+            "system",
+            help="Inspect and control the Sentinel Kernel.",
+        )
+
+        system_subparsers = system_parser.add_subparsers(
+            dest="system_command",
+            required=True,
+        )
+
+        system_subparsers.add_parser(
+            "status",
+            help="Show Kernel system status.",
+        )
+
+        system_subparsers.add_parser(
+            "health",
+            help="Show Kernel system health.",
+        )
+
+        service_parser = subparsers.add_parser(
+            "service",
+            help="Inspect and control Kernel services.",
+        )
+
+        service_subparsers = service_parser.add_subparsers(
+            dest="service_command",
+            required=True,
+        )
+
+        service_subparsers.add_parser(
+            "list",
+            help="List Kernel services.",
+        )
+
+        service_status_parser = service_subparsers.add_parser(
+            "status",
+            help="Show Kernel service status.",
+        )
+
+        service_status_parser.add_argument(
+            "name",
+            help="Kernel service name.",
+        )
+
+        service_start_parser = service_subparsers.add_parser(
+            "start",
+            help="Start a Kernel service.",
+        )
+
+        service_start_parser.add_argument(
+            "name",
+            help="Kernel service name.",
+        )
+
+        service_stop_parser = service_subparsers.add_parser(
+            "stop",
+            help="Stop a Kernel service.",
+        )
+
+        service_stop_parser.add_argument(
+            "name",
+            help="Kernel service name.",
+        )
+
+
+        # Replace the hidden compatibility parser with the real nested
+        # restart command below.
+        service_restart_parser = service_subparsers.add_parser(
+            "restart",
+            help="Restart a Kernel service.",
+        )
+
+        service_restart_parser.add_argument(
+            "name",
+            help="Kernel service name.",
         )
 
         return parser
+
+    # ------------------------------------------------------------------
+    # Process lifecycle
+    # ------------------------------------------------------------------
 
     def _start(
         self,
@@ -154,7 +290,9 @@ class CLI:
         configuration = BootConfiguration()
         configuration.load(config_path)
 
-        profile = BootProfile(name=profile_name)
+        profile = BootProfile(
+            name=profile_name,
+        )
 
         boot_manager = BootManager.from_configuration(
             configuration,
@@ -209,7 +347,9 @@ class CLI:
             return 0
 
         except Exception as exc:
-            print(f"Sentinel OS start failed: {exc}")
+            print(
+                f"Sentinel OS start failed: {exc}"
+            )
             return 1
 
     def _stop(self) -> int:
@@ -218,7 +358,9 @@ class CLI:
             try:
                 result = self._process.stop()
             except Exception as exc:
-                print(f"Sentinel OS shutdown failed: {exc}")
+                print(
+                    f"Sentinel OS shutdown failed: {exc}"
+                )
                 return 1
 
             print(result.message)
@@ -233,7 +375,9 @@ class CLI:
         try:
             success, _data, error = client.stop()
         except Exception as exc:
-            print(f"Unable to contact Sentinel OS: {exc}")
+            print(
+                f"Unable to contact Sentinel OS: {exc}"
+            )
             return 1
 
         if not success:
@@ -244,11 +388,13 @@ class CLI:
             )
             return 1
 
-        print("Sentinel OS shutdown requested.")
+        print(
+            "Sentinel OS shutdown requested."
+        )
         return 0
 
     def _status(self) -> int:
-        """Show current Sentinel OS status."""
+        """Show current Sentinel OS process status."""
         if self._process is not None:
             print(
                 "Sentinel OS: "
@@ -283,11 +429,13 @@ class CLI:
             print("Sentinel OS: unavailable")
             return 1
 
-        print(f"Sentinel OS: {state}")
+        print(
+            f"Sentinel OS: {state}"
+        )
         return 0
 
     def _health(self) -> int:
-        """Show current Sentinel OS health."""
+        """Show current Sentinel OS process health."""
         if self._process is not None:
             health = self._process.health()
 
@@ -345,8 +493,104 @@ class CLI:
 
         return 0 if healthy else 1
 
+    # ------------------------------------------------------------------
+    # Kernel Control Plane
+    # ------------------------------------------------------------------
+
+    def _kernel_system_command(
+        self,
+        command: str,
+    ) -> int:
+        """Execute a Kernel system-level Control Plane command."""
+        command_map = {
+            "status": KernelCommand.SYSTEM_STATUS,
+            "health": KernelCommand.SYSTEM_HEALTH,
+        }
+
+        kernel_command = command_map[command]
+
+        try:
+            result = self._kernel_control.execute(
+                kernel_command,
+            )
+        except Exception as exc:
+            print(
+                f"Unable to contact Kernel Control Plane: {exc}"
+            )
+            return 1
+
+        return self._print_control_result(result)
+
+    def _kernel_service_command(
+        self,
+        command: str,
+        name: str | None,
+    ) -> int:
+        """Execute a Kernel service Control Plane command."""
+        command_map = {
+            "list": KernelCommand.SERVICE_LIST,
+            "status": KernelCommand.SERVICE_STATUS,
+            "start": KernelCommand.SERVICE_START,
+            "stop": KernelCommand.SERVICE_STOP,
+            "restart": KernelCommand.SERVICE_RESTART,
+        }
+
+        kernel_command = command_map[command]
+
+        data: dict[str, Any] = {}
+
+        if command != "list":
+            if name is None:
+                print("Service name is required.")
+                return 2
+
+            data["name"] = name
+
+        try:
+            result = self._kernel_control.execute(
+                kernel_command,
+                data,
+            )
+        except Exception as exc:
+            print(
+                f"Unable to contact Kernel Control Plane: {exc}"
+            )
+            return 1
+
+        return self._print_control_result(result)
+
+    @staticmethod
+    def _print_control_result(
+        result: ControlResult,
+    ) -> int:
+        """Print a Kernel Control Plane result."""
+        if not result.success:
+            print(
+                result.error
+                if result.error is not None
+                else "Kernel Control Plane command failed."
+            )
+            return 1
+
+        if not result.data:
+            print(
+                "Command completed successfully."
+            )
+            return 0
+
+        for key, value in result.data.items():
+            print(
+                f"{key}: {value}"
+            )
+
+        return 0
+
+    # ------------------------------------------------------------------
+    # Process Control helpers
+    # ------------------------------------------------------------------
+
     def _remote_client(self) -> ControlClient | None:
-        """Create a client for the registered Sentinel endpoint."""
+        """Create a client for the registered Sentinel process endpoint."""
         try:
             endpoint = self._endpoint_registry.load()
         except (FileNotFoundError, ValueError):

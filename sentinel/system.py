@@ -11,6 +11,9 @@ from typing import Any
 from sentinel.application import Application
 from sentinel.application_host import ApplicationHost
 from sentinel.control_plane.service import ControlPlane
+from sentinel.control_plane.transport_server import (
+    ControlPlaneTransportServer,
+)
 from sentinel.kernel.kernel import Kernel
 from sentinel.platform import Platform
 
@@ -21,6 +24,9 @@ class System:
 
     Kernel owns system services.
     Platform owns applications.
+    Control Plane owns privileged system control.
+    Control Plane transport exposes that control plane to external clients.
+
     System coordinates their startup and shutdown order.
     """
 
@@ -29,6 +35,7 @@ class System:
         kernel: Kernel,
         platform: Platform | None = None,
         control_plane: ControlPlane | None = None,
+        control_transport: ControlPlaneTransportServer | None = None,
     ) -> None:
         if not isinstance(kernel, Kernel):
             raise TypeError(
@@ -51,13 +58,35 @@ class System:
                 "control_plane must be a ControlPlane instance."
             )
 
+        if control_transport is not None and not isinstance(
+            control_transport,
+            ControlPlaneTransportServer,
+        ):
+            raise TypeError(
+                "control_transport must be a "
+                "ControlPlaneTransportServer instance."
+            )
+
+        if (
+            control_transport is not None
+            and control_plane is not None
+            and control_transport.control_plane is not control_plane
+        ):
+            raise ValueError(
+                "control_transport must use the same ControlPlane "
+                "owned by the System."
+            )
+
         self._kernel = kernel
+
         self._platform = (
             platform
             if platform is not None
             else Platform()
         )
+
         self._control_plane = control_plane
+        self._control_transport = control_transport
 
         self._running = False
         self._lock = RLock()
@@ -76,6 +105,13 @@ class System:
     def control_plane(self) -> ControlPlane | None:
         """Return the system control plane."""
         return self._control_plane
+
+    @property
+    def control_transport(
+        self,
+    ) -> ControlPlaneTransportServer | None:
+        """Return the Control Plane transport server."""
+        return self._control_transport
 
     @property
     def host(self) -> ApplicationHost:
@@ -111,9 +147,15 @@ class System:
         """
         Start the complete Sentinel OS system.
 
-        Kernel starts first. Applications start only after the kernel
-        has successfully booted. If application startup fails, the
-        platform is rolled back and the kernel is shut down.
+        Startup order:
+
+            Kernel
+                ↓
+            Platform
+                ↓
+            Control Plane transport
+
+        If any later startup stage fails, earlier stages are rolled back.
         """
         with self._lock:
             if self._running:
@@ -125,11 +167,30 @@ class System:
 
         try:
             self._platform.start()
+
+            if self._control_transport is not None:
+                self._control_transport.start()
+
         except Exception:
+            try:
+                if (
+                    self._control_transport is not None
+                    and self._control_transport.running
+                ):
+                    self._control_transport.stop()
+            except Exception:
+                pass
+
+            try:
+                self._platform.shutdown()
+            except Exception:
+                pass
+
             try:
                 self._kernel.shutdown()
             except Exception:
                 pass
+
             raise
 
         with self._lock:
@@ -139,9 +200,16 @@ class System:
         """
         Shut down the complete Sentinel OS system.
 
-        Applications are stopped before kernel services.
-        Kernel shutdown is attempted even when application shutdown
-        fails.
+        Shutdown order:
+
+            Control Plane transport
+                ↓
+            Platform
+                ↓
+            Kernel
+
+        All shutdown stages are attempted even when an earlier stage
+        fails. The first failure is raised after cleanup is attempted.
         """
         with self._lock:
             if not self._running:
@@ -152,9 +220,16 @@ class System:
         first_error: Exception | None = None
 
         try:
-            self._platform.shutdown()
+            if self._control_transport is not None:
+                self._control_transport.stop()
         except Exception as exc:
             first_error = exc
+
+        try:
+            self._platform.shutdown()
+        except Exception as exc:
+            if first_error is None:
+                first_error = exc
 
         try:
             self._kernel.shutdown()
@@ -173,10 +248,32 @@ class System:
         kernel_health = self._kernel.health()
         platform_health = self._platform.health()
 
+        control_transport_health: Mapping[str, Any]
+
+        if self._control_transport is None:
+            control_transport_health = {
+                "configured": False,
+                "running": False,
+                "healthy": True,
+            }
+        else:
+            control_transport_health = {
+                "configured": True,
+                "running": self._control_transport.running,
+                "host": self._control_transport.host,
+                "port": self._control_transport.port,
+                "healthy": (
+                    self._control_transport.running
+                    if self.running
+                    else True
+                ),
+            }
+
         return {
             "running": self.running,
             "kernel": kernel_health,
             "platform": platform_health,
+            "control_transport": control_transport_health,
             "healthy": (
                 self.running
                 and kernel_health.get("healthy") is True
@@ -184,6 +281,7 @@ class System:
                     health.get("healthy") is True
                     for health in platform_health.values()
                 )
+                and control_transport_health.get("healthy") is True
             ),
         }
 

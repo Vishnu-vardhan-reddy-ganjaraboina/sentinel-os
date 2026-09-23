@@ -11,6 +11,9 @@ from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.controller import KernelController
 from sentinel.control_plane.service import ControlPlane
+from sentinel.control_plane.transport_server import (
+    ControlPlaneTransportServer,
+)
 from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.platform import Platform
@@ -82,7 +85,8 @@ class SystemFactory:
         """
         Compose and return a new Sentinel System.
 
-        The system is not started by this method.
+        The system and its Control Plane transport are not started
+        by this method.
         """
         if self._system is not None:
             raise RuntimeError(
@@ -122,12 +126,21 @@ class SystemFactory:
             context=context,
         )
 
-        control_plane = ControlPlane(controller)
+        control_plane = ControlPlane(
+            controller,
+        )
+
+        control_transport = ControlPlaneTransportServer(
+            control_plane=control_plane,
+            host="127.0.0.1",
+            port=0,
+        )
 
         system = System(
             kernel=kernel,
             platform=platform,
             control_plane=control_plane,
+            control_transport=control_transport,
         )
 
         self._bootstrap = bootstrap

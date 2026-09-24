@@ -7,6 +7,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from sentinel.brain.intent import Intent
+
 
 class OrchestrationRequest(ABC):
     """
@@ -27,6 +29,11 @@ class OrchestrationRequest(ABC):
     @abstractmethod
     def context(self) -> dict[str, Any]:
         """Return request context."""
+
+    @property
+    @abstractmethod
+    def intent(self) -> Intent | None:
+        """Return the structured intent, if one is available."""
 
 
 class OrchestrationResult(ABC):

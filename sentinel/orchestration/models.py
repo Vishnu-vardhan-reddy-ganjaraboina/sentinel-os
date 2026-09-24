@@ -7,6 +7,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from sentinel.brain.intent import Intent
 from sentinel.orchestration.interfaces import (
     OrchestrationRequest as OrchestrationRequestInterface,
 )
@@ -23,9 +24,15 @@ class OrchestrationRequest(OrchestrationRequestInterface):
         request_id: str,
         input: Any,
         context: dict[str, Any] | None = None,
+        intent: Intent | None = None,
     ) -> None:
         if not isinstance(request_id, str):
             raise TypeError("request_id must be a string.")
+
+        if intent is not None and not isinstance(intent, Intent):
+            raise TypeError(
+                "intent must be an Intent instance or None."
+            )
 
         self._request_id = request_id
         self._input = deepcopy(input)
@@ -34,6 +41,7 @@ class OrchestrationRequest(OrchestrationRequestInterface):
             if context is None
             else deepcopy(context)
         )
+        self._intent = deepcopy(intent)
 
     @property
     def id(self) -> str:
@@ -49,6 +57,11 @@ class OrchestrationRequest(OrchestrationRequestInterface):
     def context(self) -> dict[str, Any]:
         """Return an isolated copy of the request context."""
         return deepcopy(self._context)
+
+    @property
+    def intent(self) -> Intent | None:
+        """Return an isolated copy of the structured intent."""
+        return deepcopy(self._intent)
 
 
 class OrchestrationResult(OrchestrationResultInterface):

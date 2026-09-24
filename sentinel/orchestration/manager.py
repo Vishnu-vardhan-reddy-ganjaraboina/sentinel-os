@@ -203,10 +203,11 @@ class OrchestrationManager:
                 for chunk in chunks
             ]
 
-        context_data = dict(request.context)
-        context_data["memories"] = memory_context
-        context_data["knowledge"] = knowledge_context
-        context_data["capabilities"] = self._get_capability_context()
+        context_data = self._build_brain_context(
+            request=request,
+            memory_context=memory_context,
+            knowledge_context=knowledge_context,
+        )
 
         context = self._brain.create_context(
             context_id=request.id,
@@ -399,3 +400,40 @@ class OrchestrationManager:
             for capability in self._capabilities.list()
             if capability.enabled
         ]
+
+    def _build_brain_context(
+        self,
+        request: OrchestrationRequest,
+        memory_context: list[dict[str, Any]],
+        knowledge_context: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Build the context supplied to the Brain.
+
+        Intent provides structured defaults for Brain planning.
+        Explicit request context takes precedence over Intent-derived
+        values.
+        """
+        context_data: dict[str, Any] = {}
+
+        if request.intent is not None:
+            context_data.update(
+                dict(request.intent.context)
+            )
+
+            if request.intent.capability_id is not None:
+                context_data["capability_id"] = (
+                    request.intent.capability_id
+                )
+
+            context_data["capability_arguments"] = dict(
+                request.intent.arguments
+            )
+
+        context_data.update(request.context)
+
+        context_data["memories"] = memory_context
+        context_data["knowledge"] = knowledge_context
+        context_data["capabilities"] = self._get_capability_context()
+
+        return context_data

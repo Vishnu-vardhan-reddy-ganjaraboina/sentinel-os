@@ -16,6 +16,7 @@ from sentinel.security.constants import Permission, Role
 from sentinel.security.exceptions import AuthorizationError
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
+from sentinel.brain.intent import Intent
 
 
 class EchoCapability(BaseCapability):
@@ -719,4 +720,163 @@ def test_execute_disabled_capability_fails_before_authorization() -> None:
         OrchestrationExecutionError,
         match="disabled",
     ):
+        manager.execute(request)
+def test_brain_receives_intent_context() -> None:
+    manager = OrchestrationManager()
+
+    request = OrchestrationRequest(
+        request_id="req.intent",
+        input="Open Chrome",
+        intent=Intent(
+            name="open_application",
+            input="Open Chrome",
+            context={
+                "source": "intent",
+                "application": "chrome",
+            },
+        ),
+    )
+
+    result = manager.execute(request)
+
+    assert isinstance(result.data, dict)
+
+    context = result.data["context"]
+
+    assert context["data"]["source"] == "intent"
+    assert context["data"]["application"] == "chrome"
+
+def test_intent_selects_capability() -> None:
+    capabilities = CapabilityManager()
+    capabilities.register(EchoCapability())
+
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.intent.capability",
+        input="Echo hello",
+        intent=Intent(
+            name="echo",
+            input="Echo hello",
+            capability_id="system.echo",
+            arguments={
+                "message": "hello",
+            },
+        ),
+    )
+
+    result = manager.execute(request)
+
+    assert isinstance(result.data, dict)
+
+    plan = result.data["plan"]
+    step = plan["steps"][0]
+
+    assert step["capability_id"] == "system.echo"
+    assert step["arguments"] == {
+        "message": "hello",
+    }
+
+def test_request_context_overrides_intent_context() -> None:
+    manager = OrchestrationManager()
+
+    request = OrchestrationRequest(
+        request_id="req.intent.override",
+        input="hello",
+        context={
+            "source": "request",
+        },
+        intent=Intent(
+            name="test",
+            input="hello",
+            context={
+                "source": "intent",
+                "other": "value",
+            },
+        ),
+    )
+
+    result = manager.execute(request)
+
+    assert isinstance(result.data, dict)
+
+    context = result.data["context"]
+
+    assert context["data"]["source"] == "request"
+    assert context["data"]["other"] == "value"
+
+def test_intent_capability_executes_through_orchestration() -> None:
+    capabilities = CapabilityManager()
+    capabilities.register(EchoCapability())
+
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.intent.execute",
+        input="hello",
+        intent=Intent(
+            name="echo",
+            input="hello",
+            capability_id="system.echo",
+            arguments={
+                "message": "hello from intent",
+            },
+        ),
+    )
+
+    result = manager.execute(request)
+
+    assert result.success is True
+    assert result.data["capability_results"][0] == {
+        "step": 1,
+        "capability_id": "system.echo",
+        "result": {
+            "message": "hello from intent",
+        },
+    }
+
+def test_intent_capability_still_requires_authorization() -> None:
+    capabilities = CapabilityManager()
+    capabilities.register(EchoCapability())
+
+    security = SecurityManager()
+
+    identity = SecurityIdentity(
+        "user.1",
+        "Test User",
+        {Role.USER},
+    )
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.intent.denied",
+        input="hello",
+        intent=Intent(
+            name="echo",
+            input="hello",
+            capability_id="system.echo",
+            arguments={
+                "message": "hello",
+            },
+        ),
+    )
+
+    with pytest.raises(AuthorizationError):
         manager.execute(request)

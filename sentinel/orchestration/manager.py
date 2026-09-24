@@ -155,6 +155,46 @@ class OrchestrationManager:
 
         return orchestration_result
 
+    def execute_goal(
+        self,
+        request_id: str,
+        input: str,
+        context: dict[str, Any] | None = None,
+    ) -> OrchestrationResult:
+        """
+        Resolve a user goal into an Intent and execute it.
+
+        Intent resolution is performed by the configured Brain manager.
+        Execution continues through the normal orchestration pipeline.
+        """
+        if not isinstance(request_id, str):
+            raise TypeError("request_id must be a string.")
+
+        if not request_id.strip():
+            raise ValueError("request_id must not be empty.")
+
+        if not isinstance(input, str):
+            raise TypeError("input must be a string.")
+
+        if not input.strip():
+            raise ValueError("input must not be empty.")
+
+        if context is not None and not isinstance(context, dict):
+            raise TypeError("context must be a dictionary or None.")
+
+        intent = self._brain.resolve_intent(
+            input=input,
+            context=context,
+        )
+
+        request = OrchestrationRequest(
+            request_id=request_id,
+            input=input,
+            context=context,
+            intent=intent,
+        )
+
+        return self.execute(request)
     def can_execute(
         self,
         request: OrchestrationRequest,

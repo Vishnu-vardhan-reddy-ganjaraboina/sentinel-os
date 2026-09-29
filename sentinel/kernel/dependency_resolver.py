@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from sentinel.kernel.exceptions import (
     CircularDependencyError,
     DependencyNotFoundError,
+    DuplicateServiceError,
 )
 from sentinel.kernel.service import Service
 
@@ -26,10 +27,15 @@ class DependencyResolver:
         services: Iterable[Service],
     ) -> tuple[Service, ...]:
 
-        service_map = {
-            service.name: service
-            for service in services
-        }
+        service_map: dict[str, Service] = {}
+
+        for service in services:
+            if service.name in service_map:
+                raise DuplicateServiceError(
+                    f"Service '{service.name}' is already registered."
+                )
+
+            service_map[service.name] = service
 
         visited: set[str] = set()
         visiting: set[str] = set()

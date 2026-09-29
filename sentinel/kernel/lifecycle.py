@@ -82,7 +82,12 @@ class LifecycleManager:
                 raise ServiceAlreadyRunningError(
                     f"{service.name} is already starting."
                 )
-
+            
+            if current_state is ServiceState.STOPPING:
+                raise ServiceAlreadyRunningError(
+                    f"{service.name} is already stopping."
+                )
+            
             self._states[service.name] = ServiceState.STARTING
 
         try:

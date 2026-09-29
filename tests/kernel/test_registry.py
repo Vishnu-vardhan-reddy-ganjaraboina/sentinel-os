@@ -122,3 +122,33 @@ def test_concurrent_registration() -> None:
         thread.join()
 
     assert len(registry) == 25
+
+def test_concurrent_duplicate_registration() -> None:
+    registry = ServiceRegistry()
+
+    errors: list[Exception] = []
+
+    def register() -> None:
+        try:
+            registry.register(DummyService("shared"))
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=register)
+        for _ in range(25)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert len(registry) == 1
+    assert registry.exists("shared")
+    assert len(errors) == 24
+    assert all(
+        isinstance(error, DuplicateServiceError)
+        for error in errors
+    )

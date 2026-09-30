@@ -76,6 +76,31 @@ class SecurityAuthenticator(Authenticator):
             ),
         )
 
+    def _prepare(
+        self,
+        credentials: SecurityCredentials,
+    ) -> _CredentialRecord:
+        """
+        Prepare a credential verifier without modifying stored state.
+
+        This intentionally performs the expensive PBKDF2 operation
+        without holding the authenticator lock.
+        """
+        return self._create_record(
+            credentials.secret,
+        )
+
+    def _commit(
+        self,
+        username: str,
+        record: _CredentialRecord,
+    ) -> None:
+        """
+        Commit a prepared credential verifier.
+        """
+        with self._lock:
+            self._credentials[username] = record
+
     def register(
         self,
         credentials: SecurityCredentials,
@@ -86,14 +111,12 @@ class SecurityAuthenticator(Authenticator):
         Existing usernames are replaced, preserving the previous
         registration semantics.
         """
-        record = self._create_record(
-            credentials.secret,
-        )
+        record = self._prepare(credentials)
 
-        with self._lock:
-            self._credentials[
-                credentials.username
-            ] = record
+        self._commit(
+            credentials.username,
+            record,
+        )
 
     def unregister(
         self,
@@ -117,7 +140,7 @@ class SecurityAuthenticator(Authenticator):
         """
         with self._lock:
             stored = self._credentials.get(
-                credentials.username
+                credentials.username,
             )
 
         if stored is None:

@@ -45,3 +45,12 @@ class PluginNotFoundError(PluginError):
     """
     Raised when a plugin cannot be found.
     """
+
+
+class PluginCleanupError(PluginError):
+    """
+    Raised when one or more plugins cannot be safely cleaned up.
+
+    The original cleanup failures are preserved in the exception's
+    ``__cause__`` or exception-group structure where applicable.
+    """

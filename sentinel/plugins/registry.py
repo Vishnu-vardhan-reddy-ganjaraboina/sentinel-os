@@ -7,6 +7,7 @@ from __future__ import annotations
 from threading import RLock
 from typing import Any
 
+from sentinel.plugins.constants import PluginState
 from sentinel.plugins.exceptions import (
     PluginNotFoundError,
     PluginRegistrationError,
@@ -44,16 +45,12 @@ class SentinelPluginRegistry(PluginRegistry):
                 If the plugin name is invalid or already registered.
         """
         if not isinstance(plugin, Plugin):
-            raise TypeError(
-                "plugin must implement Plugin"
-            )
+            raise TypeError("plugin must implement Plugin")
 
         name = plugin.name
 
         if not isinstance(name, str):
-            raise TypeError(
-                "plugin.name must be a string"
-            )
+            raise TypeError("plugin.name must be a string")
 
         if not name.strip():
             raise PluginRegistrationError(
@@ -73,7 +70,11 @@ class SentinelPluginRegistry(PluginRegistry):
         name: str,
     ) -> None:
         """
-        Remove a registered plugin.
+        Remove a safely removable plugin from the registry.
+
+        Plugins that are still part of the active lifecycle cannot be
+        removed directly. Lifecycle cleanup must be performed through
+        the PluginManager.
 
         Raises:
             TypeError:
@@ -84,13 +85,29 @@ class SentinelPluginRegistry(PluginRegistry):
 
             PluginNotFoundError:
                 If the plugin is not registered.
+
+            PluginRegistrationError:
+                If the plugin is still loaded, enabled, or disabled.
         """
         self._validate_name(name)
 
         with self._lock:
-            if name not in self._plugins:
+            try:
+                plugin = self._plugins[name]
+            except KeyError as exc:
                 raise PluginNotFoundError(
                     f"Plugin '{name}' not found."
+                ) from exc
+
+            if plugin.state in {
+                PluginState.LOADED,
+                PluginState.ENABLED,
+                PluginState.DISABLED,
+            }:
+                raise PluginRegistrationError(
+                    f"Plugin '{name}' cannot be unregistered while "
+                    f"in state '{plugin.state.value}'. "
+                    "Use PluginManager lifecycle operations first."
                 )
 
             del self._plugins[name]
@@ -121,10 +138,24 @@ class SentinelPluginRegistry(PluginRegistry):
 
     def clear(self) -> None:
         """
-        Remove all registered plugins.
+        Remove plugins that are safe to unregister.
+
+        Active lifecycle states are preserved. Lifecycle cleanup should
+        be performed by PluginManager before registry removal.
         """
         with self._lock:
-            self._plugins.clear()
+            removable = [
+                name
+                for name, plugin in self._plugins.items()
+                if plugin.state
+                in {
+                    PluginState.REGISTERED,
+                    PluginState.UNLOADED,
+                }
+            ]
+
+            for name in removable:
+                del self._plugins[name]
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -156,11 +187,7 @@ class SentinelPluginRegistry(PluginRegistry):
     def _validate_name(name: str) -> None:
         """Validate a plugin name."""
         if not isinstance(name, str):
-            raise TypeError(
-                "plugin name must be a string"
-            )
+            raise TypeError("plugin name must be a string")
 
         if not name.strip():
-            raise ValueError(
-                "plugin name cannot be empty"
-            )
+            raise ValueError("plugin name cannot be empty")

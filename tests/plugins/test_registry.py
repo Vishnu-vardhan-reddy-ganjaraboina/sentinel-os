@@ -1,7 +1,8 @@
-import pytest
-
 import threading
 
+import pytest
+
+from sentinel.plugins.constants import PluginState
 from sentinel.plugins.exceptions import (
     PluginNotFoundError,
     PluginRegistrationError,
@@ -58,6 +59,50 @@ def test_unregister():
     registry.unregister("sample")
 
     assert len(registry) == 0
+
+def test_unregister_rejects_loaded_plugin() -> None:
+    registry = SentinelPluginRegistry()
+    plugin = SentinelPlugin("sample")
+
+    registry.register(plugin)
+    plugin.load()
+
+    with pytest.raises(PluginRegistrationError):
+        registry.unregister("sample")
+
+    assert "sample" in registry
+    assert plugin.state == PluginState.LOADED
+
+
+def test_unregister_rejects_enabled_plugin() -> None:
+    registry = SentinelPluginRegistry()
+    plugin = SentinelPlugin("sample")
+
+    registry.register(plugin)
+    plugin.load()
+    plugin.enable()
+
+    with pytest.raises(PluginRegistrationError):
+        registry.unregister("sample")
+
+    assert "sample" in registry
+    assert plugin.state == PluginState.ENABLED
+
+
+def test_unregister_rejects_disabled_plugin() -> None:
+    registry = SentinelPluginRegistry()
+    plugin = SentinelPlugin("sample")
+
+    registry.register(plugin)
+    plugin.load()
+    plugin.enable()
+    plugin.disable()
+
+    with pytest.raises(PluginRegistrationError):
+        registry.unregister("sample")
+
+    assert "sample" in registry
+    assert plugin.state == PluginState.DISABLED
 
 
 def test_all():

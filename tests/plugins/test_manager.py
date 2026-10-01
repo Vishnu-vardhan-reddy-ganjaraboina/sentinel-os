@@ -1,6 +1,14 @@
+import threading
+
 import pytest
 
 from sentinel.plugins.constants import PluginState
+from sentinel.plugins.exceptions import (
+    PluginCleanupError,
+    PluginDisableError,
+    PluginLoadError,
+    PluginUnloadError,
+)
 from sentinel.plugins.manager import PluginManager
 from sentinel.plugins.plugin import SentinelPlugin
 
@@ -144,3 +152,127 @@ def test_clear_disables_and_unloads_enabled_plugin() -> None:
 
     assert plugin.state == PluginState.UNLOADED
     assert len(manager) == 0
+
+class FailingDisablePlugin(SentinelPlugin):
+    def disable(self) -> None:
+        raise PluginDisableError("disable failure")
+
+
+class FailingUnloadPlugin(SentinelPlugin):
+    def unload(self) -> None:
+        raise PluginUnloadError("unload failure")
+
+
+def test_clear_continues_after_plugin_cleanup_failure() -> None:
+    manager = PluginManager()
+
+    failing = FailingDisablePlugin("failing")
+    healthy = SentinelPlugin("healthy")
+
+    manager.register(failing)
+    manager.register(healthy)
+
+    manager.load("failing")
+    failing.enable()
+
+    manager.load("healthy")
+
+    with pytest.raises(PluginCleanupError):
+        manager.clear()
+
+    assert "failing" in manager.registry
+    assert "healthy" not in manager.registry
+
+    assert failing.state == PluginState.ENABLED
+
+
+def test_clear_removes_successfully_cleaned_plugins() -> None:
+    manager = PluginManager()
+
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+    manager.load("sample")
+
+    manager.clear()
+
+    assert plugin.state == PluginState.UNLOADED
+    assert len(manager) == 0
+
+
+def test_clear_unloads_disabled_plugin() -> None:
+    manager = PluginManager()
+
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+    manager.load("sample")
+    manager.enable("sample")
+    manager.disable("sample")
+
+    manager.clear()
+
+    assert plugin.state == PluginState.UNLOADED
+    assert len(manager) == 0
+
+
+def test_clear_removes_registered_plugin_without_lifecycle_operation() -> None:
+    manager = PluginManager()
+
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+
+    manager.clear()
+
+    assert plugin.state == PluginState.REGISTERED
+    assert len(manager) == 0
+
+
+def test_clear_removes_already_unloaded_plugin() -> None:
+    manager = PluginManager()
+
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+    manager.load("sample")
+    manager.unload("sample")
+
+    manager.clear()
+
+    assert plugin.state == PluginState.UNLOADED
+    assert len(manager) == 0
+
+def test_concurrent_manager_lifecycle_operations_are_serialized() -> None:
+    manager = PluginManager()
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+
+    errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def load() -> None:
+        try:
+            manager.load("sample")
+        except Exception as exc:
+            with lock:
+                errors.append(exc)
+
+    threads = [
+        threading.Thread(target=load)
+        for _ in range(20)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert plugin.state == PluginState.LOADED
+
+    assert sum(
+        isinstance(error, PluginLoadError)
+        for error in errors
+    ) == 19

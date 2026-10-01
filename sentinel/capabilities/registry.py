@@ -1,5 +1,13 @@
 """
 Capability registry for the Sentinel Capabilities subsystem.
+
+The registry is responsible for:
+- capability registration
+- capability removal
+- capability lookup
+- capability discovery
+- thread-safe access
+- stable snapshots for readers
 """
 
 from __future__ import annotations
@@ -14,12 +22,24 @@ from sentinel.capabilities.exceptions import (
     CapabilityNotFoundError,
 )
 
+
 CapabilityList = list[BaseCapability]
 
 
 class CapabilityRegistry:
     """
     Thread-safe registry for Sentinel capabilities.
+
+    Concurrency model
+    -----------------
+    Mutating operations are protected by an RLock.
+
+    Read operations take the same lock while accessing the underlying
+    dictionary. Collection-returning operations return snapshots so the
+    caller never receives a live view of the registry.
+
+    The lock is never held while a caller consumes an iterator or while
+    a capability executes.
     """
 
     def __init__(self) -> None:
@@ -32,14 +52,26 @@ class CapabilityRegistry:
     ) -> None:
         """
         Register a capability.
+
+        Raises
+        ------
+        CapabilityAlreadyExistsError
+            If another capability with the same ID is already registered.
         """
+        if not isinstance(capability, BaseCapability):
+            raise TypeError(
+                "capability must be an instance of BaseCapability."
+            )
+
+        capability_id = capability.id
+
         with self._lock:
-            if capability.id in self._capabilities:
+            if capability_id in self._capabilities:
                 raise CapabilityAlreadyExistsError(
-                    f"Capability '{capability.id}' already exists."
+                    f"Capability '{capability_id}' already exists."
                 )
 
-            self._capabilities[capability.id] = capability
+            self._capabilities[capability_id] = capability
 
     def unregister(
         self,
@@ -47,12 +79,17 @@ class CapabilityRegistry:
     ) -> None:
         """
         Remove a capability.
+
+        Raises
+        ------
+        CapabilityNotFoundError
+            If the capability is not registered.
         """
+        self._validate_capability_id(capability_id)
+
         with self._lock:
             if capability_id not in self._capabilities:
-                raise CapabilityNotFoundError(
-                    capability_id
-                )
+                raise CapabilityNotFoundError(capability_id)
 
             del self._capabilities[capability_id]
 
@@ -61,44 +98,62 @@ class CapabilityRegistry:
         capability_id: str,
     ) -> BaseCapability:
         """
-        Return a capability.
+        Return a registered capability.
+
+        Raises
+        ------
+        CapabilityNotFoundError
+            If the capability is not registered.
         """
-        try:
-            return self._capabilities[capability_id]
-        except KeyError as exc:
-            raise CapabilityNotFoundError(
-                capability_id
-            ) from exc
+        self._validate_capability_id(capability_id)
+
+        with self._lock:
+            try:
+                return self._capabilities[capability_id]
+            except KeyError as exc:
+                raise CapabilityNotFoundError(
+                    capability_id
+                ) from exc
 
     def exists(
         self,
         capability_id: str,
     ) -> bool:
         """
-        Check whether a capability exists.
+        Check whether a capability is registered.
         """
-        return capability_id in self._capabilities
+        self._validate_capability_id(capability_id)
+
+        with self._lock:
+            return capability_id in self._capabilities
 
     def list(
         self,
     ) -> CapabilityList:
         """
-        Return all registered capabilities.
+        Return a stable snapshot of all registered capabilities.
         """
-        return list(self._capabilities.values())
+        with self._lock:
+            return list(self._capabilities.values())
 
     def list_by_category(
         self,
         category: CapabilityCategory,
     ) -> CapabilityList:
         """
-        Return capabilities belonging to a category.
+        Return a stable snapshot of capabilities in a category.
         """
-        return [
-            capability
-            for capability in self._capabilities.values()
-            if capability.metadata.category == category
-        ]
+        if not isinstance(category, CapabilityCategory):
+            raise TypeError(
+                "category must be a CapabilityCategory."
+            )
+
+        with self._lock:
+            return [
+                capability
+                for capability in self._capabilities.values()
+                if capability.metadata.category == category
+            ]
 
     def clear(self) -> None:
         """
@@ -111,10 +166,47 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> bool:
-        return capability_id in self._capabilities
+        """
+        Support ``capability_id in registry``.
+        """
+        self._validate_capability_id(capability_id)
+
+        with self._lock:
+            return capability_id in self._capabilities
 
     def __len__(self) -> int:
-        return len(self._capabilities)
+        """
+        Return the number of registered capabilities.
+        """
+        with self._lock:
+            return len(self._capabilities)
 
     def __iter__(self) -> Iterator[BaseCapability]:
-        return iter(self._capabilities.values())
+        """
+        Iterate over a stable registry snapshot.
+
+        The registry lock is released before the caller consumes the
+        iterator. Therefore concurrent registration/unregistration cannot
+        invalidate the iterator.
+        """
+        with self._lock:
+            snapshot = tuple(self._capabilities.values())
+
+        return iter(snapshot)
+
+    @staticmethod
+    def _validate_capability_id(
+        capability_id: str,
+    ) -> None:
+        """
+        Validate a capability identifier.
+        """
+        if not isinstance(capability_id, str):
+            raise TypeError(
+                "capability_id must be a string."
+            )
+
+        if not capability_id.strip():
+            raise ValueError(
+                "capability_id cannot be empty."
+            )

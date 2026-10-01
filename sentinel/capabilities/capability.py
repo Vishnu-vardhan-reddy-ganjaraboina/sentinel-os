@@ -5,6 +5,7 @@ Base implementation of a Sentinel capability.
 from __future__ import annotations
 
 from abc import abstractmethod
+from threading import RLock
 from typing import Any
 
 from sentinel.capabilities.exceptions import (
@@ -18,15 +19,21 @@ class BaseCapability(Capability):
     """
     Base implementation for Sentinel capabilities.
 
-    Concrete capabilities should inherit from this class and implement
-    the `run()` method.
+    Capability execution and enabled-state transitions are protected
+    against concurrent state changes.
     """
 
     def __init__(
         self,
         metadata: CapabilityMetadata,
     ) -> None:
+        if not isinstance(metadata, CapabilityMetadata):
+            raise TypeError(
+                "metadata must be a CapabilityMetadata instance."
+            )
+
         self._metadata = metadata
+        self._state_lock = RLock()
 
     @property
     def metadata(self) -> CapabilityMetadata:
@@ -37,29 +44,53 @@ class BaseCapability(Capability):
 
     @property
     def id(self) -> str:
+        """
+        Return the capability identifier.
+        """
         return self._metadata.capability_id
 
     @property
     def name(self) -> str:
+        """
+        Return the capability name.
+        """
         return self._metadata.name
 
     @property
     def description(self) -> str:
+        """
+        Return the capability description.
+        """
         return self._metadata.description
 
     @property
     def version(self) -> str:
+        """
+        Return the capability version.
+        """
         return self._metadata.version
 
     @property
     def enabled(self) -> bool:
-        return self._metadata.enabled
+        """
+        Return whether the capability is currently enabled.
+        """
+        with self._state_lock:
+            return self._metadata.enabled
 
     def enable(self) -> None:
-        self._metadata.enabled = True
+        """
+        Enable the capability.
+        """
+        with self._state_lock:
+            self._metadata.enabled = True
 
     def disable(self) -> None:
-        self._metadata.enabled = False
+        """
+        Disable the capability.
+        """
+        with self._state_lock:
+            self._metadata.enabled = False
 
     def execute(
         self,
@@ -67,11 +98,18 @@ class BaseCapability(Capability):
     ) -> Any:
         """
         Execute the capability.
+
+        The enabled state is checked atomically with respect to
+        enable/disable operations.
+
+        Once execution begins, disabling the capability does not
+        forcibly interrupt an already-running ``run()`` operation.
         """
-        if not self.enabled:
-            raise CapabilityDisabledError(
-                f"Capability '{self.id}' is disabled."
-            )
+        with self._state_lock:
+            if not self._metadata.enabled:
+                raise CapabilityDisabledError(
+                    f"Capability '{self.id}' is disabled."
+                )
 
         return self.run(**kwargs)
 
@@ -81,5 +119,5 @@ class BaseCapability(Capability):
         **kwargs: Any,
     ) -> Any:
         """
-        Execute the concrete capability.
+        Execute the concrete capability implementation.
         """

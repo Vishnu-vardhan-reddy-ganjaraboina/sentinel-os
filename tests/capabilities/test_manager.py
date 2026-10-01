@@ -103,3 +103,13 @@ def test_disabled_capability_preserves_disabled_error() -> None:
 
     with pytest.raises(CapabilityDisabledError):
         manager.execute("echo")
+
+def test_explicit_registry_is_preserved() -> None:
+    class FalseyRegistry(CapabilityManager().registry.__class__):
+        def __bool__(self) -> bool:
+            return False
+
+    registry = FalseyRegistry()
+    manager = CapabilityManager(registry)
+
+    assert manager.registry is registry

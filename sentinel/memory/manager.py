@@ -25,7 +25,7 @@ class MemoryManager:
         self,
         store: InMemoryStore | None = None,
     ) -> None:
-        self._store = store or InMemoryStore()
+        self._store = store if store is not None else InMemoryStore()
 
     @property
     def store(self) -> InMemoryStore:
@@ -126,5 +126,5 @@ class MemoryManager:
         return self._store.list()
 
     def __len__(self) -> int:
-        """Return the number of stored memory entries."""
+        """Return the number of stored entries."""
         return len(self._store)

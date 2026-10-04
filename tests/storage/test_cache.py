@@ -1,3 +1,5 @@
+﻿import threading
+
 from sentinel.storage.cache import LRUCache
 
 
@@ -58,7 +60,6 @@ def test_invalid_capacity():
     with pytest.raises(ValueError):
         LRUCache(0)
 
-import threading
 
 
 def test_invalid_capacity_type():
@@ -128,3 +129,4 @@ def test_concurrent_puts():
 
     for index in range(100):
         assert cache.get(index) == index
+

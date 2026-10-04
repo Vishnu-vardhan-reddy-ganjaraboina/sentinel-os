@@ -5,6 +5,7 @@ Vector store interfaces for Sentinel OS.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from threading import RLock
 
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.similarity import (
@@ -16,6 +17,8 @@ from sentinel.knowledge.similarity import (
 class VectorStore(ABC):
     """
     Base interface for vector stores.
+
+    A vector store maintains Chunk/embedding pairs.
     """
 
     @abstractmethod
@@ -24,6 +27,7 @@ class VectorStore(ABC):
         chunk: Chunk,
         embedding: list[float],
     ) -> None:
+        """Add or replace one chunk."""
         raise NotImplementedError
 
     @abstractmethod
@@ -31,6 +35,7 @@ class VectorStore(ABC):
         self,
         chunk_id: str,
     ) -> None:
+        """Delete one chunk."""
         raise NotImplementedError
 
     @abstractmethod
@@ -38,6 +43,7 @@ class VectorStore(ABC):
         self,
         document_id: str,
     ) -> None:
+        """Delete all chunks belonging to a document."""
         raise NotImplementedError
 
     @abstractmethod
@@ -47,6 +53,7 @@ class VectorStore(ABC):
         *,
         limit: int = 5,
     ) -> list[Chunk]:
+        """Search by vector similarity."""
         raise NotImplementedError
 
     @abstractmethod
@@ -54,6 +61,7 @@ class VectorStore(ABC):
         self,
         chunk_id: str,
     ) -> bool:
+        """Return whether a chunk exists."""
         raise NotImplementedError
 
     @abstractmethod
@@ -61,83 +69,196 @@ class VectorStore(ABC):
         self,
         chunk_id: str,
     ) -> Chunk | None:
+        """Retrieve a chunk."""
         raise NotImplementedError
 
     @abstractmethod
     def list_chunks(self) -> list[Chunk]:
+        """Return all chunks."""
         raise NotImplementedError
 
     @abstractmethod
     def clear(self) -> None:
+        """Remove all chunks."""
         raise NotImplementedError
 
+    @abstractmethod
     def connect(self) -> None:
-        """
-        Connect the vector store to its underlying resources.
+        """Connect the store."""
+        raise NotImplementedError
 
-        In-memory stores do not require an explicit connection.
-        Persistent implementations can override this method.
-        """
-        return None
-
+    @abstractmethod
     def close(self) -> None:
-        """
-        Release resources owned by the vector store.
-
-        In-memory stores do not require explicit cleanup.
-        Persistent implementations can override this method.
-        """
-        return None
+        """Close the store."""
+        raise NotImplementedError
 
     @abstractmethod
     def __len__(self) -> int:
+        """Return the number of chunks."""
         raise NotImplementedError
+
+    def replace_document(
+        self,
+        document_id: str,
+        chunks: list[tuple[Chunk, list[float]]],
+    ) -> None:
+        """
+        Replace all chunks belonging to a document.
+
+        This method is deliberately concrete rather than abstract to preserve
+        compatibility with existing custom VectorStore implementations.
+
+        Implementations that can guarantee true atomic replacement should
+        override it.
+        """
+        self.delete_document(document_id)
+
+        for chunk, embedding in chunks:
+            self.add(
+                chunk,
+                embedding,
+            )
 
 
 class InMemoryVectorStore(VectorStore):
     """
-    Production-quality in-memory vector store.
+    Thread-safe in-memory vector store.
 
-    Uses semantic similarity for retrieval.
-
-    Intended for testing and lightweight deployments.
+    Chunk/embedding pairs are maintained atomically.
     """
 
     def __init__(
         self,
         similarity: SimilarityMetric | None = None,
     ) -> None:
+        self._lock = RLock()
+
         self._chunks: dict[str, Chunk] = {}
         self._embeddings: dict[str, list[float]] = {}
-        self._similarity = similarity or CosineSimilarity()
+
+        self._similarity = (
+            similarity
+            if similarity is not None
+            else CosineSimilarity()
+        )
 
     def add(
         self,
         chunk: Chunk,
         embedding: list[float],
     ) -> None:
-        self._chunks[chunk.id] = chunk
-        self._embeddings[chunk.id] = embedding
+        """
+        Add or replace a chunk and embedding atomically.
+        """
+        copied_embedding = [
+            float(value)
+            for value in embedding
+        ]
+
+        with self._lock:
+            self._chunks[chunk.id] = chunk
+            self._embeddings[chunk.id] = copied_embedding
 
     def delete(
         self,
         chunk_id: str,
     ) -> None:
-        self._chunks.pop(chunk_id, None)
-        self._embeddings.pop(chunk_id, None)
+        """Delete a chunk and embedding atomically."""
+        with self._lock:
+            self._chunks.pop(
+                chunk_id,
+                None,
+            )
+
+            self._embeddings.pop(
+                chunk_id,
+                None,
+            )
 
     def delete_document(
         self,
         document_id: str,
     ) -> None:
-        ids = [
-            chunk_id
-            for chunk_id, chunk in self._chunks.items()
-            if chunk.document_id == document_id
-        ]
+        """Delete all chunks belonging to a document atomically."""
+        with self._lock:
+            chunk_ids = [
+                chunk_id
+                for chunk_id, chunk in self._chunks.items()
+                if chunk.document_id == document_id
+            ]
 
-        for chunk_id in ids:
-            self.delete(chunk_id)
+            for chunk_id in chunk_ids:
+                self._chunks.pop(
+                    chunk_id,
+                    None,
+                )
+
+                self._embeddings.pop(
+                    chunk_id,
+                    None,
+                )
+
+    def replace_document(
+        self,
+        document_id: str,
+        chunks: list[tuple[Chunk, list[float]]],
+    ) -> None:
+        """
+        Atomically replace all chunks belonging to a document.
+
+        Validation/copying occurs before acquiring the mutation lock so
+        invalid input cannot destroy the existing version.
+        """
+        prepared: list[tuple[Chunk, list[float]]] = []
+
+        for chunk, embedding in chunks:
+            if chunk.document_id != document_id:
+                raise ValueError(
+                    "Chunk document ID does not match replacement "
+                    f"document ID '{document_id}'."
+                )
+
+            prepared.append(
+                (
+                    chunk,
+                    [
+                        float(value)
+                        for value in embedding
+                    ],
+                )
+            )
+
+        new_ids = {
+            chunk.id
+            for chunk, _ in prepared
+        }
+
+        if len(new_ids) != len(prepared):
+            raise ValueError(
+                "Replacement contains duplicate chunk IDs."
+            )
+
+        with self._lock:
+            old_ids = [
+                chunk_id
+                for chunk_id, chunk in self._chunks.items()
+                if chunk.document_id == document_id
+            ]
+
+            for chunk_id in old_ids:
+                self._chunks.pop(
+                    chunk_id,
+                    None,
+                )
+
+                self._embeddings.pop(
+                    chunk_id,
+                    None,
+                )
+
+            for chunk, embedding in prepared:
+                self._chunks[chunk.id] = chunk
+                self._embeddings[chunk.id] = embedding
 
     def search(
         self,
@@ -146,51 +267,81 @@ class InMemoryVectorStore(VectorStore):
         limit: int = 5,
     ) -> list[Chunk]:
         """
-        Perform semantic similarity search.
-        """
-        ranked: list[tuple[float, Chunk]] = []
+        Return the most similar chunks.
 
-        for chunk_id, stored_embedding in self._embeddings.items():
+        A stable snapshot is captured before similarity calculations.
+        """
+        if limit <= 0:
+            return []
+
+        with self._lock:
+            snapshot = [
+                (
+                    chunk,
+                    list(
+                        self._embeddings[chunk_id]
+                    ),
+                )
+                for chunk_id, chunk in self._chunks.items()
+                if chunk_id in self._embeddings
+            ]
+
+        scored: list[tuple[float, Chunk]] = []
+
+        for chunk, stored_embedding in snapshot:
             score = self._similarity.similarity(
                 embedding,
                 stored_embedding,
             )
 
-            ranked.append(
+            scored.append(
                 (
                     score,
-                    self._chunks[chunk_id],
+                    chunk,
                 )
             )
 
-        ranked.sort(
+        scored.sort(
             key=lambda item: item[0],
             reverse=True,
         )
 
         return [
             chunk
-            for _, chunk in ranked[:limit]
+            for _, chunk in scored[:limit]
         ]
 
     def exists(
         self,
         chunk_id: str,
     ) -> bool:
-        return chunk_id in self._chunks
+        with self._lock:
+            return chunk_id in self._chunks
 
     def get(
         self,
         chunk_id: str,
     ) -> Chunk | None:
-        return self._chunks.get(chunk_id)
+        with self._lock:
+            return self._chunks.get(chunk_id)
 
     def list_chunks(self) -> list[Chunk]:
-        return list(self._chunks.values())
+        with self._lock:
+            return list(
+                self._chunks.values()
+            )
 
     def clear(self) -> None:
-        self._chunks.clear()
-        self._embeddings.clear()
+        with self._lock:
+            self._chunks.clear()
+            self._embeddings.clear()
+
+    def connect(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
     def __len__(self) -> int:
-        return len(self._chunks)
+        with self._lock:
+            return len(self._chunks)

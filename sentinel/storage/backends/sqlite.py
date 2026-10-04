@@ -5,6 +5,8 @@ Production SQLite storage backend for Sentinel OS.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -23,8 +25,15 @@ class SQLiteBackend(StorageBackend):
     """
     SQLite implementation of the Sentinel storage backend.
 
-    Values are serialized as JSON before being persisted. The backend
-    provides thread-safe access and transactional writes.
+    Values are serialized as JSON.
+
+    The backend provides:
+
+        - Thread-safe access.
+        - WAL mode.
+        - Transactional writes.
+        - Nested atomic contexts.
+        - Rollback on failure.
     """
 
     def __init__(
@@ -35,6 +44,7 @@ class SQLiteBackend(StorageBackend):
         self._connection: sqlite3.Connection | None = None
         self._lock = RLock()
         self._serializer = JsonSerializer()
+        self._transaction_depth = 0
 
         self._database.parent.mkdir(
             parents=True,
@@ -44,9 +54,7 @@ class SQLiteBackend(StorageBackend):
         self.connect()
 
     def connect(self) -> None:
-        """
-        Establish the SQLite connection and initialize the schema.
-        """
+        """Establish the SQLite connection and initialize the schema."""
         with self._lock:
             if self._connection is not None:
                 return
@@ -57,9 +65,15 @@ class SQLiteBackend(StorageBackend):
                     check_same_thread=False,
                 )
 
-                connection.execute("PRAGMA foreign_keys = ON")
-                connection.execute("PRAGMA journal_mode = WAL")
-                connection.execute("PRAGMA synchronous = NORMAL")
+                connection.execute(
+                    "PRAGMA foreign_keys = ON"
+                )
+                connection.execute(
+                    "PRAGMA journal_mode = WAL"
+                )
+                connection.execute(
+                    "PRAGMA synchronous = NORMAL"
+                )
 
                 connection.execute(
                     """
@@ -71,7 +85,9 @@ class SQLiteBackend(StorageBackend):
                 )
 
                 connection.commit()
+
                 self._connection = connection
+                self._transaction_depth = 0
 
             except sqlite3.Error as exc:
                 raise StorageConnectionError(
@@ -79,12 +95,15 @@ class SQLiteBackend(StorageBackend):
                 ) from exc
 
     def disconnect(self) -> None:
-        """
-        Close the SQLite connection.
-        """
+        """Close the SQLite connection."""
         with self._lock:
             if self._connection is None:
                 return
+
+            if self._transaction_depth != 0:
+                raise StorageConnectionError(
+                    "Cannot disconnect while a transaction is active."
+                )
 
             try:
                 self._connection.close()
@@ -94,17 +113,14 @@ class SQLiteBackend(StorageBackend):
                 ) from exc
             finally:
                 self._connection = None
+                self._transaction_depth = 0
 
     def close(self) -> None:
-        """
-        Backward-compatible alias for disconnect().
-        """
+        """Backward-compatible alias for disconnect()."""
         self.disconnect()
 
     def exists(self, key: str) -> bool:
-        """
-        Return whether a key exists.
-        """
+        """Return whether a key exists."""
         self._validate_key(key)
 
         with self._lock:
@@ -112,7 +128,12 @@ class SQLiteBackend(StorageBackend):
 
             try:
                 cursor = connection.execute(
-                    "SELECT 1 FROM storage WHERE key = ? LIMIT 1",
+                    """
+                    SELECT 1
+                    FROM storage
+                    WHERE key = ?
+                    LIMIT 1
+                    """,
                     (key,),
                 )
 
@@ -124,9 +145,7 @@ class SQLiteBackend(StorageBackend):
                 ) from exc
 
     def get(self, key: str) -> Any:
-        """
-        Retrieve and deserialize a stored value.
-        """
+        """Retrieve and deserialize a stored value."""
         self._validate_key(key)
 
         with self._lock:
@@ -134,7 +153,11 @@ class SQLiteBackend(StorageBackend):
 
             try:
                 cursor = connection.execute(
-                    "SELECT value FROM storage WHERE key = ?",
+                    """
+                    SELECT value
+                    FROM storage
+                    WHERE key = ?
+                    """,
                     (key,),
                 )
 
@@ -150,7 +173,7 @@ class SQLiteBackend(StorageBackend):
             except StorageKeyNotFoundError:
                 raise
 
-            except sqlite3.Error as exc:
+            except Exception as exc:
                 raise StorageReadError(
                     f"Failed to read key '{key}': {exc}"
                 ) from exc
@@ -160,9 +183,7 @@ class SQLiteBackend(StorageBackend):
         key: str,
         value: Any,
     ) -> None:
-        """
-        Serialize and persist a value atomically.
-        """
+        """Store or replace a value."""
         self._validate_key(key)
 
         serialized = self._serialize(value)
@@ -181,18 +202,23 @@ class SQLiteBackend(StorageBackend):
                     (key, serialized),
                 )
 
-                connection.commit()
+                if self._transaction_depth == 0:
+                    connection.commit()
 
             except sqlite3.Error as exc:
-                connection.rollback()
+                if self._transaction_depth == 0:
+                    connection.rollback()
 
                 raise StorageWriteError(
-                    f"Failed to write key '{key}': {exc}"
+                    f"Failed to store key '{key}': {exc}"
                 ) from exc
 
     def delete(self, key: str) -> None:
         """
-        Delete a key if it exists.
+        Delete a key.
+
+        Missing keys remain a storage-layer error, preserving the existing
+        StorageBackend contract.
         """
         self._validate_key(key)
 
@@ -200,48 +226,68 @@ class SQLiteBackend(StorageBackend):
             connection = self._ensure_connected()
 
             try:
-                connection.execute(
-                    "DELETE FROM storage WHERE key = ?",
+                cursor = connection.execute(
+                    """
+                    DELETE FROM storage
+                    WHERE key = ?
+                    """,
                     (key,),
                 )
 
-                connection.commit()
+                if cursor.rowcount == 0:
+                    raise StorageKeyNotFoundError(
+                        f"Key '{key}' does not exist."
+                    )
+
+                if self._transaction_depth == 0:
+                    connection.commit()
+
+            except StorageKeyNotFoundError:
+                if self._transaction_depth == 0:
+                    connection.rollback()
+                raise
 
             except sqlite3.Error as exc:
-                connection.rollback()
+                if self._transaction_depth == 0:
+                    connection.rollback()
 
                 raise StorageWriteError(
                     f"Failed to delete key '{key}': {exc}"
                 ) from exc
 
     def clear(self) -> None:
-        """
-        Remove all stored values.
-        """
+        """Remove all stored values."""
         with self._lock:
             connection = self._ensure_connected()
 
             try:
-                connection.execute("DELETE FROM storage")
-                connection.commit()
+                connection.execute(
+                    "DELETE FROM storage"
+                )
+
+                if self._transaction_depth == 0:
+                    connection.commit()
 
             except sqlite3.Error as exc:
-                connection.rollback()
+                if self._transaction_depth == 0:
+                    connection.rollback()
 
                 raise StorageWriteError(
                     f"Failed to clear storage: {exc}"
                 ) from exc
 
     def keys(self) -> list[str]:
-        """
-        Return all stored keys.
-        """
+        """Return all stored keys."""
         with self._lock:
             connection = self._ensure_connected()
 
             try:
                 cursor = connection.execute(
-                    "SELECT key FROM storage ORDER BY key"
+                    """
+                    SELECT key
+                    FROM storage
+                    ORDER BY key
+                    """
                 )
 
                 return [
@@ -254,29 +300,88 @@ class SQLiteBackend(StorageBackend):
                     f"Failed to list storage keys: {exc}"
                 ) from exc
 
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """
+        Execute a group of operations in one SQLite transaction.
+
+        Nested atomic contexts share the outer transaction.
+        """
+        with self._lock:
+            connection = self._ensure_connected()
+
+            outermost = self._transaction_depth == 0
+
+            if outermost:
+                try:
+                    connection.execute("BEGIN")
+                except sqlite3.Error as exc:
+                    raise StorageWriteError(
+                        f"Failed to begin transaction: {exc}"
+                    ) from exc
+
+            self._transaction_depth += 1
+
+            try:
+                yield
+
+            except BaseException:
+                self._transaction_depth -= 1
+
+                if outermost:
+                    try:
+                        connection.rollback()
+                    except sqlite3.Error as rollback_exc:
+                        raise StorageWriteError(
+                            "Transaction failed and rollback also failed."
+                        ) from rollback_exc
+
+                raise
+
+            else:
+                self._transaction_depth -= 1
+
+                if outermost:
+                    try:
+                        connection.commit()
+                    except sqlite3.Error as exc:
+                        connection.rollback()
+
+                        raise StorageWriteError(
+                            f"Failed to commit transaction: {exc}"
+                        ) from exc
+
     def save(
         self,
         key: str,
         value: Any,
     ) -> None:
-        """
-        Backward-compatible alias for set().
-        """
+        """Backward-compatible alias for set()."""
         self.set(key, value)
 
-    def load(
-        self,
-        key: str,
-    ) -> Any:
-        """
-        Backward-compatible alias for get().
-        """
+    def load(self, key: str) -> Any:
+        """Backward-compatible alias for get()."""
         return self.get(key)
 
+    def __len__(self) -> int:
+        with self._lock:
+            connection = self._ensure_connected()
+
+            try:
+                cursor = connection.execute(
+                    "SELECT COUNT(*) FROM storage"
+                )
+
+                row = cursor.fetchone()
+
+                return int(row[0]) if row is not None else 0
+
+            except sqlite3.Error as exc:
+                raise StorageReadError(
+                    f"Failed to count storage values: {exc}"
+                ) from exc
+
     def _ensure_connected(self) -> sqlite3.Connection:
-        """
-        Return the active database connection.
-        """
         if self._connection is None:
             raise StorageConnectionError(
                 "SQLite backend is not connected."
@@ -286,11 +391,10 @@ class SQLiteBackend(StorageBackend):
 
     @staticmethod
     def _validate_key(key: str) -> None:
-        """
-        Validate storage keys.
-        """
         if not isinstance(key, str):
-            raise TypeError("Storage key must be a string.")
+            raise TypeError(
+                "Storage key must be a string."
+            )
 
         if not key.strip():
             raise ValueError(
@@ -299,21 +403,27 @@ class SQLiteBackend(StorageBackend):
 
     def _serialize(self, value: Any) -> str:
         """
-        Serialize a value using the configured JSON serializer.
+        Serialize a value using the existing JsonSerializer API.
         """
         from io import StringIO
 
         stream = StringIO()
-        self._serializer.dump(value, stream)
+
+        self._serializer.dump(
+            value,
+            stream,
+        )
 
         return stream.getvalue()
 
     def _deserialize(self, value: str) -> Any:
         """
-        Deserialize a stored JSON value.
+        Deserialize a value using the existing JsonSerializer API.
         """
         from io import StringIO
 
         stream = StringIO(value)
 
-        return self._serializer.load(stream)
+        return self._serializer.load(
+            stream,
+        )

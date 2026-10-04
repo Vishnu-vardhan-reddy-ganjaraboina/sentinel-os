@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.embeddings import DummyEmbeddingProvider
 from sentinel.knowledge.retriever import Retriever
@@ -47,3 +49,45 @@ def test_limit():
     )
 
     assert len(results) == 3
+
+def test_concurrent_retrieve() -> None:
+    provider = DummyEmbeddingProvider()
+    store = InMemoryVectorStore()
+
+    for i in range(10):
+        chunk = Chunk(
+            id=str(i),
+            document_id="doc",
+            text=f"Chunk {i}",
+            index=i,
+        )
+
+        store.add(
+            chunk,
+            provider.embed(chunk.text),
+        )
+
+    retriever = Retriever(
+        provider,
+        store,
+    )
+
+    def retrieve() -> list[Chunk]:
+        return retriever.retrieve(
+            "Chunk",
+            limit=5,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(retrieve)
+            for _ in range(8)
+        ]
+
+        results = [
+            future.result()
+            for future in futures
+        ]
+
+    assert len(results) == 8
+    assert all(len(chunks) == 5 for chunks in results)

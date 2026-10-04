@@ -7,27 +7,28 @@ Defines the contract implemented by all storage backends.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 
 class StorageBackend(ABC):
     """
-    Abstract storage backend.
+    Abstract key-value storage backend.
 
-    Backends provide persistent or ephemeral key-value storage.
+    Implementations provide thread-safe key-value storage and may optionally
+    support atomic multi-operation transactions.
 
-    Lifecycle methods (`connect` and `disconnect`) have safe default
-    implementations so lightweight backends do not need to implement
-    meaningless lifecycle methods. Resource-backed implementations such
-    as SQLite may override them.
+    ``atomic()`` is intentionally a capability rather than an abstract
+    requirement so existing third-party/custom backends remain compatible.
     """
 
     def connect(self) -> None:
         """
-        Initialize the backend and make it ready for operations.
+        Initialize the backend.
 
-        Backends that do not require an explicit connection may use
-        this default no-op implementation.
+        Backends that do not require explicit connection may use this
+        default no-op implementation.
         """
         return None
 
@@ -35,16 +36,14 @@ class StorageBackend(ABC):
         """
         Release backend resources.
 
-        Backends that do not own external resources may use this
-        default no-op implementation.
+        Backends without external resources may use this default
+        no-op implementation.
         """
         return None
 
     @abstractmethod
     def exists(self, key: str) -> bool:
-        """
-        Return whether a key exists.
-        """
+        """Return whether a key exists."""
         raise NotImplementedError
 
     @abstractmethod
@@ -60,30 +59,22 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def set(self, key: str, value: Any) -> None:
-        """
-        Store or replace a value.
-        """
+        """Store or replace a value."""
         raise NotImplementedError
 
     @abstractmethod
     def delete(self, key: str) -> None:
-        """
-        Delete a key.
-        """
+        """Delete a key."""
         raise NotImplementedError
 
     @abstractmethod
     def clear(self) -> None:
-        """
-        Remove all stored values.
-        """
+        """Remove all stored values."""
         raise NotImplementedError
 
     @abstractmethod
     def keys(self) -> list[str]:
-        """
-        Return all stored keys.
-        """
+        """Return all stored keys."""
         raise NotImplementedError
 
     def close(self) -> None:
@@ -103,3 +94,19 @@ class StorageBackend(ABC):
         Backward-compatible alias for get().
         """
         return self.get(key)
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """
+        Execute a group of storage operations atomically.
+
+        Backends that support transactional multi-operation updates override
+        this method.
+
+        A backend without transaction support must not silently pretend that
+        operations are atomic.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support atomic transactions."
+        )
+        yield

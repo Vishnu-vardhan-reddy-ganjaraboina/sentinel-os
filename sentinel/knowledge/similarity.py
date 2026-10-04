@@ -8,7 +8,7 @@ score. Larger values indicate more similar vectors.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from math import sqrt
+from math import isfinite, sqrt
 
 
 class SimilarityMetric(ABC):
@@ -45,6 +45,12 @@ class SimilarityMetric(ABC):
             raise ValueError(
                 "Vectors must have the same dimension."
             )
+
+        for value in (*left, *right):
+            if not isfinite(value):
+                raise ValueError(
+                    "Vectors must contain only finite values."
+                )
 
 
 class CosineSimilarity(SimilarityMetric):

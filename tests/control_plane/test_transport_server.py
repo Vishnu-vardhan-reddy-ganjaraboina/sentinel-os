@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
 import time
 
 import pytest
@@ -50,8 +51,27 @@ class FakeAuthorizer:
             raise PermissionError("denied")
 
 
+class BlockingControlPlane(ControlPlane):
+    def __init__(self, controller: KernelController) -> None:
+        super().__init__(controller)
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def execute_request(
+        self,
+        request: ControlRequest,
+    ) -> ControlResult:
+        if request.context.caller_id == "slow-client":
+            self.started.set()
+            if not self.release.wait():
+                raise RuntimeError("Blocking test was not released.")
+
+        return super().execute_request(request)
+
+
 def create_server(
     client_timeout: float | None = None,
+    max_workers: int | None = None,
 ) -> ControlPlaneTransportServer:
     controller = KernelController(
         target=FakeTarget(),
@@ -73,6 +93,9 @@ def create_server(
     if client_timeout is not None:
         server_kwargs["client_timeout"] = client_timeout
 
+    if max_workers is not None:
+        server_kwargs["max_workers"] = max_workers
+
     return ControlPlaneTransportServer(**server_kwargs)
 
 def wait_for_server(server: ControlPlaneTransportServer) -> None:
@@ -87,10 +110,11 @@ def wait_for_server(server: ControlPlaneTransportServer) -> None:
 def send_request(
     server: ControlPlaneTransportServer,
     request: ControlRequest,
+    timeout: float = 2.0,
 ) -> ControlResult:
     with socket.create_connection(
         (server.host, server.port),
-        timeout=2.0,
+        timeout=timeout,
     ) as connection:
         connection.sendall(ControlPlaneProtocol.encode_request(request))
 
@@ -312,3 +336,175 @@ def test_server_exposes_client_timeout() -> None:
     server = create_server(client_timeout=2.5)
 
     assert server.client_timeout == 2.5
+def test_server_handles_connections_concurrently() -> None:
+    controller = KernelController(
+        target=FakeTarget(),
+        authorizer=FakeAuthorizer(),
+        context=ControlContext(
+            caller_id="test",
+            caller_type="test",
+        ),
+    )
+    plane = BlockingControlPlane(controller)
+    server = ControlPlaneTransportServer(
+        control_plane=plane,
+        host="127.0.0.1",
+        port=0,
+        client_timeout=1.0,
+    )
+
+    server.start()
+
+    slow_connection: socket.socket | None = None
+
+    try:
+        wait_for_server(server)
+
+        slow_request = ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=ControlContext(
+                caller_id="slow-client",
+                caller_type="cli",
+            ),
+        )
+
+        fast_request = ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=ControlContext(
+                caller_id="fast-client",
+                caller_type="cli",
+            ),
+        )
+
+        slow_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=1.0,
+        )
+        slow_connection.sendall(
+            ControlPlaneProtocol.encode_request(slow_request)
+        )
+
+        assert plane.started.wait(timeout=1.0)
+
+        fast_result = send_request(
+            server,
+            fast_request,
+            timeout=0.5,
+        )
+
+        assert fast_result.success is True
+        assert fast_result.command == KernelCommand.SYSTEM_STATUS.value
+    finally:
+        plane.release.set()
+
+        if slow_connection is not None:
+            try:
+                slow_connection.close()
+            except OSError:
+                pass
+
+        server.stop()
+def test_server_respects_max_workers_limit() -> None:
+    controller = KernelController(
+        target=FakeTarget(),
+        authorizer=FakeAuthorizer(),
+        context=ControlContext(
+            caller_id="test",
+            caller_type="test",
+        ),
+    )
+    plane = BlockingControlPlane(controller)
+    server = ControlPlaneTransportServer(
+        control_plane=plane,
+        host="127.0.0.1",
+        port=0,
+        client_timeout=1.0,
+        max_workers=1,
+    )
+
+    server.start()
+
+    slow_connection: socket.socket | None = None
+    fast_connection: socket.socket | None = None
+
+    try:
+        wait_for_server(server)
+
+        slow_request = ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=ControlContext(
+                caller_id="slow-client",
+                caller_type="cli",
+            ),
+        )
+
+        fast_request = ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=ControlContext(
+                caller_id="fast-client",
+                caller_type="cli",
+            ),
+        )
+
+        slow_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=1.0,
+        )
+        slow_connection.sendall(
+            ControlPlaneProtocol.encode_request(slow_request)
+        )
+
+        assert plane.started.wait(timeout=1.0)
+
+        fast_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=1.0,
+        )
+        fast_connection.sendall(
+            ControlPlaneProtocol.encode_request(fast_request)
+        )
+        fast_connection.settimeout(0.25)
+
+        with pytest.raises(socket.timeout):
+            fast_connection.recv(4096)
+
+        plane.release.set()
+
+        fast_connection.settimeout(1.0)
+        response = fast_connection.recv(4096)
+
+        fast_result = ControlPlaneProtocol.decode_response(response)
+
+        assert fast_result.success is True
+        assert fast_result.command == KernelCommand.SYSTEM_STATUS.value
+    finally:
+        plane.release.set()
+
+        for connection in (slow_connection, fast_connection):
+            if connection is not None:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+
+        server.stop()
+
+
+def test_server_rejects_invalid_max_workers() -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        create_server(max_workers=0)
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        create_server(max_workers=-1)
+
+    with pytest.raises(TypeError, match="must be an integer"):
+        create_server(max_workers="4")  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="must be an integer"):
+        create_server(max_workers=True)  # type: ignore[arg-type]
+
+
+def test_server_exposes_max_workers() -> None:
+    server = create_server(max_workers=8)
+
+    assert server.max_workers == 8

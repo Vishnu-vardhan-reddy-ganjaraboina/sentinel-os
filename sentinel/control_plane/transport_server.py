@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from sentinel.control.exceptions import ControlProtocolError
 from sentinel.control_plane.service import ControlPlane
@@ -29,6 +30,7 @@ class ControlPlaneTransportServer:
 
     MAX_MESSAGE_SIZE = 64 * 1024
     DEFAULT_CLIENT_TIMEOUT = 5.0
+    DEFAULT_MAX_WORKERS = 4
 
     def __init__(
         self,
@@ -36,6 +38,8 @@ class ControlPlaneTransportServer:
         host: str = "127.0.0.1",
         port: int = 0,
         client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
+        *,
+        max_workers: int = DEFAULT_MAX_WORKERS,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -58,11 +62,19 @@ class ControlPlaneTransportServer:
         if client_timeout <= 0:
             raise ValueError("client_timeout must be greater than zero.")
 
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int):
+            raise TypeError("max_workers must be an integer.")
+
+        if max_workers <= 0:
+            raise ValueError("max_workers must be greater than zero.")
+
         self._control_plane = control_plane
         self._host = host
         self._port = port
         self._client_timeout = float(client_timeout)
+        self._max_workers = max_workers
 
+        self._executor: ThreadPoolExecutor | None = None
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -88,6 +100,10 @@ class ControlPlaneTransportServer:
         return self._client_timeout
 
     @property
+    def max_workers(self) -> int:
+        return self._max_workers
+
+    @property
     def running(self) -> bool:
         thread = self._thread
         return thread is not None and thread.is_alive()
@@ -99,12 +115,26 @@ class ControlPlaneTransportServer:
 
             self._stop_event.clear()
 
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((self._host, self._port))
-            server_socket.listen()
+            executor = ThreadPoolExecutor(
+                max_workers=self._max_workers,
+                thread_name_prefix="sentinel-control-plane-worker",
+            )
+
+            try:
+                server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                server_socket.setsockopt(
+                    socket.SOL_SOCKET,
+                    socket.SO_REUSEADDR,
+                    1,
+                )
+                server_socket.bind((self._host, self._port))
+                server_socket.listen()
+            except Exception:
+                executor.shutdown(wait=True)
+                raise
 
             self._socket = server_socket
+            self._executor = executor
 
             thread = threading.Thread(
                 target=self._serve,
@@ -112,17 +142,37 @@ class ControlPlaneTransportServer:
                 daemon=True,
             )
             self._thread = thread
-            thread.start()
 
+            try:
+                thread.start()
+            except Exception:
+                self._thread = None
+                self._socket = None
+                self._executor = None
+
+                try:
+                    server_socket.close()
+                except OSError:
+                    pass
+
+                executor.shutdown(wait=True)
+                raise
     def stop(self) -> None:
         with self._lock:
-            if not self.running and self._socket is None:
+            if (
+                not self.running
+                and self._socket is None
+                and self._executor is None
+            ):
                 return
 
             self._stop_event.set()
 
             server_socket = self._socket
+            executor = self._executor
+
             self._socket = None
+            self._executor = None
 
         if server_socket is not None:
             try:
@@ -134,13 +184,16 @@ class ControlPlaneTransportServer:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
 
+        if executor is not None:
+            executor.shutdown(wait=True)
+
         with self._lock:
             self._thread = None
-
     def _serve(self) -> None:
         server_socket = self._socket
+        executor = self._executor
 
-        if server_socket is None:
+        if server_socket is None or executor is None:
             return
 
         while not self._stop_event.is_set():
@@ -152,12 +205,26 @@ class ControlPlaneTransportServer:
                 continue
 
             try:
-                self._handle_connection(connection)
-            finally:
+                executor.submit(
+                    self._handle_connection_and_close,
+                    connection,
+                )
+            except RuntimeError:
                 try:
                     connection.close()
                 except OSError:
                     pass
+    def _handle_connection_and_close(
+        self,
+        connection: socket.socket,
+    ) -> None:
+        try:
+            self._handle_connection(connection)
+        finally:
+            try:
+                connection.close()
+            except OSError:
+                pass
 
     def _handle_connection(self, connection: socket.socket) -> None:
         try:

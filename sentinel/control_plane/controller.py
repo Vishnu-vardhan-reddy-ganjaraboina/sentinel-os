@@ -418,6 +418,10 @@ class KernelController:
     ) -> None:
         """
         Record an audit event when an audit recorder is configured.
+
+        Audit persistence is secondary to the control operation itself.
+        Failure to record an audit event must not replace the operation
+        result or cause a second control operation failure.
         """
         if self._audit_recorder is None:
             return
@@ -431,4 +435,7 @@ class KernelController:
             error=result.error,
         )
 
-        self._audit_recorder.record(event)
+        try:
+            self._audit_recorder.record(event)
+        except Exception:
+            return

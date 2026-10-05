@@ -5,8 +5,10 @@ Audit events for the Sentinel Kernel Control Plane.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -66,7 +68,7 @@ class ControlAuditEvent:
         object.__setattr__(
             self,
             "data",
-            dict(self.data),
+            deepcopy(self.data),
         )
 
 
@@ -84,6 +86,7 @@ class ControlAuditRecorder:
         """
         raise NotImplementedError
 
+
 class InMemoryControlAuditRecorder(ControlAuditRecorder):
     """
     Store Control Plane audit events in memory.
@@ -95,13 +98,15 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
 
     def __init__(self) -> None:
         self._events: list[ControlAuditEvent] = []
+        self._lock = RLock()
 
     @property
     def events(self) -> tuple[ControlAuditEvent, ...]:
         """
-        Return all recorded events.
+        Return all recorded events as an immutable snapshot.
         """
-        return tuple(self._events)
+        with self._lock:
+            return tuple(self._events)
 
     def record(
         self,
@@ -115,13 +120,16 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
                 "event must be a ControlAuditEvent."
             )
 
-        self._events.append(event)
+        with self._lock:
+            self._events.append(event)
 
     def clear(self) -> None:
         """
         Remove all recorded events.
         """
-        self._events.clear()
+        with self._lock:
+            self._events.clear()
+
 
 class PersistentControlAuditRecorder(ControlAuditRecorder):
     """

@@ -30,6 +30,16 @@ class ControlRequestValidator:
         command: KernelCommand,
         data: Mapping[str, Any],
     ) -> None:
+        if not isinstance(command, KernelCommand):
+            raise TypeError(
+                "command must be a KernelCommand."
+            )
+
+        if not isinstance(data, Mapping):
+            raise TypeError(
+                "data must be a mapping."
+            )
+
         if command in cls._COMMANDS_WITHOUT_DATA:
             if data:
                 raise ValueError(

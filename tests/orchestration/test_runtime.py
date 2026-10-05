@@ -4,7 +4,6 @@ Tests for the Sentinel Orchestration runtime service.
 
 from __future__ import annotations
 
-
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.kernel.service import Service
 from sentinel.knowledge.chunker import FixedSizeChunker

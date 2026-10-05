@@ -4,6 +4,8 @@ Kernel runtime service for the Orchestration subsystem.
 
 from __future__ import annotations
 
+from threading import RLock
+
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.kernel.service import Service
 from sentinel.knowledge.knowledge_service import KnowledgeService
@@ -53,6 +55,7 @@ class OrchestrationRuntimeService(Service):
         )
 
         self._initialized = False
+        self._lifecycle_lock = RLock()
 
     @property
     def orchestration(self) -> OrchestrationService:
@@ -66,7 +69,7 @@ class OrchestrationRuntimeService(Service):
 
     @property
     def security(self) -> SecurityManager:
-        """Return the security manager."""
+        """Return the Security manager."""
         return self._orchestration.security
 
     @property
@@ -91,7 +94,9 @@ class OrchestrationRuntimeService(Service):
         """
         Execute an orchestration request.
 
-        Delegates directly to the underlying OrchestrationService.
+        Lifecycle synchronization protects only the lifecycle state;
+        actual request execution remains delegated to the orchestration
+        service.
         """
         return self._orchestration.execute(request)
 
@@ -101,8 +106,6 @@ class OrchestrationRuntimeService(Service):
     ) -> bool:
         """
         Return whether an orchestration request can be executed.
-
-        Delegates directly to the underlying OrchestrationService.
         """
         return self._orchestration.can_execute(request)
 
@@ -110,28 +113,33 @@ class OrchestrationRuntimeService(Service):
         """
         Initialize orchestration resources.
 
-        The current orchestration service owns no external resources,
-        so initialization only updates lifecycle state.
+        Initialization is idempotent and synchronized.
         """
-        if self._initialized:
-            return
+        with self._lifecycle_lock:
+            if self._initialized:
+                return
 
-        self._initialized = True
+            self._initialized = True
 
     def shutdown(self) -> None:
         """
         Shut down orchestration resources.
 
-        Shutdown is idempotent because the current service owns
-        no external resources.
+        Shutdown is idempotent and synchronized.
         """
-        if not self._initialized:
-            return
+        with self._lifecycle_lock:
+            if not self._initialized:
+                return
 
-        self._initialized = False
+            self._initialized = False
 
     def health(self) -> dict[str, bool]:
-        """Return orchestration service health information."""
+        """
+        Return orchestration service health information.
+        """
+        with self._lifecycle_lock:
+            initialized = self._initialized
+
         return {
-            "healthy": self._initialized,
+            "healthy": initialized,
         }

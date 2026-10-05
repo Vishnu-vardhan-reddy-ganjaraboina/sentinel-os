@@ -5,6 +5,7 @@ Manager for the Sentinel Orchestration subsystem.
 from __future__ import annotations
 
 from collections.abc import Callable
+from threading import Lock, RLock
 from typing import Any
 
 from sentinel.brain.manager import BrainManager
@@ -14,6 +15,9 @@ from sentinel.memory.service import MemoryService
 from sentinel.orchestration.exceptions import (
     OrchestrationExecutionError,
     OrchestrationValidationError,
+)
+from sentinel.orchestration.interfaces import (
+    OrchestrationRequest as OrchestrationRequestInterface,
 )
 from sentinel.orchestration.models import (
     OrchestrationRequest,
@@ -46,41 +50,35 @@ class OrchestrationManager:
         knowledge: KnowledgeService | None = None,
     ) -> None:
         self._handler = handler
-
-        self._brain = (
-            brain
-            if brain is not None
-            else BrainManager()
-        )
-
+        self._brain = brain if brain is not None else BrainManager()
         self._capabilities = (
             capabilities
             if capabilities is not None
             else CapabilityManager()
         )
-
         self._security = (
             security
             if security is not None
             else SecurityManager()
         )
-
         self._identity = identity
-
-        self._memory = (
-            memory
-            if memory is not None
-            else MemoryService()
-        )
-
+        self._memory = memory if memory is not None else MemoryService()
         self._knowledge = knowledge
+
+        self._state_lock = RLock()
+
+        # Maps request IDs to [execution lock, number of active/waiting
+        # callers]. Entries are removed when the final caller releases
+        # the lock.
+        self._request_locks: dict[str, tuple[Lock, int]] = {}
 
     @property
     def handler(
         self,
     ) -> Callable[[OrchestrationRequest], Any] | None:
         """Return the configured custom handler."""
-        return self._handler
+        with self._state_lock:
+            return self._handler
 
     @property
     def brain(self) -> BrainManager:
@@ -125,35 +123,48 @@ class OrchestrationManager:
         and executed.
 
         Successful orchestration results are persisted in Memory.
+
+        Requests sharing the same request ID are serialized. Different
+        request IDs remain independently executable.
         """
         self._validate(request)
 
+        request_lock = self._acquire_request_lock(request.id)
+
         try:
-            if self._handler is not None:
-                result = self._handler(request)
-            else:
-                result = self._execute_with_brain(request)
+            try:
+                handler = self.handler
 
-        except AuthorizationError:
-            raise
+                if handler is not None:
+                    result = handler(request)
+                else:
+                    result = self._execute_with_brain(request)
 
-        except OrchestrationExecutionError:
-            raise
+            except AuthorizationError:
+                raise
 
-        except Exception as exc:
-            raise OrchestrationExecutionError(
-                f"Orchestration request '{request.id}' failed."
-            ) from exc
+            except OrchestrationExecutionError:
+                raise
 
-        orchestration_result = OrchestrationResult(
-            request_id=request.id,
-            success=True,
-            data=result,
-        )
+            except Exception as exc:
+                raise OrchestrationExecutionError(
+                    f"Orchestration request '{request.id}' failed."
+                ) from exc
 
-        self._persist_result(orchestration_result)
+            orchestration_result = OrchestrationResult(
+                request_id=request.id,
+                success=True,
+                data=result,
+            )
 
-        return orchestration_result
+            self._persist_result(orchestration_result)
+
+            return orchestration_result
+        finally:
+            self._release_request_lock(
+                request.id,
+                request_lock,
+            )
 
     def execute_goal(
         self,
@@ -163,9 +174,6 @@ class OrchestrationManager:
     ) -> OrchestrationResult:
         """
         Resolve a user goal into an Intent and execute it.
-
-        Intent resolution is performed by the configured Brain manager.
-        Execution continues through the normal orchestration pipeline.
         """
         if not isinstance(request_id, str):
             raise TypeError("request_id must be a string.")
@@ -195,6 +203,7 @@ class OrchestrationManager:
         )
 
         return self.execute(request)
+
     def can_execute(
         self,
         request: OrchestrationRequest,
@@ -202,7 +211,71 @@ class OrchestrationManager:
         """
         Return whether the request can be executed.
         """
-        return bool(request.id.strip())
+        try:
+            self._validate(request)
+        except (TypeError, OrchestrationValidationError):
+            return False
+
+        return True
+
+    def _acquire_request_lock(
+        self,
+        request_id: str,
+    ) -> Lock:
+        """
+        Acquire the request-specific execution lock.
+
+        The registry entry is reference-counted so locks do not remain
+        allocated forever for completed request IDs.
+        """
+        with self._state_lock:
+            entry = self._request_locks.get(request_id)
+
+            if entry is None:
+                lock = Lock()
+                self._request_locks[request_id] = (lock, 1)
+            else:
+                lock, users = entry
+                self._request_locks[request_id] = (
+                    lock,
+                    users + 1,
+                )
+
+        lock.acquire()
+        return lock
+
+    def _release_request_lock(
+        self,
+        request_id: str,
+        request_lock: Lock,
+    ) -> None:
+        """
+        Release a request-specific lock and clean up its registry entry.
+
+        Cleanup is performed only after the execution lock has been
+        released, preventing another caller from creating a second
+        lock while the original lock is still held.
+        """
+        request_lock.release()
+
+        with self._state_lock:
+            entry = self._request_locks.get(request_id)
+
+            if entry is None:
+                return
+
+            registered_lock, users = entry
+
+            if registered_lock is not request_lock:
+                return
+
+            if users <= 1:
+                del self._request_locks[request_id]
+            else:
+                self._request_locks[request_id] = (
+                    registered_lock,
+                    users - 1,
+                )
 
     def _execute_with_brain(
         self,
@@ -210,10 +283,6 @@ class OrchestrationManager:
     ) -> dict[str, Any]:
         """
         Execute a request through the Brain subsystem.
-
-        Relevant memories and knowledge are retrieved from their
-        shared services and made available to the Brain through
-        the execution context.
         """
         memories = self._memory.search(
             str(request.input),
@@ -259,6 +328,11 @@ class OrchestrationManager:
             context=context,
         )
 
+        if not isinstance(result, dict):
+            raise OrchestrationExecutionError(
+                "Brain returned an invalid execution result."
+            )
+
         result_context = result.get("context")
 
         if isinstance(result_context, dict):
@@ -301,7 +375,7 @@ class OrchestrationManager:
             if capability_id is None:
                 continue
 
-            if not isinstance(capability_id, str) or not capability_id:
+            if not isinstance(capability_id, str) or not capability_id.strip():
                 raise OrchestrationExecutionError(
                     "Brain plan contains an invalid capability ID."
                 )
@@ -314,19 +388,20 @@ class OrchestrationManager:
                     "must be a dictionary."
                 )
 
-            self._validate_capability(
-                capability_id,
-            )
+            self._validate_capability(capability_id)
+            self._authorize_capability(capability_id)
 
-            self._authorize_capability(
-                capability_id,
-            )
-
-            capability_result = self._capabilities.execute(
-                capability_id,
-                **arguments,
-            )
-            
+            try:
+                capability_result = self._capabilities.execute(
+                    capability_id,
+                    **arguments,
+                )
+            except OrchestrationExecutionError:
+                raise
+            except Exception as exc:
+                raise OrchestrationExecutionError(
+                    f"Capability '{capability_id}' execution failed."
+                ) from exc
 
             capability_results.append(
                 {
@@ -347,9 +422,6 @@ class OrchestrationManager:
     ) -> None:
         """
         Validate that a capability exists and is enabled.
-
-        Capability validation is deliberately performed before
-        authorization and execution.
         """
         if not self._capabilities.exists(capability_id):
             raise OrchestrationExecutionError(
@@ -359,6 +431,11 @@ class OrchestrationManager:
         capability = self._capabilities.registry.get(
             capability_id,
         )
+
+        if capability is None:
+            raise OrchestrationExecutionError(
+                f"Capability '{capability_id}' is not registered."
+            )
 
         if not capability.enabled:
             raise OrchestrationExecutionError(
@@ -413,9 +490,38 @@ class OrchestrationManager:
         """
         Validate an orchestration request.
         """
-        if not request.id.strip():
+        if not isinstance(request, OrchestrationRequestInterface):
+            raise TypeError(
+                "request must implement OrchestrationRequest."
+            )
+
+        request_id = request.id
+
+        if not isinstance(request_id, str):
+            raise OrchestrationValidationError(
+                "Orchestration request ID must be a string."
+            )
+
+        if not request_id.strip():
             raise OrchestrationValidationError(
                 "Orchestration request ID cannot be empty."
+            )
+
+        if not isinstance(request.input, str):
+            raise OrchestrationValidationError(
+                "Orchestration request input must be a string."
+            )
+
+        if not request.input.strip():
+            raise OrchestrationValidationError(
+                "Orchestration request input cannot be empty."
+            )
+
+        context = request.context
+
+        if not isinstance(context, dict):
+            raise OrchestrationValidationError(
+                "Orchestration request context must be a dictionary."
             )
 
     def _get_capability_context(

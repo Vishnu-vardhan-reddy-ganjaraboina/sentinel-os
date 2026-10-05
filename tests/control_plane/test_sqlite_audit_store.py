@@ -1,14 +1,13 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from sentinel.control_plane.audit import ControlAuditEvent
+from sentinel.control_plane.audit_query import ControlAuditQuery
 from sentinel.control_plane.sqlite_audit_store import (
     SQLiteControlAuditStore,
 )
-
-from sentinel.control_plane.audit_query import ControlAuditQuery
 
 
 def make_event(
@@ -22,7 +21,7 @@ def make_event(
         caller_type="user",
         command=command,
         success=success,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         data={"service": "memory"},
         error=None if success else "operation failed",
     )
@@ -247,7 +246,7 @@ def test_query_time_range(tmp_path: Path) -> None:
         1,
         10,
         0,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
 
     second_timestamp = first_timestamp + timedelta(hours=1)

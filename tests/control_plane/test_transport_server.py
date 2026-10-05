@@ -8,11 +8,11 @@ import pytest
 
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.controller import KernelController
+from sentinel.control_plane.permissions import ControlPermission
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.service import ControlPlane
-from sentinel.control_plane.controller import KernelController
-from sentinel.control_plane.permissions import ControlPermission
 from sentinel.control_plane.transport import ControlPlaneProtocol
 from sentinel.control_plane.transport_server import ControlPlaneTransportServer
 from sentinel.kernel.lifecycle import ServiceState

@@ -57,7 +57,7 @@ class ControlPlaneEndpoint:
     def from_mapping(
         cls,
         data: object,
-    ) -> "ControlPlaneEndpoint":
+    ) -> ControlPlaneEndpoint:
         if not isinstance(data, dict):
             raise TypeError(
                 "Endpoint data must be a mapping."

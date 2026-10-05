@@ -11,8 +11,8 @@ from pathlib import Path
 from threading import RLock
 
 from sentinel.control_plane.audit import ControlAuditEvent
-from sentinel.control_plane.audit_store import ControlAuditStore
 from sentinel.control_plane.audit_query import ControlAuditQuery
+from sentinel.control_plane.audit_store import ControlAuditStore
 
 
 class SQLiteControlAuditStore(ControlAuditStore):

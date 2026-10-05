@@ -7,7 +7,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from sentinel.control_plane.audit import ControlAuditEvent
-
 from sentinel.control_plane.audit_query import ControlAuditQuery
 
 

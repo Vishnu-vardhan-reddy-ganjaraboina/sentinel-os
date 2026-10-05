@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+from sentinel.control_plane.caller_policy import ControlCallerPolicy
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.permissions import ControlPermission
-from sentinel.control_plane.caller_policy import ControlCallerPolicy
 
 
 class ControlAuthorizer:

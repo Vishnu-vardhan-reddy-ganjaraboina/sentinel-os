@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import socket
 import threading
-from typing import Any
 
-from sentinel.control.exceptions import ControlConnectionError, ControlProtocolError
-from sentinel.control_plane.request import ControlRequest
+from sentinel.control.exceptions import ControlProtocolError
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
 

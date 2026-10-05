@@ -5,9 +5,6 @@ import pytest
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.request import ControlRequest
-from sentinel.control_plane.commands import KernelCommand
-from sentinel.control_plane.context import ControlContext
-from sentinel.control_plane.request import ControlRequest
 
 
 def create_context() -> ControlContext:

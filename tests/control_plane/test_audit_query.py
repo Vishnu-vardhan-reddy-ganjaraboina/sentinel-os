@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -18,7 +18,7 @@ def test_default_query() -> None:
 
 
 def test_valid_query() -> None:
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
 
     query = ControlAuditQuery(
         caller_id="user-1",
@@ -63,14 +63,14 @@ def test_since_after_until_rejected() -> None:
         2026,
         1,
         2,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
 
     end = datetime(
         2026,
         1,
         1,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
 
     with pytest.raises(ValueError):

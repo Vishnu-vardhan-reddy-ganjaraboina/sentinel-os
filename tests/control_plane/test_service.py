@@ -3,8 +3,8 @@ from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.controller import KernelController
 from sentinel.control_plane.permissions import ControlPermission
-from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.request import ControlRequest
+from sentinel.control_plane.service import ControlPlane
 
 
 class FakeTarget:

@@ -50,7 +50,9 @@ class FakeAuthorizer:
             raise PermissionError("denied")
 
 
-def create_server() -> ControlPlaneTransportServer:
+def create_server(
+    client_timeout: float | None = None,
+) -> ControlPlaneTransportServer:
     controller = KernelController(
         target=FakeTarget(),
         authorizer=FakeAuthorizer(),
@@ -62,12 +64,16 @@ def create_server() -> ControlPlaneTransportServer:
 
     plane = ControlPlane(controller)
 
-    return ControlPlaneTransportServer(
-        control_plane=plane,
-        host="127.0.0.1",
-        port=0,
-    )
+    server_kwargs: dict[str, object] = {
+        "control_plane": plane,
+        "host": "127.0.0.1",
+        "port": 0,
+    }
 
+    if client_timeout is not None:
+        server_kwargs["client_timeout"] = client_timeout
+
+    return ControlPlaneTransportServer(**server_kwargs)
 
 def wait_for_server(server: ControlPlaneTransportServer) -> None:
     deadline = time.monotonic() + 2.0
@@ -250,3 +256,59 @@ def test_server_stop_is_idempotent() -> None:
     server.stop()
 
     assert server.running is False
+def test_server_times_out_incomplete_client_message() -> None:
+    server = create_server(client_timeout=0.1)
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=1.0,
+        ) as connection:
+            connection.sendall(b'{"version":1,"type":"request"')
+
+            data = b""
+            deadline = time.monotonic() + 1.0
+
+            while b"\n" not in data:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        "Server did not respond to incomplete message."
+                    )
+
+                chunk = connection.recv(4096)
+
+                if not chunk:
+                    break
+
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert result.command == "transport.error"
+        assert result.error
+    finally:
+        server.stop()
+def test_server_rejects_non_positive_client_timeout() -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        create_server(client_timeout=0)
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        create_server(client_timeout=-1)
+
+
+def test_server_rejects_invalid_client_timeout_type() -> None:
+    with pytest.raises(TypeError, match="must be a number"):
+        create_server(client_timeout="1")  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="must be a number"):
+        create_server(client_timeout=True)  # type: ignore[arg-type]
+
+
+def test_server_exposes_client_timeout() -> None:
+    server = create_server(client_timeout=2.5)
+
+    assert server.client_timeout == 2.5

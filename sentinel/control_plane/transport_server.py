@@ -28,12 +28,14 @@ class ControlPlaneTransportServer:
     """
 
     MAX_MESSAGE_SIZE = 64 * 1024
+    DEFAULT_CLIENT_TIMEOUT = 5.0
 
     def __init__(
         self,
         control_plane: ControlPlane,
         host: str = "127.0.0.1",
         port: int = 0,
+        client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -47,9 +49,19 @@ class ControlPlaneTransportServer:
         if port < 0 or port > 65535:
             raise ValueError("port must be between 0 and 65535.")
 
+        if isinstance(client_timeout, bool) or not isinstance(
+            client_timeout,
+            (int, float),
+        ):
+            raise TypeError("client_timeout must be a number.")
+
+        if client_timeout <= 0:
+            raise ValueError("client_timeout must be greater than zero.")
+
         self._control_plane = control_plane
         self._host = host
         self._port = port
+        self._client_timeout = float(client_timeout)
 
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -70,6 +82,10 @@ class ControlPlaneTransportServer:
             if self._socket is None:
                 return self._port
             return int(self._socket.getsockname()[1])
+
+    @property
+    def client_timeout(self) -> float:
+        return self._client_timeout
 
     @property
     def running(self) -> bool:
@@ -145,7 +161,10 @@ class ControlPlaneTransportServer:
 
     def _handle_connection(self, connection: socket.socket) -> None:
         try:
+            connection.settimeout(self._client_timeout)
             message = self._receive_message(connection)
+            connection.settimeout(None)
+
             request = ControlPlaneProtocol.decode_request(message)
 
             result = self._control_plane.execute_request(request)

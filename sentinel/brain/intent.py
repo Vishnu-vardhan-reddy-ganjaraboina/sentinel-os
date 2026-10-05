@@ -1,4 +1,4 @@
-"""
+﻿"""
 Intent model for Sentinel Brain.
 
 An Intent represents the structured meaning of a requested action.
@@ -9,8 +9,9 @@ perform authorization, or interact with the operating system.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True)

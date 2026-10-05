@@ -1,9 +1,10 @@
-"""
+﻿"""
 Manager for the Sentinel Brain subsystem.
 """
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any
 
 from sentinel.brain.constants import BrainState
@@ -20,15 +21,14 @@ class BrainManager:
     """
     Public manager for the Sentinel Brain subsystem.
 
-    BrainManager owns the BrainEngine and the configured IntentResolver.
-    It provides a stable interface for intent resolution, context creation,
-    execution, and state inspection.
+    BrainManager owns the BrainEngine and configured IntentResolver.
     """
 
     def __init__(
         self,
         intent_resolver: IntentResolver | None = None,
     ) -> None:
+        self._lock = RLock()
         self._engine = BrainEngine()
 
         if intent_resolver is None:
@@ -43,17 +43,12 @@ class BrainManager:
 
     @property
     def engine(self) -> BrainEngine:
-        """
-        Return the Brain engine.
-        """
         return self._engine
 
     @property
     def intent_resolver(self) -> IntentResolver:
-        """
-        Return the configured intent resolver.
-        """
-        return self._intent_resolver
+        with self._lock:
+            return self._intent_resolver
 
     def resolve_intent(
         self,
@@ -63,10 +58,12 @@ class BrainManager:
         """
         Resolve raw input into a structured Intent.
 
-        Intent resolution only interprets the request. It does not execute
-        capabilities or perform authorization.
+        Resolution does not execute capabilities or authorize actions.
         """
-        return self._intent_resolver.resolve(
+        with self._lock:
+            resolver = self._intent_resolver
+
+        return resolver.resolve(
             input=input,
             context=context,
         )
@@ -79,6 +76,11 @@ class BrainManager:
         """
         Execute a Brain request through the BrainEngine.
         """
+        if not isinstance(context, BrainContext):
+            raise TypeError(
+                "context must be a BrainContext instance."
+            )
+
         return self._engine.execute(
             request,
             context,

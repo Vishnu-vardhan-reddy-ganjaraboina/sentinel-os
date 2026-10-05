@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from sentinel.brain.constants import BrainState
 from sentinel.brain.intent import Intent
 from sentinel.brain.intent_resolver import IntentResolver

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Intent resolution for the Sentinel Brain subsystem.
 
 Intent resolution converts an incoming user goal into a structured
@@ -9,6 +9,7 @@ or interact with the operating system.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from typing import Any
 
 from sentinel.brain.intent import Intent
@@ -35,7 +36,7 @@ class DefaultIntentResolver(IntentResolver):
     Deterministic default Intent resolver.
 
     The default resolver creates a structured Intent without executing
-    any capability or performing authorization.
+    capabilities or performing authorization.
     """
 
     def resolve(
@@ -58,5 +59,5 @@ class DefaultIntentResolver(IntentResolver):
         return Intent(
             name="user_request",
             input=input,
-            context=dict(context),
+            context=deepcopy(context),
         )

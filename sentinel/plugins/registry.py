@@ -4,6 +4,7 @@ Registry implementation for the Sentinel Plugin subsystem.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from threading import RLock
 from typing import Any
 
@@ -22,13 +23,28 @@ class SentinelPluginRegistry(PluginRegistry):
     """
     Thread-safe registry for Sentinel plugins.
 
-    The registry owns plugin registration metadata but does not execute
-    plugin lifecycle operations.
+    The registry owns plugin registration metadata and synchronization.
+    It does not execute plugin lifecycle operations.
+
+    The lifecycle lock coordinates multi-step PluginManager operations
+    with direct registry mutations. This prevents a direct registry
+    mutation from racing a manager-owned lifecycle transition.
     """
 
     def __init__(self) -> None:
         self._plugins: dict[str, Plugin] = {}
         self._lock = RLock()
+        self._lifecycle_lock = RLock()
+
+    def _lifecycle_context(self) -> AbstractContextManager[None]:
+        """
+        Return the registry lifecycle lock as a context manager.
+
+        PluginManager uses this lock around multi-step lifecycle
+        operations so direct registry mutations cannot interleave
+        between plugin lookup and lifecycle execution.
+        """
+        return self._lifecycle_lock
 
     def register(
         self,
@@ -57,13 +73,14 @@ class SentinelPluginRegistry(PluginRegistry):
                 "Plugin name cannot be empty."
             )
 
-        with self._lock:
-            if name in self._plugins:
-                raise PluginRegistrationError(
-                    f"Plugin '{name}' is already registered."
-                )
+        with self._lifecycle_context():
+            with self._lock:
+                if name in self._plugins:
+                    raise PluginRegistrationError(
+                        f"Plugin '{name}' is already registered."
+                    )
 
-            self._plugins[name] = plugin
+                self._plugins[name] = plugin
 
     def unregister(
         self,
@@ -91,26 +108,27 @@ class SentinelPluginRegistry(PluginRegistry):
         """
         self._validate_name(name)
 
-        with self._lock:
-            try:
-                plugin = self._plugins[name]
-            except KeyError as exc:
-                raise PluginNotFoundError(
-                    f"Plugin '{name}' not found."
-                ) from exc
+        with self._lifecycle_context():
+            with self._lock:
+                try:
+                    plugin = self._plugins[name]
+                except KeyError as exc:
+                    raise PluginNotFoundError(
+                        f"Plugin '{name}' not found."
+                    ) from exc
 
-            if plugin.state in {
-                PluginState.LOADED,
-                PluginState.ENABLED,
-                PluginState.DISABLED,
-            }:
-                raise PluginRegistrationError(
-                    f"Plugin '{name}' cannot be unregistered while "
-                    f"in state '{plugin.state.value}'. "
-                    "Use PluginManager lifecycle operations first."
-                )
+                if plugin.state in {
+                    PluginState.LOADED,
+                    PluginState.ENABLED,
+                    PluginState.DISABLED,
+                }:
+                    raise PluginRegistrationError(
+                        f"Plugin '{name}' cannot be unregistered while "
+                        f"in state '{plugin.state.value}'. "
+                        "Use PluginManager lifecycle operations first."
+                    )
 
-            del self._plugins[name]
+                del self._plugins[name]
 
     def get(
         self,
@@ -143,19 +161,20 @@ class SentinelPluginRegistry(PluginRegistry):
         Active lifecycle states are preserved. Lifecycle cleanup should
         be performed by PluginManager before registry removal.
         """
-        with self._lock:
-            removable = [
-                name
-                for name, plugin in self._plugins.items()
-                if plugin.state
-                in {
-                    PluginState.REGISTERED,
-                    PluginState.UNLOADED,
-                }
-            ]
+        with self._lifecycle_context():
+            with self._lock:
+                removable = [
+                    name
+                    for name, plugin in self._plugins.items()
+                    if plugin.state
+                    in {
+                        PluginState.REGISTERED,
+                        PluginState.UNLOADED,
+                    }
+                ]
 
-            for name in removable:
-                del self._plugins[name]
+                for name in removable:
+                    del self._plugins[name]
 
     def to_dict(self) -> dict[str, Any]:
         """

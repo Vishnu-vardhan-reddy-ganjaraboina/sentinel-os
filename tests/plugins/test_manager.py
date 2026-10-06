@@ -7,30 +7,28 @@ from sentinel.plugins.exceptions import (
     PluginCleanupError,
     PluginDisableError,
     PluginLoadError,
+    PluginRegistrationError,
     PluginUnloadError,
 )
+from sentinel.plugins.loader import SentinelPluginLoader
 from sentinel.plugins.manager import PluginManager
 from sentinel.plugins.plugin import SentinelPlugin
 
 
 def test_registry_property():
-
     manager = PluginManager()
 
     assert manager.registry is not None
 
 
 def test_loader_property():
-
     manager = PluginManager()
 
     assert manager.loader is not None
 
 
 def test_register():
-
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -39,9 +37,7 @@ def test_register():
 
 
 def test_get():
-
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -50,9 +46,7 @@ def test_get():
 
 
 def test_lifecycle():
-
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -71,7 +65,6 @@ def test_lifecycle():
 
 
 def test_plugins():
-
     manager = PluginManager()
 
     manager.register(
@@ -86,9 +79,7 @@ def test_plugins():
 
 
 def test_unregister():
-
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -99,7 +90,6 @@ def test_unregister():
 
 
 def test_clear():
-
     manager = PluginManager()
 
     manager.register(
@@ -127,7 +117,6 @@ def test_invalid_loader_rejected() -> None:
 
 def test_clear_unloads_loaded_plugin() -> None:
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -141,7 +130,6 @@ def test_clear_unloads_loaded_plugin() -> None:
 
 def test_clear_disables_and_unloads_enabled_plugin() -> None:
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -152,6 +140,7 @@ def test_clear_disables_and_unloads_enabled_plugin() -> None:
 
     assert plugin.state == PluginState.UNLOADED
     assert len(manager) == 0
+
 
 class FailingDisablePlugin(SentinelPlugin):
     def disable(self) -> None:
@@ -188,7 +177,6 @@ def test_clear_continues_after_plugin_cleanup_failure() -> None:
 
 def test_clear_removes_successfully_cleaned_plugins() -> None:
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -202,7 +190,6 @@ def test_clear_removes_successfully_cleaned_plugins() -> None:
 
 def test_clear_unloads_disabled_plugin() -> None:
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -218,7 +205,6 @@ def test_clear_unloads_disabled_plugin() -> None:
 
 def test_clear_removes_registered_plugin_without_lifecycle_operation() -> None:
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -231,7 +217,6 @@ def test_clear_removes_registered_plugin_without_lifecycle_operation() -> None:
 
 def test_clear_removes_already_unloaded_plugin() -> None:
     manager = PluginManager()
-
     plugin = SentinelPlugin("sample")
 
     manager.register(plugin)
@@ -242,6 +227,26 @@ def test_clear_removes_already_unloaded_plugin() -> None:
 
     assert plugin.state == PluginState.UNLOADED
     assert len(manager) == 0
+
+
+def test_multiple_managers_can_share_registry() -> None:
+    from sentinel.plugins.registry import SentinelPluginRegistry
+
+    registry = SentinelPluginRegistry()
+    manager_one = PluginManager(registry=registry)
+    manager_two = PluginManager(registry=registry)
+
+    plugin = SentinelPlugin("shared")
+
+    manager_one.register(plugin)
+
+    assert manager_two.get("shared") is plugin
+    assert manager_one.registry is manager_two.registry
+
+    manager_two.load("shared")
+
+    assert plugin.state == PluginState.LOADED
+    assert manager_one.get("shared") is plugin
 
 def test_concurrent_manager_lifecycle_operations_are_serialized() -> None:
     manager = PluginManager()
@@ -276,3 +281,67 @@ def test_concurrent_manager_lifecycle_operations_are_serialized() -> None:
         isinstance(error, PluginLoadError)
         for error in errors
     ) == 19
+
+
+class BlockingLoader(SentinelPluginLoader):
+    def __init__(self) -> None:
+        self.load_started = threading.Event()
+        self.allow_load = threading.Event()
+
+    def load(self, plugin: SentinelPlugin) -> None:
+        self.load_started.set()
+
+        if not self.allow_load.wait(timeout=5):
+            raise TimeoutError("timed out waiting for test release")
+
+        plugin.load()
+
+
+def test_direct_registry_mutation_cannot_race_manager_load() -> None:
+    loader = BlockingLoader()
+    manager = PluginManager(loader=loader)
+    plugin = SentinelPlugin("sample")
+
+    manager.register(plugin)
+
+    load_errors: list[Exception] = []
+
+    def load_plugin() -> None:
+        try:
+            manager.load("sample")
+        except Exception as exc:
+            load_errors.append(exc)
+
+    load_thread = threading.Thread(target=load_plugin)
+    load_thread.start()
+
+    assert loader.load_started.wait(timeout=5)
+
+    unregister_done = threading.Event()
+    unregister_errors: list[Exception] = []
+
+    def unregister_plugin() -> None:
+        try:
+            manager.registry.unregister("sample")
+        except Exception as exc:
+            unregister_errors.append(exc)
+        finally:
+            unregister_done.set()
+
+    unregister_thread = threading.Thread(target=unregister_plugin)
+    unregister_thread.start()
+
+    # Direct registry mutation must wait for the manager-owned lifecycle
+    # operation to finish.
+    assert not unregister_done.wait(timeout=0.2)
+
+    loader.allow_load.set()
+
+    load_thread.join(timeout=5)
+    unregister_thread.join(timeout=5)
+
+    assert not load_errors
+    assert len(unregister_errors) == 1
+    assert isinstance(unregister_errors[0], PluginRegistrationError)
+    assert plugin.state == PluginState.LOADED
+    assert manager.get("sample") is plugin

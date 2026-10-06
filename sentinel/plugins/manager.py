@@ -25,7 +25,9 @@ class PluginManager:
     - PluginManager owns multi-step orchestration.
 
     The manager lock prevents concurrent orchestration operations from
-    interleaving in unsafe ways.
+    interleaving in unsafe ways. The registry lifecycle lock additionally
+    prevents direct registry mutations from racing manager-owned
+    lifecycle operations.
     """
 
     def __init__(
@@ -85,23 +87,27 @@ class PluginManager:
 
     def load(self, name: str) -> None:
         with self._lock:
-            plugin = self._registry.get(name)
-            self._loader.load(plugin)
+            with self._registry._lifecycle_context():  # noqa: SLF001
+                plugin = self._registry.get(name)
+                self._loader.load(plugin)
 
     def enable(self, name: str) -> None:
         with self._lock:
-            plugin = self._registry.get(name)
-            self._loader.enable(plugin)
+            with self._registry._lifecycle_context():  # noqa: SLF001
+                plugin = self._registry.get(name)
+                self._loader.enable(plugin)
 
     def disable(self, name: str) -> None:
         with self._lock:
-            plugin = self._registry.get(name)
-            self._loader.disable(plugin)
+            with self._registry._lifecycle_context():  # noqa: SLF001
+                plugin = self._registry.get(name)
+                self._loader.disable(plugin)
 
     def unload(self, name: str) -> None:
         with self._lock:
-            plugin = self._registry.get(name)
-            self._loader.unload(plugin)
+            with self._registry._lifecycle_context():  # noqa: SLF001
+                plugin = self._registry.get(name)
+                self._loader.unload(plugin)
 
     def plugins(self) -> list[Plugin]:
         with self._lock:
@@ -120,39 +126,40 @@ class PluginManager:
         - Multiple failures are reported together.
         """
         with self._lock:
-            plugins = self._registry.all()
-            failures: list[Exception] = []
-            cleaned: list[str] = []
+            with self._registry._lifecycle_context():  # noqa: SLF001
+                plugins = self._registry.all()
+                failures: list[Exception] = []
+                cleaned: list[str] = []
 
-            for plugin in plugins:
-                try:
-                    self._cleanup_plugin(plugin)
-                except Exception as exc:
-                    failures.append(exc)
-                    continue
+                for plugin in plugins:
+                    try:
+                        self._cleanup_plugin(plugin)
+                    except Exception as exc:
+                        failures.append(exc)
+                        continue
 
-                cleaned.append(plugin.name)
+                    cleaned.append(plugin.name)
 
-            for name in cleaned:
-                try:
-                    self._registry.unregister(name)
-                except Exception as exc:
-                    failures.append(exc)
+                for name in cleaned:
+                    try:
+                        self._registry.unregister(name)
+                    except Exception as exc:
+                        failures.append(exc)
 
-            if failures:
-                if len(failures) == 1:
+                if failures:
+                    if len(failures) == 1:
+                        raise PluginCleanupError(
+                            "One or more plugins could not be cleaned up."
+                        ) from failures[0]
+
+                    group = ExceptionGroup(
+                        "Multiple plugin cleanup failures.",
+                        failures,
+                    )
+
                     raise PluginCleanupError(
                         "One or more plugins could not be cleaned up."
-                    ) from failures[0]
-
-                group = ExceptionGroup(
-                    "Multiple plugin cleanup failures.",
-                    failures,
-                )
-
-                raise PluginCleanupError(
-                    "One or more plugins could not be cleaned up."
-                ) from group
+                    ) from group
 
     def _cleanup_plugin(self, plugin: Plugin) -> None:
         """

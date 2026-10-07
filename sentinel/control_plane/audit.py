@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from threading import RLock
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -35,17 +36,35 @@ class ControlAuditEvent:
     error: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.caller_id, str):
+            raise TypeError("caller_id must be a string.")
+
         if not self.caller_id.strip():
             raise ValueError("caller_id must not be empty.")
 
+        if not isinstance(self.caller_type, str):
+            raise TypeError("caller_type must be a string.")
+
         if not self.caller_type.strip():
             raise ValueError("caller_type must not be empty.")
+
+        if not isinstance(self.command, str):
+            raise TypeError("command must be a string.")
 
         if not self.command.strip():
             raise ValueError("command must not be empty.")
 
         if not isinstance(self.success, bool):
             raise TypeError("success must be a boolean.")
+
+        if not isinstance(self.timestamp, datetime):
+            raise TypeError("timestamp must be a datetime.")
+
+        if self.timestamp.tzinfo is None:
+            raise ValueError("timestamp must be timezone-aware.")
+
+        if not isinstance(self.data, Mapping):
+            raise TypeError("data must be a mapping.")
 
         if self.error is not None and not isinstance(self.error, str):
             raise TypeError("error must be a string or None.")
@@ -60,15 +79,12 @@ class ControlAuditEvent:
                 "Failed audit events must contain an error."
             )
 
-        if self.timestamp.tzinfo is None:
-            raise ValueError(
-                "timestamp must be timezone-aware."
-            )
+        copied_data = deepcopy(dict(self.data))
 
         object.__setattr__(
             self,
             "data",
-            deepcopy(self.data),
+            MappingProxyType(copied_data),
         )
 
 

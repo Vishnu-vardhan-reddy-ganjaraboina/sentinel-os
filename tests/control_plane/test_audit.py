@@ -232,3 +232,85 @@ def test_persistent_recorder_rejects_invalid_event() -> None:
 
     with pytest.raises(TypeError):
         recorder.record("invalid")  # type: ignore[arg-type]
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("caller_id", 123),
+        ("caller_type", 123),
+        ("command", 123),
+    ],
+)
+def test_audit_event_rejects_non_string_required_fields(
+    field: str,
+    value: object,
+) -> None:
+    kwargs = {
+        "caller_id": "caller",
+        "caller_type": "user",
+        "command": "service.status",
+        "success": True,
+        field: value,
+    }
+
+    with pytest.raises(TypeError):
+        ControlAuditEvent(**kwargs)  # type: ignore[arg-type]
+
+
+def test_audit_event_rejects_non_datetime_timestamp() -> None:
+    with pytest.raises(TypeError):
+        ControlAuditEvent(
+            caller_id="user",
+            caller_type="user",
+            command="service.status",
+            success=True,
+            timestamp="2026-01-01T00:00:00Z",  # type: ignore[arg-type]
+        )
+
+
+def test_audit_event_rejects_non_mapping_data() -> None:
+    with pytest.raises(TypeError):
+        ControlAuditEvent(
+            caller_id="user",
+            caller_type="user",
+            command="service.status",
+            success=True,
+            data=["invalid"],  # type: ignore[arg-type]
+        )
+
+
+def test_audit_event_data_mapping_is_immutable() -> None:
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data={"service": "execution"},
+    )
+
+    with pytest.raises(TypeError):
+        event.data["service"] = "memory"  # type: ignore[index]
+
+    assert event.data["service"] == "execution"
+
+
+def test_audit_event_nested_data_is_isolated() -> None:
+    data = {
+        "request": {
+            "service": "execution",
+        },
+        "items": ["one", "two"],
+    }
+
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data=data,
+    )
+
+    data["request"]["service"] = "memory"
+    data["items"].append("three")
+
+    assert event.data["request"]["service"] == "execution"
+    assert event.data["items"] == ["one", "two"]

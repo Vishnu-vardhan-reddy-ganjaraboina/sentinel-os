@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,15 @@ from sentinel.boot import BootManager
 from sentinel.control import ControlEndpointRegistry
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
-from sentinel.process import ProcessHost, ProcessState
+from sentinel.process import ProcessHost
 from sentinel.supervisor import (
     RestartPolicy,
     Supervisor,
-    SupervisorState,
+    SupervisorMonitor,
+    SupervisorRestartError,
+    SupervisorShutdownError,
     SupervisorStartupError,
+    SupervisorState,
     SupervisorStateError,
 )
 from sentinel.system import System
@@ -271,6 +275,54 @@ def test_startup_failure_returns_to_stopped() -> None:
     assert supervisor.running is False
 
 
+def test_startup_rollback_failure_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    supervisor = Supervisor(process)
+
+    def fail_monitor_start() -> None:
+        raise RuntimeError("monitor start failed")
+
+    def fail_process_stop() -> None:
+        raise RuntimeError("process rollback failed")
+
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "start",
+        fail_monitor_start,
+    )
+    monkeypatch.setattr(
+        process,
+        "stop",
+        fail_process_stop,
+    )
+
+    try:
+        with pytest.raises(SupervisorStartupError) as exc_info:
+            supervisor.start()
+
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is True
+
+        cause = exc_info.value.__cause__
+
+        assert isinstance(cause, ExceptionGroup)
+        assert [
+            str(error)
+            for error in cause.exceptions
+        ] == [
+            "monitor start failed",
+            "process rollback failed",
+        ]
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()
+
 def test_health_before_start() -> None:
     process = make_process()
     supervisor = Supervisor(process)
@@ -362,9 +414,7 @@ def test_restart_count_is_read_only() -> None:
 # Supervisor monitor tests
 # ---------------------------------------------------------------------------
 
-import time
 
-from sentinel.supervisor import SupervisorMonitor
 
 
 def test_monitor_constructor() -> None:
@@ -732,3 +782,351 @@ def test_supervisor_zero_backoff_does_not_sleep(monkeypatch, tmp_path):
     assert supervisor.state == SupervisorState.RUNNING
 
     supervisor.stop()
+
+def test_shutdown_failure_preserves_all_cleanup_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    supervisor = Supervisor(process)
+
+    supervisor.start()
+
+    monitor_stop_called = False
+    process_stop_called = False
+
+    def fail_monitor_stop() -> None:
+        nonlocal monitor_stop_called
+        monitor_stop_called = True
+        raise RuntimeError("monitor shutdown failed")
+
+    def fail_process_stop() -> None:
+        nonlocal process_stop_called
+        process_stop_called = True
+        raise RuntimeError("process shutdown failed")
+
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "stop",
+        fail_monitor_stop,
+    )
+    monkeypatch.setattr(
+        process,
+        "stop",
+        fail_process_stop,
+    )
+
+    try:
+        with pytest.raises(SupervisorShutdownError) as exc_info:
+            supervisor.stop()
+
+        assert monitor_stop_called is True
+        assert process_stop_called is True
+
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is True
+
+        cause = exc_info.value.__cause__
+
+        assert isinstance(cause, ExceptionGroup)
+        assert [
+            str(error)
+            for error in cause.exceptions
+        ] == [
+            "monitor shutdown failed",
+            "process shutdown failed",
+        ]
+    finally:
+        monkeypatch.undo()
+
+        supervisor.monitor.stop()
+
+        if process.running:
+            process.stop()
+
+def test_restart_monitor_start_failure_rolls_back_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    supervisor = Supervisor(process)
+
+    supervisor.start()
+
+    original_process_stop = process.stop
+    process_stop_calls = 0
+
+    def track_process_stop() -> None:
+        nonlocal process_stop_calls
+        process_stop_calls += 1
+        original_process_stop()
+
+    def fail_monitor_start() -> None:
+        raise RuntimeError("monitor restart failed")
+
+    monkeypatch.setattr(
+        process,
+        "stop",
+        track_process_stop,
+    )
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "start",
+        fail_monitor_start,
+    )
+
+    try:
+        with pytest.raises(SupervisorRestartError) as exc_info:
+            supervisor.restart()
+
+        assert process_stop_calls >= 1
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is False
+
+        assert str(exc_info.value.__cause__) == "monitor restart failed"
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()
+
+def test_restart_rollback_failure_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    supervisor = Supervisor(process)
+
+    supervisor.start()
+
+    original_process_stop = process.stop
+    process_stop_calls = 0
+
+    def fail_process_stop() -> None:
+        nonlocal process_stop_calls
+        process_stop_calls += 1
+
+        if process_stop_calls == 2:
+            raise RuntimeError("process rollback failed")
+
+        original_process_stop()
+
+    def fail_monitor_start() -> None:
+        raise RuntimeError("monitor restart failed")
+
+    monkeypatch.setattr(
+        process,
+        "stop",
+        fail_process_stop,
+    )
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "start",
+        fail_monitor_start,
+    )
+
+    try:
+        with pytest.raises(SupervisorRestartError) as exc_info:
+            supervisor.restart()
+
+        assert process_stop_calls == 2
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is True
+
+        cause = exc_info.value.__cause__
+
+        assert isinstance(cause, ExceptionGroup)
+        assert [
+            str(error)
+            for error in cause.exceptions
+        ] == [
+            "monitor restart failed",
+            "process rollback failed",
+        ]
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()
+
+def test_automatic_restart_failure_leaves_supervisor_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    policy = RestartPolicy(
+        enabled=True,
+        max_restarts=3,
+        backoff_seconds=0,
+    )
+    supervisor = Supervisor(
+        process,
+        policy=policy,
+        monitor_interval=0.01,
+    )
+
+    supervisor.start()
+
+
+    def fail_process_start() -> None:
+        raise RuntimeError("automatic restart failed")
+
+    monkeypatch.setattr(
+        process,
+        "start",
+        fail_process_start,
+    )
+
+    try:
+        supervisor.monitor.stop()
+        process.stop()
+
+        supervisor._handle_process_failure()
+
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is False
+        assert supervisor.restart_count == 0
+
+        recovery_error = supervisor.health()["last_recovery_error"]
+
+        assert recovery_error == {
+            "type": "RuntimeError",
+            "message": "automatic restart failed",
+        }
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()
+
+def test_automatic_restart_monitor_failure_rolls_back_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    policy = RestartPolicy(
+        enabled=True,
+        max_restarts=3,
+        backoff_seconds=0,
+    )
+    supervisor = Supervisor(
+        process,
+        policy=policy,
+        monitor_interval=0.01,
+    )
+
+    supervisor.start()
+
+    process_stop_calls = 0
+    original_process_stop = process.stop
+
+    def tracking_process_stop() -> None:
+        nonlocal process_stop_calls
+        process_stop_calls += 1
+        original_process_stop()
+
+    def fail_monitor_start() -> None:
+        raise RuntimeError("automatic monitor restart failed")
+
+    monkeypatch.setattr(process, "stop", tracking_process_stop)
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "start",
+        fail_monitor_start,
+    )
+
+    try:
+        supervisor.monitor.stop()
+        process.stop()
+
+        supervisor._handle_process_failure()
+
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is False
+        assert process_stop_calls >= 1
+        assert supervisor.restart_count == 0
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()
+
+def test_automatic_restart_rollback_failure_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    policy = RestartPolicy(
+        enabled=True,
+        max_restarts=3,
+        backoff_seconds=0,
+    )
+    supervisor = Supervisor(
+        process,
+        policy=policy,
+        monitor_interval=0.01,
+    )
+
+    supervisor.start()
+
+    original_process_stop = process.stop
+    process_stop_calls = 0
+
+    def failing_process_stop() -> None:
+        nonlocal process_stop_calls
+        process_stop_calls += 1
+
+        if process_stop_calls >= 2:
+            raise RuntimeError("automatic rollback failed")
+
+        original_process_stop()
+
+    def fail_monitor_start() -> None:
+        raise RuntimeError("automatic monitor restart failed")
+
+    monkeypatch.setattr(
+        process,
+        "stop",
+        failing_process_stop,
+    )
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "start",
+        fail_monitor_start,
+    )
+
+    try:
+        supervisor.monitor.stop()
+        process.stop()
+
+        supervisor._handle_process_failure()
+
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is True
+        assert process_stop_calls == 2
+
+        recovery_error = supervisor.health()["last_recovery_error"]
+
+        assert recovery_error is not None
+        assert recovery_error["type"] == "ExceptionGroup"
+        assert recovery_error["errors"] == [
+            {
+                "type": "RuntimeError",
+                "message": "automatic monitor restart failed",
+            },
+            {
+                "type": "RuntimeError",
+                "message": "automatic rollback failed",
+            },
+        ]
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()

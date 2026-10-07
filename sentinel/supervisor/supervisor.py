@@ -430,9 +430,3 @@ class Supervisor:
             f"restart_count={self.restart_count}"
             ")"
         )
-    def _wait_for_backoff(self) -> None:
-        """Wait for the configured restart backoff period."""
-        delay = self._policy.backoff_seconds
-
-        if delay > 0:
-            sleep(delay)

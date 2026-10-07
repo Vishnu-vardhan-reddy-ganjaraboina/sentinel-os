@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -652,6 +653,47 @@ def test_monitor_failure_callback_is_called_once() -> None:
         if process.running:
             process.stop()
 
+
+def test_monitor_failure_callback_exception_is_isolated() -> None:
+    process = make_process()
+    callback_started = Event()
+
+    def on_failure() -> None:
+        callback_started.set()
+        raise RuntimeError("callback failed")
+
+    monitor = SupervisorMonitor(
+        process,
+        interval=0.01,
+        on_failure=on_failure,
+    )
+
+    process.start()
+
+    try:
+        monitor.start()
+        process.stop()
+
+        assert callback_started.wait(1.0) is True
+
+        deadline = time.monotonic() + 1.0
+
+        while (
+            monitor.running
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+
+        assert monitor.failure_detected is True
+        assert monitor.running is False
+        assert isinstance(monitor.callback_error, RuntimeError)
+        assert str(monitor.callback_error) == "callback failed"
+    finally:
+        if monitor.running:
+            monitor.stop()
+
+        if process.running:
+            process.stop()
 
 def test_monitor_can_restart_after_stop() -> None:
     process = make_process()

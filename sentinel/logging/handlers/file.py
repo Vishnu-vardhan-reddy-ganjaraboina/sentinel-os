@@ -5,6 +5,7 @@ File logging handler for Sentinel OS.
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 
 from sentinel.logging.constants import (
     DEFAULT_ENCODING,
@@ -42,6 +43,7 @@ class FileHandler(LogHandler):
             mode="a",
             encoding=self._encoding,
         )
+        self._lock = RLock()
 
     @property
     def path(self) -> Path:
@@ -54,21 +56,23 @@ class FileHandler(LogHandler):
         """
         Write a formatted record to the log file.
         """
-        if self._closed:
-            raise RuntimeError("FileHandler is closed")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("FileHandler is closed")
 
-        message = self._formatter.format(record)
-        self._stream.write(f"{message}\n")
-        self._stream.flush()
+            message = self._formatter.format(record)
+            self._stream.write(f"{message}\n")
+            self._stream.flush()
 
     def close(self) -> None:
         """
         Close the log file.
         """
-        if not self._closed:
-            self._stream.flush()
-            self._stream.close()
-            self._closed = True
+        with self._lock:
+            if not self._closed:
+                self._stream.flush()
+                self._stream.close()
+                self._closed = True
 
 
 __all__ = (

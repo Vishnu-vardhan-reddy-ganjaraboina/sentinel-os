@@ -9,9 +9,9 @@ from threading import RLock
 from typing import Any
 
 from sentinel.application import Application
+from sentinel.application_manifest import ApplicationManifest
 from sentinel.application_registry import ApplicationRegistry
 from sentinel.application_state import ApplicationState
-from sentinel.application_manifest import ApplicationManifest
 
 
 class ApplicationManager:
@@ -336,6 +336,66 @@ class ApplicationManager:
         result = dict(health)
         result.setdefault("healthy", False)
         result["state"] = state.value
+
+        return result
+
+    def health_all(self) -> Mapping[str, Mapping[str, Any]]:
+        """
+        Return health information for all registered applications.
+
+        The application/state/error snapshot is captured while holding the
+        manager lock. Application health code executes after the lock is
+        released so arbitrary application code cannot block lifecycle
+        operations.
+        """
+        with self._lock:
+            snapshot = tuple(
+                (
+                    name,
+                    application,
+                    self._states.get(name),
+                    self._errors.get(name),
+                )
+                for name, application in self._registry.items()
+            )
+
+        result: dict[str, Mapping[str, Any]] = {}
+
+        for name, application, state, error in snapshot:
+            if state != ApplicationState.RUNNING:
+                result[name] = {
+                    "healthy": False,
+                    "state": (
+                        state.value
+                        if state is not None
+                        else None
+                    ),
+                    "error": error,
+                }
+                continue
+
+            try:
+                health = application.health
+            except Exception as exc:
+                result[name] = {
+                    "healthy": False,
+                    "state": state.value,
+                    "error": str(exc),
+                }
+                continue
+
+            if not isinstance(health, Mapping):
+                result[name] = {
+                    "healthy": False,
+                    "state": state.value,
+                    "error": "Application health result is invalid.",
+                }
+                continue
+
+            application_result = dict(health)
+            application_result.setdefault("healthy", False)
+            application_result["state"] = state.value
+            result[name] = application_result
 
         return result
 

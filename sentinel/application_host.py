@@ -282,11 +282,8 @@ class ApplicationHost:
     def health_all(
         self,
     ) -> Mapping[str, Mapping[str, Any]]:
-        """Return health information for all applications."""
-        return {
-            name: self._manager.health(name)
-            for name in self._manager.names()
-        }
+        """Return a consistent health snapshot for all applications."""
+        return self._manager.health_all()
 
     def __len__(self) -> int:
         """Return the number of registered applications."""

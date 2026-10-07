@@ -1,11 +1,12 @@
+import threading
+
 import pytest
 
-from sentinel.infrastructure.monitor import Monitor
+from sentinel.infrastructure.monitor import Monitor, ServiceHealth
 from sentinel.kernel.exceptions import ServiceNotFoundError
-from sentinel.infrastructure.exceptions import MonitorError
-from sentinel.kernel.service_state import ServiceState
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
+from sentinel.kernel.service_state import ServiceState
 
 
 def test_register_service() -> None:
@@ -92,6 +93,7 @@ def test_shutdown() -> None:
 
     assert monitor.get_all_health() == {}
 
+
 def test_duplicate_service_rejected() -> None:
     monitor = Monitor()
 
@@ -177,8 +179,9 @@ def test_shutdown_rejects_future_operations() -> None:
 
     monitor.shutdown()
 
-    with pytest.raises(Exception):
+    with pytest.raises(ServiceNotFoundError):
         monitor.get_health("kernel")
+
 
 def test_sync_kernel_registers_running_services() -> None:
     monitor = Monitor()
@@ -275,3 +278,91 @@ def test_sync_kernel_rejects_invalid_kernel() -> None:
 
     with pytest.raises(TypeError):
         monitor.sync_kernel(object())  # type: ignore[arg-type]
+
+
+def test_sync_kernel_updates_are_atomic() -> None:
+    commit_started = threading.Event()
+    release_commit = threading.Event()
+
+    class CoordinatedMonitor(Monitor):
+        def _ensure_active(self) -> None:
+            commit_started.set()
+
+            if not release_commit.wait(timeout=5):
+                raise AssertionError(
+                    "Monitor synchronization was not released"
+                )
+
+            super()._ensure_active()
+
+    monitor = CoordinatedMonitor()
+    kernel = Kernel()
+
+    class DummyService(Service):
+        def __init__(self, name: str) -> None:
+            super().__init__(name)
+
+        def initialize(self) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            pass
+
+    first = "first"
+    second = "second"
+
+    kernel.register(DummyService(first))
+    kernel.register(DummyService(second))
+    kernel.boot()
+
+    snapshots: list[dict[str, ServiceHealth]] = []
+    reader_errors: list[BaseException] = []
+    sync_errors: list[BaseException] = []
+
+    def synchronize() -> None:
+        try:
+            monitor.sync_kernel(kernel)
+        except BaseException as exc:
+            sync_errors.append(exc)
+
+    def read_snapshot() -> None:
+        try:
+            snapshots.append(monitor.get_all_health())
+        except BaseException as exc:
+            reader_errors.append(exc)
+
+    sync_thread = threading.Thread(target=synchronize)
+    reader_thread = threading.Thread(target=read_snapshot)
+
+    try:
+        sync_thread.start()
+
+        assert commit_started.wait(timeout=5)
+
+        reader_thread.start()
+
+        # The reader must be blocked while sync_kernel owns
+        # the Monitor lock during its atomic commit.
+        reader_thread.join(timeout=0.2)
+        assert reader_thread.is_alive()
+
+        release_commit.set()
+
+        sync_thread.join(timeout=5)
+        reader_thread.join(timeout=5)
+
+        assert not sync_thread.is_alive()
+        assert not reader_thread.is_alive()
+        assert sync_errors == []
+        assert reader_errors == []
+
+        assert len(snapshots) == 1
+        assert set(snapshots[0]) == {first, second}
+    finally:
+        release_commit.set()
+
+        sync_thread.join(timeout=5)
+        reader_thread.join(timeout=5)
+
+        kernel.shutdown()
+        monitor.shutdown()

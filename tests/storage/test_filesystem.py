@@ -9,6 +9,8 @@ import pytest
 from sentinel.storage.exceptions import (
     StorageBackendError,
     StorageKeyNotFoundError,
+    StorageSerializationError,
+    StorageWriteError,
 )
 from sentinel.storage.filesystem import FilesystemStorage
 
@@ -101,3 +103,51 @@ def test_persistence(tmp_path: Path):
     assert storage2.get("config") == {
         "version": 1
     }
+def test_replace_failure_preserves_existing_value_and_cleans_temp(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    storage = FilesystemStorage(tmp_path)
+
+    storage.set(
+        "config",
+        {"version": 1},
+    )
+
+    def failing_replace(source, destination):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(
+        "sentinel.storage.backends.filesystem.os.replace",
+        failing_replace,
+    )
+
+    with pytest.raises(StorageWriteError, match="Unable to write 'config'"):
+        storage.set(
+            "config",
+            {"version": 2},
+        )
+
+    assert storage.get("config") == {
+        "version": 1,
+    }
+
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_serialization_failure_cleans_temp_file(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemStorage(tmp_path)
+
+    class Unserializable:
+        pass
+
+    with pytest.raises(StorageSerializationError):
+        storage.set(
+            "invalid",
+            Unserializable(),
+        )
+
+    assert not (tmp_path / "invalid.json").exists()
+    assert list(tmp_path.glob("*.tmp")) == []

@@ -17,23 +17,35 @@ from sentinel.knowledge.similarity import DotProductSimilarity
 from sentinel.storage.backends.sqlite import SQLiteBackend
 
 
-def create_store(
-    database: Path,
-) -> PersistentVectorStore:
-    """Create a persistent vector store for testing."""
-    backend = SQLiteBackend(database)
+@pytest.fixture
+def store_factory():
+    """Create persistent stores and close all of them after the test."""
+    stores: list[PersistentVectorStore] = []
 
-    return PersistentVectorStore(
-        backend=backend,
-    )
+    def create(database: Path) -> PersistentVectorStore:
+        backend = SQLiteBackend(database)
+
+        store = PersistentVectorStore(
+            backend=backend,
+        )
+
+        stores.append(store)
+
+        return store
+
+    yield create
+
+    for store in stores:
+        store.close()
 
 
 def test_add_and_get(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = create_store(database)
+    store = store_factory(database)
 
     chunk = Chunk(
         id="chunk.1",
@@ -59,10 +71,11 @@ def test_add_and_get(
 
 def test_persistence_survives_reopen(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    first = create_store(database)
+    first = store_factory(database)
 
     chunk = Chunk(
         id="chunk.1",
@@ -76,9 +89,9 @@ def test_persistence_survives_reopen(
         [1.0, 0.0, 0.0],
     )
 
-    first.backend.close()
+    first.close()
 
-    second = create_store(database)
+    second = store_factory(database)
 
     stored = second.get("chunk.1")
 
@@ -87,15 +100,14 @@ def test_persistence_survives_reopen(
     assert stored.document_id == "doc.1"
     assert stored.text == "Persistent Sentinel knowledge"
 
-    second.backend.close()
-
 
 def test_search(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = create_store(database)
+    store = store_factory(database)
 
     store.add(
         Chunk(
@@ -128,10 +140,11 @@ def test_search(
 
 def test_delete(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = create_store(database)
+    store = store_factory(database)
 
     store.add(
         Chunk(
@@ -151,10 +164,11 @@ def test_delete(
 
 def test_delete_document(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = create_store(database)
+    store = store_factory(database)
 
     store.add(
         Chunk(
@@ -195,10 +209,11 @@ def test_delete_document(
 
 def test_clear(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = create_store(database)
+    store = store_factory(database)
 
     store.add(
         Chunk(
@@ -215,10 +230,12 @@ def test_clear(
     assert len(store) == 0
     assert store.list_chunks() == []
 
+
 def test_search_with_non_positive_limit_returns_empty(
     tmp_path: Path,
+    store_factory,
 ) -> None:
-    store = create_store(tmp_path / "knowledge.db")
+    store = store_factory(tmp_path / "knowledge.db")
 
     store.add(
         Chunk(
@@ -236,17 +253,20 @@ def test_search_with_non_positive_limit_returns_empty(
 
 def test_missing_chunk_returns_none(
     tmp_path: Path,
+    store_factory,
 ) -> None:
-    store = create_store(tmp_path / "knowledge.db")
+    store = store_factory(tmp_path / "knowledge.db")
 
     assert store.get("missing") is None
 
 
 def test_corrupt_json_is_rejected(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
-    store = create_store(database)
+
+    store = store_factory(database)
 
     store.backend.set(
         "knowledge:chunk:broken",
@@ -259,9 +279,11 @@ def test_corrupt_json_is_rejected(
 
 def test_invalid_payload_is_rejected(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
-    store = create_store(database)
+
+    store = store_factory(database)
 
     store.backend.set(
         "knowledge:chunk:broken",
@@ -274,9 +296,11 @@ def test_invalid_payload_is_rejected(
 
 def test_invalid_embedding_is_rejected(
     tmp_path: Path,
+    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
-    store = create_store(database)
+
+    store = store_factory(database)
 
     store.backend.set(
         "knowledge:chunk:broken",
@@ -300,8 +324,9 @@ def test_invalid_embedding_is_rejected(
 
 def test_concurrent_unique_adds(
     tmp_path: Path,
+    store_factory,
 ) -> None:
-    store = create_store(
+    store = store_factory(
         tmp_path / "knowledge.db",
     )
 
@@ -343,8 +368,9 @@ def test_concurrent_unique_adds(
 
 def test_concurrent_replacement_preserves_complete_records(
     tmp_path: Path,
+    store_factory,
 ) -> None:
-    store = create_store(
+    store = store_factory(
         tmp_path / "knowledge.db",
     )
 
@@ -399,8 +425,9 @@ def test_concurrent_replacement_preserves_complete_records(
 
 def test_concurrent_search_and_delete(
     tmp_path: Path,
+    store_factory,
 ) -> None:
-    store = create_store(
+    store = store_factory(
         tmp_path / "knowledge.db",
     )
 
@@ -444,8 +471,9 @@ def test_concurrent_search_and_delete(
 
 def test_concurrent_clear_and_reads(
     tmp_path: Path,
+    store_factory,
 ) -> None:
-    store = create_store(
+    store = store_factory(
         tmp_path / "knowledge.db",
     )
 
@@ -514,4 +542,7 @@ def test_falsey_similarity_is_preserved(
         similarity=similarity,
     )
 
-    assert store._similarity is similarity
+    try:
+        assert store._similarity is similarity
+    finally:
+        store.close()

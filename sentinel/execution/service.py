@@ -92,9 +92,34 @@ class ExecutionService:
 
     def shutdown(self) -> None:
         """
-        Shut down the executor.
+        Shut down all execution resources.
+
+        Executor and process resources are both released. If multiple
+        resources fail during shutdown, the first failure is preserved
+        while cleanup of the remaining resource is still attempted.
         """
-        self._executor.shutdown()
+        failures: list[BaseException] = []
+
+        try:
+            self._executor.shutdown()
+        except BaseException as exc:
+            failures.append(exc)
+
+        try:
+            self._process_manager.shutdown()
+        except BaseException as exc:
+            failures.append(exc)
+
+        if not failures:
+            return
+
+        if len(failures) == 1:
+            raise failures[0]
+
+        raise ExceptionGroup(
+            "Execution service shutdown failed.",
+            failures,
+        )
 
     # ------------------------------------------------------------------
     # Command execution

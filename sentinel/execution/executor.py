@@ -46,9 +46,6 @@ class DefaultExecutor(Executor):
         *args: Any,
         **kwargs: Any,
     ) -> str:
-        if self._shutdown:
-            raise RuntimeError("Executor has been shut down.")
-
         task = Task(
             callback=callback,
             args=args,
@@ -58,23 +55,32 @@ class DefaultExecutor(Executor):
         context = ExecutionContext(task.task_id)
 
         with self._lock:
+            self._ensure_accepting_work()
+
             self._contexts[task.task_id] = context
             self._submitted += 1
 
-        future = self._pool.submit(self._run_task, task, context)
+            try:
+                future = self._pool.submit(
+                    self._run_task,
+                    task,
+                    context,
+                )
+            except BaseException:
+                self._contexts.pop(task.task_id, None)
+                self._submitted -= 1
+                raise
 
-        with self._lock:
             self._futures[task.task_id] = future
 
         return task.task_id
 
     def execute(self, task: Task) -> Any:
-        if self._shutdown:
-            raise RuntimeError("Executor has been shut down.")
-
         context = ExecutionContext(task.task_id)
 
         with self._lock:
+            self._ensure_accepting_work()
+
             self._contexts[task.task_id] = context
             self._submitted += 1
 
@@ -85,22 +91,21 @@ class DefaultExecutor(Executor):
         task: Task,
         context: ExecutionContext,
     ) -> Any:
-        context.mark_running()
+        with self._lock:
+            context.mark_running()
 
         try:
             result = task.execute()
 
-            context.mark_completed(result)
-
             with self._lock:
+                context.mark_completed(result)
                 self._completed += 1
 
             return result
 
         except Exception as exc:
-            context.mark_failed(exc)
-
             with self._lock:
+                context.mark_failed(exc)
                 self._failed += 1
 
             raise
@@ -109,40 +114,44 @@ class DefaultExecutor(Executor):
         self,
         task_id: str,
     ) -> bool:
-        future = self._futures.get(task_id)
+        with self._lock:
+            future = self._futures.get(task_id)
 
-        if future is None:
-            return False
+            if future is None:
+                return False
 
-        cancelled = future.cancel()
+            cancelled = future.cancel()
 
-        if cancelled:
+            if not cancelled:
+                return False
+
             context = self._contexts.get(task_id)
 
             if context is not None:
                 context.mark_cancelled()
 
-            with self._lock:
-                self._cancelled += 1
+            self._cancelled += 1
 
-        return cancelled
+            return True
 
     def is_running(
         self,
         task_id: str,
     ) -> bool:
-        context = self._contexts.get(task_id)
+        with self._lock:
+            context = self._contexts.get(task_id)
 
-        return (
-            context is not None
-            and context.status == TaskStatus.RUNNING
-        )
+            return (
+                context is not None
+                and context.status == TaskStatus.RUNNING
+            )
 
     def get_context(
         self,
         task_id: str,
     ) -> ExecutionContext | None:
-        return self._contexts.get(task_id)
+        with self._lock:
+            return self._contexts.get(task_id)
 
     def stats(self) -> dict[str, int]:
         """
@@ -165,6 +174,13 @@ class DefaultExecutor(Executor):
 
     def shutdown(self) -> None:
         with self._lock:
+            if self._shutdown:
+                return
+
             self._shutdown = True
 
         self._pool.shutdown(wait=True)
+
+    def _ensure_accepting_work(self) -> None:
+        if self._shutdown:
+            raise RuntimeError("Executor has been shut down.")

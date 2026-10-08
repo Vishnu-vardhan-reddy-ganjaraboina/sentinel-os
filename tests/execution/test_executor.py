@@ -77,7 +77,16 @@ def test_cancel_unknown_task() -> None:
 def test_submit() -> None:
     executor = DefaultExecutor()
 
-    task_id = executor.submit(add, 4, 6)
+    completed = threading.Event()
+
+    def add_and_signal(a: int, b: int) -> int:
+        result = add(a, b)
+        completed.set()
+        return result
+
+    task_id = executor.submit(add_and_signal, 4, 6)
+
+    assert completed.wait(timeout=1)
 
     context = executor.get_context(task_id)
 
@@ -86,7 +95,6 @@ def test_submit() -> None:
     assert context.status == TaskStatus.COMPLETED
 
     executor.shutdown()
-
 
 def test_shutdown() -> None:
     executor = DefaultExecutor()
@@ -178,3 +186,140 @@ def test_multiple_tasks_can_execute_concurrently() -> None:
 
     release.set()
     executor.shutdown()
+def test_shutdown_is_idempotent() -> None:
+    executor = DefaultExecutor()
+
+    executor.shutdown()
+    executor.shutdown()
+
+def test_concurrent_submit_and_shutdown() -> None:
+    executor = DefaultExecutor(max_workers=4)
+
+    barrier = threading.Barrier(2)
+    submitted: list[str] = []
+    rejected = 0
+    lock = threading.Lock()
+
+    def submitter() -> None:
+        nonlocal rejected
+
+        barrier.wait()
+
+        for _ in range(50):
+            try:
+                task_id = executor.submit(add, 1, 2)
+            except RuntimeError:
+                with lock:
+                    rejected += 1
+            else:
+                with lock:
+                    submitted.append(task_id)
+
+    thread = threading.Thread(target=submitter)
+
+    thread.start()
+    barrier.wait()
+
+    executor.shutdown()
+
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert rejected >= 0
+    assert len(submitted) <= 50
+
+def test_submit_failure_does_not_leave_context() -> None:
+    executor = DefaultExecutor()
+
+    original_submit = executor._pool.submit
+
+    def failing_submit(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("submit failed")
+
+    executor._pool.submit = failing_submit  # type: ignore[method-assign]
+
+    try:
+        with pytest.raises(RuntimeError, match="submit failed"):
+            executor.submit(add, 1, 2)
+
+        stats = executor.stats()
+
+        assert stats["submitted"] == 0
+        assert stats["completed"] == 0
+        assert stats["failed"] == 0
+        assert stats["cancelled"] == 0
+    finally:
+        executor._pool.submit = original_submit  # type: ignore[method-assign]
+        executor.shutdown()
+
+def test_get_context_is_safe_during_concurrent_submissions() -> None:
+    executor = DefaultExecutor(max_workers=4)
+
+    task_ids: list[str] = []
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+
+    def submit_tasks() -> None:
+        try:
+            for _ in range(50):
+                task_id = executor.submit(add, 1, 2)
+                with lock:
+                    task_ids.append(task_id)
+        except BaseException as exc:
+            with lock:
+                errors.append(exc)
+
+    threads = [
+        threading.Thread(target=submit_tasks)
+        for _ in range(4)
+    ]
+
+    try:
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == []
+        assert len(task_ids) == 200
+
+        for task_id in task_ids:
+            context = executor.get_context(task_id)
+            assert context is not None
+    finally:
+        executor.shutdown()
+
+def test_cancel_only_marks_context_when_future_cancels() -> None:
+    executor = DefaultExecutor(max_workers=1)
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_task() -> None:
+        started.set()
+        release.wait(timeout=5)
+
+    try:
+        first_task = executor.submit(blocking_task)
+
+        assert started.wait(timeout=1)
+
+        second_task = executor.submit(add, 1, 2)
+
+        assert executor.cancel(second_task) is True
+
+        second_context = executor.get_context(second_task)
+        assert second_context is not None
+        assert second_context.status == TaskStatus.CANCELLED
+
+        assert executor.cancel(first_task) is False
+
+        first_context = executor.get_context(first_task)
+        assert first_context is not None
+        assert first_context.status == TaskStatus.RUNNING
+
+    finally:
+        release.set()
+        executor.shutdown()

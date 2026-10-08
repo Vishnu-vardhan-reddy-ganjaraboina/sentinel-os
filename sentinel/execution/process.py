@@ -7,6 +7,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
+from threading import RLock
 
 from sentinel.execution.constants import (
     DEFAULT_SHELL,
@@ -19,6 +20,10 @@ from sentinel.execution.exceptions import ProcessError
 class ProcessManager:
     """
     Manages long-running operating system processes.
+
+    Process ownership and lifecycle state are synchronized so concurrent
+    callers cannot start, terminate, or replace the managed process
+    inconsistently.
     """
 
     def __init__(
@@ -30,30 +35,34 @@ class ProcessManager:
         self._shell = shell
         self._cwd = Path(cwd).resolve() if cwd else None
         self._process: subprocess.Popen[str] | None = None
+        self._lock = RLock()
+        self._shutdown = False
 
     @property
     def process(self) -> subprocess.Popen[str] | None:
         """
         Return the underlying process.
+
+        The returned object is the currently owned process snapshot.
+        Callers must not mutate its lifecycle directly.
         """
-        return self._process
+        with self._lock:
+            return self._process
 
     @property
     def pid(self) -> int | None:
-        """
-        Return the process ID.
-        """
-        return None if self._process is None else self._process.pid
+        """Return the process ID."""
+        with self._lock:
+            process = self._process
+            return None if process is None else process.pid
 
     @property
     def is_running(self) -> bool:
-        """
-        Return True if the process is still running.
-        """
-        return (
-            self._process is not None
-            and self._process.poll() is None
-        )
+        """Return True if the process is still running."""
+        with self._lock:
+            process = self._process
+
+        return process is not None and process.poll() is None
 
     def start(
         self,
@@ -62,26 +71,39 @@ class ProcessManager:
         """
         Start a new process.
         """
-        if self.is_running:
-            raise ProcessError(
-                "A process is already running."
-            )
+        with self._lock:
+            if self._shutdown:
+                raise ProcessError(
+                    "Process manager has been shut down."
+                )
 
-        try:
-            self._process = subprocess.Popen(
-                list(command),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE,
-                text=TEXT_MODE,
-                shell=self._shell,
-                cwd=self._cwd,
-            )
+            process = self._process
 
-        except OSError as exc:
-            raise ProcessError(str(exc)) from exc
+            if process is not None and process.poll() is None:
+                raise ProcessError(
+                    "A process is already running."
+                )
 
-        return self._process.pid
+            if process is not None:
+                self._close_process_streams(process)
+                self._process = None
+
+            try:
+                process = subprocess.Popen(
+                    list(command),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.PIPE,
+                    text=TEXT_MODE,
+                    shell=self._shell,
+                    cwd=self._cwd,
+                )
+            except OSError as exc:
+                raise ProcessError(str(exc)) from exc
+
+            self._process = process
+
+            return process.pid
 
     def wait(
         self,
@@ -90,39 +112,100 @@ class ProcessManager:
         """
         Wait for the process to finish.
 
-        Returns
-        -------
-        int
-            Exit code.
+        The process remains owned by the manager after ``wait()`` so callers
+        can subsequently retrieve stdout/stderr with ``read_output()``.
         """
-        if self._process is None:
-            raise ProcessError("No process has been started.")
-
-        return self._process.wait(timeout)
-
+        with self._lock:
+            process = self._require_process()
+            return process.wait(timeout)
     def terminate(self) -> None:
         """
         Gracefully terminate the process.
+
+        If graceful termination exceeds the configured timeout, the
+        process is killed and reaped.
         """
-        if self._process is None:
-            return
+        with self._lock:
+            process = self._process
 
-        self._process.terminate()
+            if process is None:
+                return
 
-        try:
-            self._process.wait(DEFAULT_TERMINATE_TIMEOUT)
+            if process.poll() is None:
+                process.terminate()
 
-        except subprocess.TimeoutExpired:
-            self._process.kill()
-            self._process.wait()
+                try:
+                    process.wait(DEFAULT_TERMINATE_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
 
+            if self._process is process:
+                self._close_process_streams(process)
+                self._process = None
     def read_output(self) -> tuple[str, str]:
         """
-        Read stdout and stderr.
+        Read stdout and stderr and fully reap the process.
+
+        ``communicate()`` drains the communication streams. The process
+        reference is cleared after successful completion.
         """
-        if self._process is None:
+        with self._lock:
+            process = self._require_process()
+
+            stdout, stderr = process.communicate()
+
+            if self._process is process:
+                self._close_process_streams(process)
+                self._process = None
+
+            return stdout, stderr
+    def shutdown(self) -> None:
+        """
+        Terminate any owned process and release its resources.
+
+        Shutdown is idempotent.
+        """
+        with self._lock:
+            if self._shutdown:
+                return
+
+            self._shutdown = True
+
+        try:
+            self.terminate()
+        except Exception:
+            with self._lock:
+                process = self._process
+
+            if process is not None:
+                try:
+                    process.kill()
+                    process.wait()
+                finally:
+                    with self._lock:
+                        if self._process is process:
+                            self._close_process_streams(process)
+                            self._process = None
+
+            raise
+
+    def _require_process(self) -> subprocess.Popen[str]:
+        process = self._process
+
+        if process is None:
             raise ProcessError("No process has been started.")
 
-        stdout, stderr = self._process.communicate()
+        return process
 
-        return stdout, stderr
+    @staticmethod
+    def _close_process_streams(
+        process: subprocess.Popen[str],
+    ) -> None:
+        for stream in (
+            process.stdin,
+            process.stdout,
+            process.stderr,
+        ):
+            if stream is not None:
+                stream.close()

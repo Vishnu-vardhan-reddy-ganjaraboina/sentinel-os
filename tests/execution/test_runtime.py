@@ -5,8 +5,8 @@ Tests for the Sentinel Execution runtime service.
 from __future__ import annotations
 
 import sys
+import threading
 import time
-
 
 from sentinel.execution.command import CommandResult
 from sentinel.execution.context import ExecutionContext
@@ -139,17 +139,25 @@ def test_runtime_delegates_execute_task() -> None:
 def test_runtime_delegates_submit() -> None:
     runtime = ExecutionRuntimeService()
 
+    completed = threading.Event()
+
+    def add_and_signal(a: int, b: int) -> int:
+        result = add(a, b)
+        completed.set()
+        return result
+
     task_id = runtime.submit(
-        add,
+        add_and_signal,
         4,
         6,
     )
+
+    assert completed.wait(timeout=1)
 
     context = runtime.get_context(task_id)
 
     assert isinstance(context, ExecutionContext)
     assert context.result == 10
-
 
 def test_runtime_delegates_cancel() -> None:
     runtime = ExecutionRuntimeService()
@@ -210,32 +218,38 @@ def test_runtime_delegates_run_command_checked() -> None:
 def test_runtime_delegates_start_process() -> None:
     runtime = ExecutionRuntimeService()
 
-    pid = runtime.start_process(
-        [
-            sys.executable,
-            "-c",
-            "print('hello')",
-        ]
-    )
+    try:
+        pid = runtime.start_process(
+            [
+                sys.executable,
+                "-c",
+                "print('hello')",
+            ]
+        )
 
-    assert isinstance(pid, int)
-
+        assert isinstance(pid, int)
+    finally:
+        runtime.terminate_process()
 
 def test_runtime_delegates_wait_for_process() -> None:
     runtime = ExecutionRuntimeService()
 
-    runtime.start_process(
-        [
-            sys.executable,
-            "-c",
-            "print('hello')",
-        ]
-    )
+    try:
+        runtime.start_process(
+            [
+                sys.executable,
+                "-c",
+                "print('hello')",
+            ]
+        )
 
-    exit_code = runtime.wait_for_process()
+        exit_code = runtime.wait_for_process()
 
-    assert exit_code == 0
+        assert exit_code == 0
 
+        runtime.read_process_output()
+    finally:
+        runtime.terminate_process()
 
 def test_runtime_delegates_read_process_output() -> None:
     runtime = ExecutionRuntimeService()

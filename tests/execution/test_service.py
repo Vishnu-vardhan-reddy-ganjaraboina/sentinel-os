@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import sys
+import threading
 
 from sentinel.execution.constants import TaskStatus
 from sentinel.execution.service import ExecutionService
@@ -27,13 +30,21 @@ def test_execute_task():
 def test_submit():
     service = ExecutionService()
 
-    task_id = service.submit(add, 10, 20)
+    completed = threading.Event()
+
+    def add_and_signal(a: int, b: int) -> int:
+        result = add(a, b)
+        completed.set()
+        return result
+
+    task_id = service.submit(add_and_signal, 10, 20)
+
+    assert completed.wait(timeout=1)
 
     context = service.get_context(task_id)
 
     assert context is not None
     assert context.result == 30
-
 
 def test_run_command():
     service = ExecutionService()

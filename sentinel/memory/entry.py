@@ -4,6 +4,7 @@ Base implementation of a Sentinel memory entry.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
@@ -23,6 +24,7 @@ class BaseMemoryEntry(MemoryEntry):
 
     The entry protects its mutable lifecycle state and access timestamps
     so that concurrent readers and lifecycle operations remain consistent.
+    Mutable content is isolated from callers through defensive deep copies.
     """
 
     def __init__(
@@ -56,7 +58,7 @@ class BaseMemoryEntry(MemoryEntry):
             raise TypeError("memory_type must be a MemoryType.")
 
         self._id = memory_id
-        self._content = content
+        self._content = deepcopy(content)
         self._type = memory_type
         self._importance = importance
         self._ttl = ttl
@@ -77,7 +79,7 @@ class BaseMemoryEntry(MemoryEntry):
     def content(self) -> Any:
         with self._lock:
             self._last_accessed = datetime.now(UTC)
-            return self._content
+            return deepcopy(self._content)
 
     @property
     def importance(self) -> int:
@@ -128,7 +130,7 @@ class BaseMemoryEntry(MemoryEntry):
         with self._lock:
             return {
                 "id": self._id,
-                "content": self._content,
+                "content": deepcopy(self._content),
                 "memory_type": self._type.value,
                 "importance": self._importance,
                 "status": self._status.value,

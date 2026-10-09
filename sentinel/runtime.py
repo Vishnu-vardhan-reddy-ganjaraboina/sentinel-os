@@ -24,6 +24,7 @@ from sentinel.orchestration.runtime import OrchestrationRuntimeService
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
 from sentinel.storage.backends.sqlite import SQLiteBackend
+from sentinel.storage.runtime import StorageRuntimeService
 
 TService = TypeVar("TService", bound=Service)
 
@@ -161,6 +162,11 @@ class Runtime:
             KnowledgeRuntimeService,
         )
 
+    @property
+    def storage(self) -> StorageRuntimeService:
+        """Return the configured Storage runtime service."""
+        return self.get_typed("storage", StorageRuntimeService)
+
     def __iter__(self) -> Iterator[Service]:
         """Iterate over the composed runtime services."""
         return iter(self._services)
@@ -228,7 +234,7 @@ class RuntimeComposer:
 
         shared_knowledge = knowledge_runtime.knowledge
 
-        services = (
+        services: tuple[Service, ...] = (
             ExecutionRuntimeService(),
             OrchestrationRuntimeService(
                 capabilities=self._capabilities,
@@ -242,6 +248,26 @@ class RuntimeComposer:
             ),
             knowledge_runtime,
         )
+
+        if (
+            self._configuration is not None
+            and self._configuration.exists("storage")
+        ):
+            backend = self._configuration.get("storage.backend", "memory")
+            database = self._configuration.get(
+                "storage.database",
+                "data/sentinel.db",
+            )
+            directory = self._configuration.get(
+                "storage.directory",
+                "data/storage",
+            )
+            storage_runtime = StorageRuntimeService(
+                backend=backend,
+                database=database,
+                directory=directory,
+            )
+            services = (*services, storage_runtime)
 
         return Runtime(services)
 

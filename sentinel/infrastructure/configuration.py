@@ -242,6 +242,48 @@ class Configuration:
                     "knowledge.database_path cannot be empty."
                 )
 
+        with self._lock:
+            storage = deepcopy(self._config.get("storage", {}))
+
+        if not isinstance(storage, dict):
+            raise ConfigurationError(
+                "The 'storage' configuration must be a mapping."
+            )
+
+        storage_backend = storage.get("backend", "memory")
+        if not isinstance(storage_backend, str):
+            raise ConfigurationError(
+                "storage.backend must be a string."
+            )
+
+        storage_backend = storage_backend.strip().lower()
+        if storage_backend not in {"memory", "filesystem", "sqlite"}:
+            raise ConfigurationError(
+                f"Unsupported storage backend: '{storage_backend}'."
+            )
+
+        if storage_backend == "sqlite":
+            storage_database = storage.get("database", "data/sentinel.db")
+            if not isinstance(storage_database, (str, Path)):
+                raise ConfigurationError(
+                    "storage.database must be a string or path."
+                )
+            if not str(storage_database).strip():
+                raise ConfigurationError(
+                    "storage.database cannot be empty."
+                )
+
+        if storage_backend == "filesystem":
+            storage_directory = storage.get("directory", "data/storage")
+            if not isinstance(storage_directory, (str, Path)):
+                raise ConfigurationError(
+                    "storage.directory must be a string or path."
+                )
+            if not str(storage_directory).strip():
+                raise ConfigurationError(
+                    "storage.directory cannot be empty."
+                )
+
     @staticmethod
     def _validate_key(key: str) -> None:
         """Validate a dotted configuration key."""

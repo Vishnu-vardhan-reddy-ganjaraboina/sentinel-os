@@ -8,3 +8,5 @@ venv/
 logs/
 dist/
 build/
+# Local runtime data and databases
+/data/

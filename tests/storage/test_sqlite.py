@@ -144,3 +144,27 @@ def test_clear(tmp_path: Path) -> None:
     assert backend.keys() == []
 
     backend.disconnect()
+def test_connect_closes_connection_when_initialization_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    connection = Mock()
+    connection.execute.side_effect = sqlite3.OperationalError(
+        "simulated initialization failure"
+    )
+
+    monkeypatch.setattr(
+        "sentinel.storage.backends.sqlite.sqlite3.connect",
+        lambda *args, **kwargs: connection,
+    )
+
+    with pytest.raises(
+        StorageConnectionError,
+        match="simulated initialization failure",
+    ):
+        SQLiteBackend(tmp_path / "failure.db")
+
+    connection.close.assert_called_once()

@@ -71,10 +71,8 @@ class StorageRuntimeService(Service):
         if manager is None:
             return
 
-        try:
-            manager.disconnect()
-        finally:
-            self._manager = None
+        manager.disconnect()
+        self._manager = None
 
     def health(self) -> Mapping[str, Any]:
         """Report whether the storage service is initialized."""

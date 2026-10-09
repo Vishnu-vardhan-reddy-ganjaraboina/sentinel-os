@@ -51,6 +51,8 @@ class SQLiteBackend(StorageBackend):
             if self._connection is not None:
                 return
 
+            connection: sqlite3.Connection | None = None
+
             try:
                 connection = sqlite3.connect(
                     self._database,
@@ -74,6 +76,12 @@ class SQLiteBackend(StorageBackend):
                 self._connection = connection
 
             except sqlite3.Error as exc:
+                if connection is not None:
+                    try:
+                        connection.close()
+                    except sqlite3.Error:
+                        pass
+
                 raise StorageConnectionError(
                     f"Failed to connect to SQLite database: {exc}"
                 ) from exc

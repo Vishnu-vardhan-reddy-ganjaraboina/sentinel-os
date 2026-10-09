@@ -3,6 +3,7 @@ Tests for the persistent knowledge vector store.
 """
 
 import json
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -13,16 +14,31 @@ from sentinel.knowledge.persistent_vector_store import (
 )
 from sentinel.storage.backends.sqlite import SQLiteBackend
 
+_CREATED_STORES: list[PersistentVectorStore] = []
+
 
 def create_store(
     database: Path,
 ) -> PersistentVectorStore:
     """Create a persistent vector store for testing."""
     backend = SQLiteBackend(database)
+    store = PersistentVectorStore(backend=backend)
+    _CREATED_STORES.append(store)
+    return store
 
-    return PersistentVectorStore(
-        backend=backend,
-    )
+
+@pytest.fixture(autouse=True)
+def close_created_stores() -> Generator[None]:
+    """Close all stores created during each test."""
+    _CREATED_STORES.clear()
+    try:
+        yield
+    finally:
+        try:
+            for store in reversed(_CREATED_STORES):
+                store.close()
+        finally:
+            _CREATED_STORES.clear()
 
 
 def test_add_and_get(

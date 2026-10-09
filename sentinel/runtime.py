@@ -1,10 +1,12 @@
-"""
+﻿"""
 Runtime composition for Sentinel OS.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TypeVar
 
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
@@ -22,6 +24,8 @@ from sentinel.orchestration.runtime import OrchestrationRuntimeService
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
 from sentinel.storage.backends.sqlite import SQLiteBackend
+
+TService = TypeVar("TService", bound=Service)
 
 
 class Runtime:
@@ -100,8 +104,8 @@ class Runtime:
     def get_typed(
         self,
         name: str,
-        service_type: type[Service],
-    ) -> Service:
+        service_type: type[TService],
+    ) -> TService:
         """
         Return a composed service validated against an expected type.
 
@@ -157,7 +161,7 @@ class Runtime:
             KnowledgeRuntimeService,
         )
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Service]:
         """Iterate over the composed runtime services."""
         return iter(self._services)
 

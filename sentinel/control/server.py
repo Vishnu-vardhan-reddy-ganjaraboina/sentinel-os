@@ -1,4 +1,4 @@
-"""
+﻿"""
 Local TCP control server for Sentinel OS.
 """
 
@@ -18,6 +18,7 @@ class _ControlTCPServer(
 ):
     allow_reuse_address = True
     daemon_threads = True
+    process_host: ProcessControlTarget | None = None
 
 
 class _ControlRequestHandler(
@@ -111,7 +112,7 @@ class _ControlRequestHandler(
         if command is ControlCommand.HEALTH:
             return ControlProtocol.encode_response(
                 True,
-                data=host.health(),
+                data=dict(host.health()),
             )
 
         if command is ControlCommand.STOP:

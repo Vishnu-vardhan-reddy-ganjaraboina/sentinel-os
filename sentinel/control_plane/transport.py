@@ -1,4 +1,4 @@
-"""
+﻿"""
 JSON transport protocol for the Sentinel Kernel Control Plane.
 """
 
@@ -79,6 +79,10 @@ class ControlPlaneProtocol:
             )
 
         command_value = payload.get("command")
+        if not isinstance(command_value, str):
+            raise ControlProtocolError(
+                "Kernel command must be a string."
+            )
 
         try:
             command = KernelCommand(command_value)

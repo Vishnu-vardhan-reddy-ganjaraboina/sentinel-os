@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -17,6 +17,7 @@ class ControlContext:
         if not self.caller_id.strip():
             raise ValueError("caller_id must not be empty.")
 
+        caller_type: ControlCallerType | str
         if isinstance(self.caller_type, ControlCallerType):
             caller_type = self.caller_type
         elif isinstance(self.caller_type, str):

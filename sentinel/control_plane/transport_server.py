@@ -1,4 +1,4 @@
-"""
+﻿"""
 Network transport server for the Sentinel Kernel Control Plane.
 """
 
@@ -8,6 +8,7 @@ import socket
 import threading
 
 from sentinel.control.exceptions import ControlProtocolError
+from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
 
@@ -205,8 +206,7 @@ class ControlPlaneTransportServer:
             pass
 
 
-def _protocol_error_result(message: str):
-    from sentinel.control_plane.result import ControlResult
+def _protocol_error_result(message: str) -> ControlResult:
 
     return ControlResult(
         success=False,

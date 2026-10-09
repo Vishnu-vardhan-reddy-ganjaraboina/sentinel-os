@@ -1,4 +1,4 @@
-"""
+﻿"""
 Manager for the Sentinel Brain subsystem.
 """
 
@@ -31,6 +31,7 @@ class BrainManager:
     ) -> None:
         self._engine = BrainEngine()
 
+        self._intent_resolver: IntentResolver
         if intent_resolver is None:
             self._intent_resolver = DefaultIntentResolver()
         else:

@@ -1,6 +1,7 @@
 import pytest
 
 from sentinel.brain.constants import PlanStatus
+from sentinel.brain.intent import Intent
 from sentinel.brain.manager import BrainManager
 from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.constants import CapabilityCategory
@@ -16,7 +17,6 @@ from sentinel.security.constants import Permission, Role
 from sentinel.security.exceptions import AuthorizationError
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
-from sentinel.brain.intent import Intent
 
 
 class EchoCapability(BaseCapability):

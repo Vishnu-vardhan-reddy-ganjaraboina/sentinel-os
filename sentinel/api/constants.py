@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from enum import Enum
 
-
 DEFAULT_API_VERSION = "1.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000

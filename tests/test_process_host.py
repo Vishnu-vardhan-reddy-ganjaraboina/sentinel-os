@@ -1,22 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
 from threading import Barrier, Thread
 
 import pytest
-
-from pathlib import Path
-
-from sentinel.control import (
-    ControlEndpoint,
-    ControlEndpointRegistry,
-)
 
 from sentinel.boot import (
     BootManager,
     BootShutdownError,
     BootStartupError,
-    BootStateError,
 )
+from sentinel.control import (
+    ControlEndpoint,
+    ControlEndpointRegistry,
+)
+from sentinel.kernel.kernel import Kernel
+from sentinel.kernel.service import Service
 from sentinel.process import (
     ProcessHost,
     ProcessShutdownError,
@@ -25,10 +24,6 @@ from sentinel.process import (
     ProcessStateError,
 )
 from sentinel.system import System
-from sentinel.kernel.kernel import Kernel
-from sentinel.kernel.service import Service
-
-
 
 
 class ProcessTestService(Service):

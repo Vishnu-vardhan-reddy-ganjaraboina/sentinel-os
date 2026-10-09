@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
-from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.controller import KernelController
-
+from sentinel.control_plane.request import ControlRequest
+from sentinel.control_plane.result import ControlResult
 
 
 class ControlPlane:

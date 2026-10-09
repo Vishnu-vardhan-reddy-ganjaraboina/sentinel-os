@@ -7,7 +7,6 @@ from __future__ import annotations
 import sys
 import time
 
-
 from sentinel.execution.command import CommandResult
 from sentinel.execution.context import ExecutionContext
 from sentinel.execution.runtime import ExecutionRuntimeService

@@ -2,15 +2,15 @@
 Tests for Sentinel application lifecycle management.
 """
 
-import pytest
-
 import threading
+
+import pytest
 
 from sentinel.application import Application
 from sentinel.application_manager import ApplicationManager
+from sentinel.application_manifest import ApplicationManifest
 from sentinel.application_registry import ApplicationRegistry
 from sentinel.application_state import ApplicationState
-from sentinel.application_manifest import ApplicationManifest
 
 
 def create_application() -> Application:

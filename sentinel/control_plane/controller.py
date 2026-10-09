@@ -4,7 +4,8 @@ Kernel controller for the Sentinel Kernel Control Plane.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from sentinel.control_plane.audit import (
     ControlAuditEvent,

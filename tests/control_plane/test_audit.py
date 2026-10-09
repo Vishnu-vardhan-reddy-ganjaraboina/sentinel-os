@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from sentinel.control_plane.audit import (
     ControlAuditEvent,
     InMemoryControlAuditRecorder,
-)
-
-from sentinel.control_plane.audit import (
     PersistentControlAuditRecorder,
 )
+
 
 def test_audit_event_defaults() -> None:
     event = ControlAuditEvent(
@@ -122,7 +120,7 @@ def test_audit_event_requires_timezone_aware_timestamp() -> None:
 
 
 def test_audit_event_accepts_timezone_aware_timestamp() -> None:
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
 
     event = ControlAuditEvent(
         caller_id="user",

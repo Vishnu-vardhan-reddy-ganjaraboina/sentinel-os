@@ -5,13 +5,13 @@ Protocol definitions for Sentinel local control.
 from __future__ import annotations
 
 import json
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sentinel.control.exceptions import ControlProtocolError
 
 
-class ControlCommand(str, Enum):
+class ControlCommand(StrEnum):
     """Commands supported by the Sentinel local control plane."""
 
     STATUS = "status"

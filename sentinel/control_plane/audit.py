@@ -4,10 +4,10 @@ Audit events for the Sentinel Kernel Control Plane.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Mapping
-from typing import TYPE_CHECKING, Any, Mapping
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sentinel.control_plane.audit_store import ControlAuditStore
@@ -27,7 +27,7 @@ class ControlAuditEvent:
     command: str
     success: bool
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     data: Mapping[str, Any] = field(default_factory=dict)
     error: str | None = None
@@ -128,11 +128,11 @@ class PersistentControlAuditRecorder(ControlAuditRecorder):
     Record Control Plane audit events using a persistent audit store.
     """
 
-    def __init__(self, store: "ControlAuditStore") -> None:
+    def __init__(self, store: ControlAuditStore) -> None:
         self._store = store
 
     @property
-    def store(self) -> "ControlAuditStore":
+    def store(self) -> ControlAuditStore:
         """
         Return the configured audit store.
         """

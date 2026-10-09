@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Event, RLock, Thread
-from typing import Callable
 
 from sentinel.process import ProcessHost
 

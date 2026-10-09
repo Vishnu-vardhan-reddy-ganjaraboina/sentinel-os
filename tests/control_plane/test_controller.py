@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from sentinel.control_plane.adapter import KernelAdapter
-from sentinel.control_plane.authorizer import ControlAuthorizer
-from sentinel.control_plane.commands import KernelCommand
-from sentinel.control_plane.controller import KernelController
-from sentinel.control_plane.permissions import ControlPermission
-from sentinel.kernel.kernel import Kernel
-from sentinel.kernel.service import Service
-from sentinel.control_plane.context import ControlContext
-from sentinel.control_plane.callers import ControlCallerType
-from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.audit import (
     InMemoryControlAuditRecorder,
 )
+from sentinel.control_plane.authorizer import ControlAuthorizer
+from sentinel.control_plane.callers import ControlCallerType
+from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.controller import KernelController
+from sentinel.control_plane.permissions import ControlPermission
+from sentinel.control_plane.request import ControlRequest
+from sentinel.kernel.kernel import Kernel
+from sentinel.kernel.service import Service
 
 
 class StubService(Service):

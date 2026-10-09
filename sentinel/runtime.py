@@ -15,8 +15,7 @@ from sentinel.knowledge.persistent_vector_store import (
     PersistentVectorStore,
 )
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
-from sentinel.knowledge.vector_store import InMemoryVectorStore
-from sentinel.knowledge.vector_store import VectorStore
+from sentinel.knowledge.vector_store import InMemoryVectorStore, VectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService

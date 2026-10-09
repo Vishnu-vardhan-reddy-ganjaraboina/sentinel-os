@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,13 @@ from sentinel.boot import BootManager
 from sentinel.control import ControlEndpointRegistry
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
-from sentinel.process import ProcessHost, ProcessState
+from sentinel.process import ProcessHost
 from sentinel.supervisor import (
     RestartPolicy,
     Supervisor,
-    SupervisorState,
+    SupervisorMonitor,
     SupervisorStartupError,
+    SupervisorState,
     SupervisorStateError,
 )
 from sentinel.system import System
@@ -362,9 +364,7 @@ def test_restart_count_is_read_only() -> None:
 # Supervisor monitor tests
 # ---------------------------------------------------------------------------
 
-import time
 
-from sentinel.supervisor import SupervisorMonitor
 
 
 def test_monitor_constructor() -> None:

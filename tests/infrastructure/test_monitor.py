@@ -2,10 +2,9 @@ import pytest
 
 from sentinel.infrastructure.monitor import Monitor
 from sentinel.kernel.exceptions import ServiceNotFoundError
-from sentinel.infrastructure.exceptions import MonitorError
-from sentinel.kernel.service_state import ServiceState
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
+from sentinel.kernel.service_state import ServiceState
 
 
 def test_register_service() -> None:
@@ -177,7 +176,7 @@ def test_shutdown_rejects_future_operations() -> None:
 
     monitor.shutdown()
 
-    with pytest.raises(Exception):
+    with pytest.raises(ServiceNotFoundError):
         monitor.get_health("kernel")
 
 def test_sync_kernel_registers_running_services() -> None:

@@ -76,7 +76,7 @@ def test_shutdown_clears_kernel() -> None:
         RuntimeError,
         match="not been started",
     ):
-        bootstrap.kernel
+        _ = bootstrap.kernel
 
 
 def test_kernel_property_before_start_raises() -> None:
@@ -86,7 +86,7 @@ def test_kernel_property_before_start_raises() -> None:
         RuntimeError,
         match="not been started",
     ):
-        bootstrap.kernel
+        _ = bootstrap.kernel
 
 
 def test_failed_start_does_not_retain_kernel() -> None:
@@ -104,7 +104,7 @@ def test_failed_start_does_not_retain_kernel() -> None:
         RuntimeError,
         match="not been started",
     ):
-        bootstrap.kernel
+        _ = bootstrap.kernel
 
 
 def test_failed_start_can_be_retried() -> None:
@@ -145,7 +145,7 @@ def test_create_kernel_creates_configured_kernel_without_starting() -> None:
         RuntimeError,
         match="not been started",
     ):
-        bootstrap.kernel
+        _ = bootstrap.kernel
 
 
 def test_create_kernel_rejects_when_kernel_already_exists() -> None:

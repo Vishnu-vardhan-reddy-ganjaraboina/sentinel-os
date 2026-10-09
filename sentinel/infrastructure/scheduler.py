@@ -22,7 +22,6 @@ from sentinel.kernel.exceptions import (
 )
 from sentinel.kernel.service import Service
 
-
 logger = get_logger(__name__)
 
 

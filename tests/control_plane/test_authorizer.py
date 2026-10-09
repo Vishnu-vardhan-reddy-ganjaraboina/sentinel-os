@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 
 from sentinel.control_plane.authorizer import ControlAuthorizer
+from sentinel.control_plane.callers import ControlCallerType
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.permissions import ControlPermission
-from sentinel.control_plane.callers import ControlCallerType
 
 
 def create_context() -> ControlContext:

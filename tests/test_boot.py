@@ -4,8 +4,8 @@ from threading import Barrier, Thread
 
 import pytest
 
-from sentinel.application import Application
 from sentinel.boot import (
+    BootConfiguration,
     BootManager,
     BootProfile,
     BootShutdownError,
@@ -16,7 +16,6 @@ from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.platform import Platform
 from sentinel.system import System
-from sentinel.boot import BootConfiguration
 
 
 class BootTestService(Service):

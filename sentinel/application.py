@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
@@ -22,6 +22,9 @@ from sentinel.orchestration.runtime import OrchestrationRuntimeService
 from sentinel.runtime import Runtime, RuntimeComposer
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
+
+if TYPE_CHECKING:
+    from sentinel.platform import Platform
 
 
 class Application:

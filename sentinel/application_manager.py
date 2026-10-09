@@ -9,9 +9,9 @@ from threading import RLock
 from typing import Any
 
 from sentinel.application import Application
+from sentinel.application_manifest import ApplicationManifest
 from sentinel.application_registry import ApplicationRegistry
 from sentinel.application_state import ApplicationState
-from sentinel.application_manifest import ApplicationManifest
 
 
 class ApplicationManager:

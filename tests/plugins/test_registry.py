@@ -1,6 +1,6 @@
-import pytest
-
 import threading
+
+import pytest
 
 from sentinel.plugins.exceptions import (
     PluginNotFoundError,

@@ -19,4 +19,6 @@ __all__ = [
     "SupervisorShutdownError",
     "SupervisorStartupError",
     "SupervisorState",
+
+    "SupervisorStateError",
 ]

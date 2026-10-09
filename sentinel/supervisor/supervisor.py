@@ -5,7 +5,6 @@ from time import sleep
 from typing import Any
 
 from sentinel.process import ProcessHost
-
 from sentinel.supervisor.exceptions import (
     SupervisorRestartError,
     SupervisorShutdownError,

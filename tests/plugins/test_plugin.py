@@ -5,7 +5,6 @@ from sentinel.plugins.constants import (
     PluginState,
     PluginType,
 )
-
 from sentinel.plugins.exceptions import (
     PluginDisableError,
     PluginEnableError,

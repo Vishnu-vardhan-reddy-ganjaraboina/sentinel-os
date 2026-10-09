@@ -3,7 +3,6 @@ Public API tests for Sentinel OS.
 """
 
 import sentinel
-
 from sentinel import (
     Application,
     ApplicationRegistry,

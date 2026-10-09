@@ -7,8 +7,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from sentinel.kernel.service import Service
-from sentinel.memory.constants import MemoryStatus
-from sentinel.memory.constants import MemoryType
+from sentinel.memory.constants import MemoryStatus, MemoryType
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
 

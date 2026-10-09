@@ -1,6 +1,6 @@
-import pytest
-
 import threading
+
+import pytest
 
 from sentinel.kernel.exceptions import (
     DuplicateServiceError,

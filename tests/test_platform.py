@@ -10,7 +10,6 @@ from sentinel.application import Application
 from sentinel.application_host import ApplicationHost
 from sentinel.application_manifest import ApplicationManifest
 from sentinel.application_state import ApplicationState
-
 from sentinel.platform import Platform
 
 

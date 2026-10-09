@@ -5,8 +5,9 @@ Sentinel OS command-line interface.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from sentinel.boot import (
     BootConfiguration,
@@ -24,7 +25,6 @@ from sentinel.control_plane.endpoint_registry import (
 )
 from sentinel.control_plane.result import ControlResult
 from sentinel.process import ProcessHost
-
 
 DEFAULT_CONFIG = Path("configs/development.yaml")
 

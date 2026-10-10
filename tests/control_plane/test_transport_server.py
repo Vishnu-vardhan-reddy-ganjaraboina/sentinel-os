@@ -4,6 +4,7 @@ import json
 import select
 import socket
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -443,6 +444,66 @@ def test_server_rejects_invalid_connection_rate_limit(limit: object) -> None:
             port=0,
             max_connections_per_minute=limit,
         )
+
+
+def test_connection_rate_limit_is_isolated_per_ip() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.10") is False
+    assert server._is_rate_limited("192.0.2.10") is True
+    assert server._is_rate_limited("192.0.2.11") is False
+
+
+def test_connection_rate_limit_expires_after_sixty_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_time = [100.0]
+    monkeypatch.setattr(
+        "sentinel.control_plane.transport_server.time",
+        SimpleNamespace(monotonic=lambda: current_time[0]),
+    )
+
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.20") is False
+
+    current_time[0] = 159.999
+    assert server._is_rate_limited("192.0.2.20") is True
+
+    current_time[0] = 160.0
+    assert server._is_rate_limited("192.0.2.20") is False
+
+
+def test_connection_rate_limit_history_persists_after_restart() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        max_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.30") is False
+
+    server.start()
+    try:
+        wait_for_server(server)
+        server.stop()
+
+        server.start()
+        wait_for_server(server)
+
+        assert server._is_rate_limited("192.0.2.30") is True
+    finally:
+        server.stop()
 
 
 def test_server_can_restart_after_stop() -> None:

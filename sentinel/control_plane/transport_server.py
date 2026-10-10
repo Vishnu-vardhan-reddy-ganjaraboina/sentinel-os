@@ -1,9 +1,10 @@
-﻿"""
+"""
 Network transport server for the Sentinel Kernel Control Plane.
 """
 
 from __future__ import annotations
 
+import math
 import socket
 import threading
 
@@ -35,6 +36,7 @@ class ControlPlaneTransportServer:
         control_plane: ControlPlane,
         host: str = "127.0.0.1",
         port: int = 0,
+        read_timeout: float = 5.0,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -48,9 +50,18 @@ class ControlPlaneTransportServer:
         if port < 0 or port > 65535:
             raise ValueError("port must be between 0 and 65535.")
 
+        if (
+            isinstance(read_timeout, bool)
+            or not isinstance(read_timeout, (int, float))
+            or not math.isfinite(read_timeout)
+            or read_timeout <= 0
+        ):
+            raise ValueError("read_timeout must be a finite positive number.")
+
         self._control_plane = control_plane
         self._host = host
         self._port = port
+        self._read_timeout = float(read_timeout)
 
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -182,6 +193,7 @@ class ControlPlaneTransportServer:
 
     def _handle_connection(self, connection: socket.socket) -> None:
         try:
+            connection.settimeout(self._read_timeout)
             message = self._receive_message(connection)
             request = ControlPlaneProtocol.decode_request(message)
 
@@ -190,6 +202,8 @@ class ControlPlaneTransportServer:
             response = ControlPlaneProtocol.encode_response(result)
             connection.sendall(response)
 
+        except TimeoutError:
+            self._send_protocol_error(connection, "Control message timed out.")
         except ControlProtocolError as exc:
             self._send_protocol_error(connection, str(exc))
 

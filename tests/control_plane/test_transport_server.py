@@ -50,7 +50,9 @@ class FakeAuthorizer:
             raise PermissionError("denied")
 
 
-def create_server() -> ControlPlaneTransportServer:
+def create_server(
+    read_timeout: float = 5.0,
+) -> ControlPlaneTransportServer:
     controller = KernelController(
         target=FakeTarget(),
         authorizer=FakeAuthorizer(),
@@ -66,6 +68,7 @@ def create_server() -> ControlPlaneTransportServer:
         control_plane=plane,
         host="127.0.0.1",
         port=0,
+        read_timeout=read_timeout,
     )
 
 
@@ -273,6 +276,36 @@ def test_server_stop_closes_idle_client_connection() -> None:
     finally:
         if connection is not None:
             connection.close()
+        server.stop()
+
+
+def test_server_times_out_when_client_sends_incomplete_message() -> None:
+    server = create_server(read_timeout=0.2)
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(3.0)
+            connection.sendall(b'{"version":1,"type":"request"')
+
+            data = b""
+            while b"\n" not in data:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert result.command == "transport.error"
+        assert result.error is not None
+    finally:
         server.stop()
 
 

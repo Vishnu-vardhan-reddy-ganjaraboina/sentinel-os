@@ -674,3 +674,24 @@ def test_server_stop_is_idempotent() -> None:
     server.stop()
 
     assert server.running is False
+
+
+def test_server_handles_concurrent_stop_calls() -> None:
+    server = create_server()
+    server.start()
+    wait_for_server(server)
+
+    thread = server._thread
+    assert thread is not None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(server.stop),
+            executor.submit(server.stop),
+        ]
+        for future in futures:
+            future.result(timeout=3.0)
+
+    assert not thread.is_alive()
+    assert server.running is False
+    assert server._active_connection is None

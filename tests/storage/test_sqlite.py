@@ -200,3 +200,62 @@ def test_set_preserves_write_error_when_rollback_fails(
     assert any("simulated rollback failure" in note for note in notes)
 
     backend.disconnect()
+
+
+def test_set_preserves_commit_error_when_rollback_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "commit_failure.db")
+    connection = Mock()
+    connection.commit.side_effect = sqlite3.OperationalError(
+        "simulated commit failure"
+    )
+    monkeypatch.setattr(backend, "_connection", connection)
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated commit failure",
+    ) as exc_info:
+        backend.set("key", "value")
+
+    assert isinstance(exc_info.value.__cause__, sqlite3.OperationalError)
+    connection.rollback.assert_called_once()
+    backend.disconnect()
+
+
+def test_set_preserves_commit_and_rollback_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "commit_rollback_failure.db")
+    connection = Mock()
+    connection.commit.side_effect = sqlite3.OperationalError(
+        "simulated commit failure"
+    )
+    connection.rollback.side_effect = sqlite3.OperationalError(
+        "simulated rollback failure"
+    )
+    monkeypatch.setattr(backend, "_connection", connection)
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated commit failure",
+    ) as exc_info:
+        backend.set("key", "value")
+
+    assert isinstance(exc_info.value.__cause__, sqlite3.OperationalError)
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("simulated rollback failure" in note for note in notes)
+    connection.rollback.assert_called_once()
+    backend.disconnect()

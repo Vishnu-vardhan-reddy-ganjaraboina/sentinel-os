@@ -259,3 +259,38 @@ def test_set_preserves_commit_and_rollback_errors(
     assert any("simulated rollback failure" in note for note in notes)
     connection.rollback.assert_called_once()
     backend.disconnect()
+
+
+def test_connection_remains_usable_after_write_failure(
+    tmp_path: Path,
+) -> None:
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "write_recovery.db")
+    connection = backend._ensure_connected()
+
+    connection.execute(
+        """
+        CREATE TRIGGER reject_blocked_key
+        BEFORE INSERT ON storage
+        WHEN NEW.key = 'blocked'
+        BEGIN
+            SELECT RAISE(ABORT, 'simulated write rejection');
+        END;
+        """
+    )
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated write rejection",
+    ):
+        backend.set("blocked", "value")
+
+    connection.execute("DROP TRIGGER reject_blocked_key")
+
+    backend.set("recovered", "success")
+
+    assert backend.get("recovered") == "success"
+    assert backend.exists("recovered")
+
+    backend.disconnect()

@@ -118,3 +118,26 @@ def test_request_data_is_independently_copied() -> None:
     )
 
     assert request.data == {"value": 1}
+
+def test_request_rejects_non_mapping_data() -> None:
+    with pytest.raises(TypeError):
+        ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=create_context(),
+            data=None,  # type: ignore[arg-type]
+        )
+
+
+def test_request_deep_copies_nested_data() -> None:
+    data = {"options": {"mode": "safe"}}
+
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_LIST,
+        context=create_context(),
+        data=data,
+    )
+
+    data["options"]["mode"] = "changed"
+
+    assert request.data == {"options": {"mode": "safe"}}
+

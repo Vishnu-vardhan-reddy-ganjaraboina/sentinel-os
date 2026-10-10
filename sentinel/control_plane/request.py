@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,8 +33,11 @@ class ControlRequest:
                 "context must be a ControlContext."
             )
 
+        if not isinstance(self.data, Mapping):
+            raise TypeError("data must be a mapping.")
+
         object.__setattr__(
             self,
             "data",
-            dict(self.data),
+            deepcopy(dict(self.data)),
         )

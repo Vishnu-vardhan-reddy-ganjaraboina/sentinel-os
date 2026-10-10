@@ -695,3 +695,56 @@ def test_server_handles_concurrent_stop_calls() -> None:
     assert not thread.is_alive()
     assert server.running is False
     assert server._active_connection is None
+
+
+def test_server_stops_when_shutdown_races_with_rate_limit_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    server = create_server()
+    rate_check_reached = threading.Event()
+    release_rate_check = threading.Event()
+
+    def pause_rate_check(client_ip: str) -> bool:
+        rate_check_reached.set()
+        if not release_rate_check.wait(timeout=3.0):
+            raise AssertionError("Rate-limit check was not released.")
+        return False
+
+    monkeypatch.setattr(server, "_is_rate_limited", pause_rate_check)
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+
+        assert rate_check_reached.wait(timeout=2.0), (
+            "Server did not reach the rate-limit check."
+        )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            stop_future = executor.submit(server.stop)
+
+            deadline = time.monotonic() + 2.0
+            while not server._stop_event.is_set():
+                if time.monotonic() >= deadline:
+                    raise AssertionError("Shutdown did not start.")
+                time.sleep(0.005)
+
+            release_rate_check.set()
+            stop_future.result(timeout=3.0)
+
+        thread = server._thread
+        assert thread is None or not thread.is_alive()
+        assert server.running is False
+        assert server._active_connection is None
+    finally:
+        release_rate_check.set()
+        if connection is not None:
+            connection.close()
+        server.stop()

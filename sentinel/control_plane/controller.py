@@ -126,9 +126,7 @@ class KernelController:
                 error=str(exc),
             )
 
-            self._record_audit(request, result)
-
-            return result
+            return self._audit_result(request, result)
 
         except (TypeError, ValueError) as exc:
             result = ControlResult(
@@ -137,9 +135,7 @@ class KernelController:
                 error=str(exc),
             )
 
-            self._record_audit(request, result)
-
-            return result
+            return self._audit_result(request, result)
 
         except Exception as exc:
             result = ControlResult(
@@ -148,9 +144,7 @@ class KernelController:
                 error=str(exc),
             )
 
-            self._record_audit(request, result)
-
-            return result
+            return self._audit_result(request, result)
 
     def _authorize(
         self,
@@ -230,12 +224,7 @@ class KernelController:
                 error=str(exc),
             )
 
-        self._record_audit(
-            request,
-            result,
-        )
-
-        return result
+        return self._audit_result(request, result)
 
     def _dispatch(
         self,
@@ -410,6 +399,25 @@ class KernelController:
             )
 
         return service
+
+    def _audit_result(
+        self,
+        request: ControlRequest,
+        result: ControlResult,
+    ) -> ControlResult:
+        """Preserve the operation result when audit recording fails."""
+        try:
+            self._record_audit(request, result)
+        except Exception as exc:
+            return ControlResult(
+                success=result.success,
+                command=result.command,
+                data=result.data,
+                error=result.error,
+                audit_error=str(exc) or type(exc).__name__,
+            )
+
+        return result
 
     def _record_audit(
         self,

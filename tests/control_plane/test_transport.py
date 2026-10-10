@@ -255,3 +255,18 @@ def test_protocol_commands_are_serialized_by_value() -> None:
         encoded = ControlPlaneProtocol.encode_request(request)
 
         assert command.value.encode() in encoded
+
+def test_response_round_trips_audit_error() -> None:
+    result = ControlResult(
+        success=True,
+        command=KernelCommand.SERVICE_STATUS.value,
+        data={"service": "memory"},
+        audit_error="Audit database unavailable",
+    )
+
+    encoded = ControlPlaneProtocol.encode_response(result)
+    decoded = ControlPlaneProtocol.decode_response(encoded)
+
+    assert decoded == result
+    assert decoded.success is True
+    assert decoded.audit_error == "Audit database unavailable"

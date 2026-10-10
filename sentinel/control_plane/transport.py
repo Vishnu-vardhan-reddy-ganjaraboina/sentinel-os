@@ -162,6 +162,9 @@ class ControlPlaneProtocol:
         if result.error is not None:
             payload["error"] = result.error
 
+        if result.audit_error is not None:
+            payload["audit_error"] = result.audit_error
+
         return (
             json.dumps(
                 payload,
@@ -209,10 +212,16 @@ class ControlPlaneProtocol:
             )
 
         error = payload.get("error")
+        audit_error = payload.get("audit_error")
 
         if error is not None and not isinstance(error, str):
             raise ControlProtocolError(
                 "Response error must be a string or None."
+            )
+
+        if audit_error is not None and not isinstance(audit_error, str):
+            raise ControlProtocolError(
+                "Response audit_error must be a string or None."
             )
 
         if success and error is not None:
@@ -230,6 +239,7 @@ class ControlPlaneProtocol:
             command=command,
             data=data,
             error=error,
+            audit_error=audit_error,
         )
 
     @staticmethod

@@ -415,3 +415,61 @@ def test_ai_agent_cannot_control_service() -> None:
     assert result.success is False
     assert result.error is not None
     assert "permission" in result.error.lower()
+
+
+class FailingAuditRecorder:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def record(self, event) -> None:
+        self.calls += 1
+        raise RuntimeError("Audit database unavailable")
+
+
+def test_audit_failure_does_not_hide_successful_operation() -> None:
+    recorder = FailingAuditRecorder()
+    _, controller = create_controller(
+        {ControlPermission.READ}
+    )
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_STATUS,
+        {"service": "memory"},
+    )
+
+    assert result.success is True
+    assert result.data["service"] == "memory"
+    assert result.data["state"] == "created"
+    assert result.audit_error == "Audit database unavailable"
+    assert recorder.calls == 1
+
+
+def test_audit_failure_does_not_hide_denied_operation() -> None:
+    recorder = FailingAuditRecorder()
+    _, controller = create_controller(
+        {ControlPermission.READ}
+    )
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_START,
+        {"service": "memory"},
+    )
+
+    assert result.success is False
+    assert result.error == (
+        "Permission denied: 'control' permission required."
+    )
+    assert result.audit_error == "Audit database unavailable"
+    assert recorder.calls == 1

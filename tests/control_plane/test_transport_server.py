@@ -364,6 +364,18 @@ def test_server_enforces_total_message_deadline() -> None:
         server.stop()
 
 
+def test_server_rejects_invalid_listen_backlog() -> None:
+    base_server = create_server()
+
+    with pytest.raises(ValueError, match="listen_backlog"):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            host="127.0.0.1",
+            port=0,
+            listen_backlog=0,
+        )
+
+
 def test_server_can_restart_after_stop() -> None:
     server = create_server()
     server.start()

@@ -39,6 +39,7 @@ class ControlPlaneTransportServer:
         port: int = 0,
         read_timeout: float = 5.0,
         message_timeout: float = 30.0,
+        listen_backlog: int = 5,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -51,6 +52,13 @@ class ControlPlaneTransportServer:
 
         if port < 0 or port > 65535:
             raise ValueError("port must be between 0 and 65535.")
+
+        if (
+            isinstance(listen_backlog, bool)
+            or not isinstance(listen_backlog, int)
+            or listen_backlog <= 0
+        ):
+            raise ValueError("listen_backlog must be a positive integer.")
 
         if (
             isinstance(read_timeout, bool)
@@ -73,6 +81,7 @@ class ControlPlaneTransportServer:
         self._control_plane = control_plane
         self._host = host
         self._port = port
+        self._listen_backlog = listen_backlog
         self._read_timeout = float(read_timeout)
         self._message_timeout = float(message_timeout)
 
@@ -112,7 +121,7 @@ class ControlPlaneTransportServer:
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server_socket.bind((self._host, self._port))
-            server_socket.listen()
+            server_socket.listen(self._listen_backlog)
 
             self._socket = server_socket
 

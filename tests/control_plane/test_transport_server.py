@@ -364,6 +364,56 @@ def test_server_enforces_total_message_deadline() -> None:
         server.stop()
 
 
+def test_server_rejects_connections_over_rate_limit() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        max_connections_per_minute=1,
+    )
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_HEALTH,
+        context=ControlContext(
+            caller_id="test-client",
+            caller_type="cli",
+        ),
+    )
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        first_result = send_request(server, request)
+        assert first_result.success is True
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(
+                ControlPlaneProtocol.encode_request(request)
+            )
+
+            data = b""
+            while b"\n" not in data:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert result.command == "transport.error"
+        assert result.error is not None
+        assert "rate limit" in result.error.lower()
+    finally:
+        server.stop()
+
+
 def test_server_rejects_invalid_listen_backlog() -> None:
     base_server = create_server()
 
@@ -373,6 +423,25 @@ def test_server_rejects_invalid_listen_backlog() -> None:
             host="127.0.0.1",
             port=0,
             listen_backlog=0,
+        )
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [0, -1, True, 1.5],
+)
+def test_server_rejects_invalid_connection_rate_limit(limit: object) -> None:
+    base_server = create_server()
+
+    with pytest.raises(
+        ValueError,
+        match="max_connections_per_minute",
+    ):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            host="127.0.0.1",
+            port=0,
+            max_connections_per_minute=limit,
         )
 
 

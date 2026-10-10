@@ -8,6 +8,7 @@ import math
 import socket
 import threading
 import time
+from collections import deque
 
 from sentinel.control.exceptions import ControlProtocolError
 from sentinel.control_plane.result import ControlResult
@@ -40,6 +41,7 @@ class ControlPlaneTransportServer:
         read_timeout: float = 5.0,
         message_timeout: float = 30.0,
         listen_backlog: int = 5,
+        max_connections_per_minute: int = 60,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -78,10 +80,21 @@ class ControlPlaneTransportServer:
                 "message_timeout must be a finite positive number."
             )
 
+        if (
+            isinstance(max_connections_per_minute, bool)
+            or not isinstance(max_connections_per_minute, int)
+            or max_connections_per_minute <= 0
+        ):
+            raise ValueError(
+                "max_connections_per_minute must be a positive integer."
+            )
+
         self._control_plane = control_plane
         self._host = host
         self._port = port
         self._listen_backlog = listen_backlog
+        self._max_connections_per_minute = max_connections_per_minute
+        self._connection_times_by_ip: dict[str, deque[float]] = {}
         self._read_timeout = float(read_timeout)
         self._message_timeout = float(message_timeout)
 
@@ -183,7 +196,7 @@ class ControlPlaneTransportServer:
 
         while not self._stop_event.is_set():
             try:
-                connection, _address = server_socket.accept()
+                connection, address = server_socket.accept()
             except OSError:
                 if self._stop_event.is_set():
                     break
@@ -202,7 +215,15 @@ class ControlPlaneTransportServer:
                 break
 
             try:
-                self._handle_connection(connection)
+                client_ip = address[0]
+                if self._is_rate_limited(client_ip):
+                    self._discard_pending_message(connection)
+                    self._send_protocol_error(
+                        connection,
+                        "Connection rate limit exceeded.",
+                    )
+                else:
+                    self._handle_connection(connection)
             finally:
                 with self._lock:
                     if self._active_connection is connection:
@@ -212,6 +233,55 @@ class ControlPlaneTransportServer:
                     connection.close()
                 except OSError:
                     pass
+
+    def _is_rate_limited(self, client_ip: str) -> bool:
+        now = time.monotonic()
+        cutoff = now - 60.0
+
+        # Discard expired entries for all tracked client IPs.
+        for tracked_ip, timestamps in list(
+            self._connection_times_by_ip.items()
+        ):
+            while timestamps and timestamps[0] <= cutoff:
+                timestamps.popleft()
+            if not timestamps:
+                del self._connection_times_by_ip[tracked_ip]
+
+        timestamps = self._connection_times_by_ip.setdefault(
+            client_ip, deque()
+        )
+        if len(timestamps) >= self._max_connections_per_minute:
+            return True
+
+        timestamps.append(now)
+        return False
+
+    def _discard_pending_message(
+        self,
+        connection: socket.socket,
+    ) -> None:
+        """Briefly drain pending input before rejecting a rate-limited client."""
+        deadline = time.monotonic() + min(self._read_timeout, 0.25)
+        total_size = 0
+
+        try:
+            while total_size <= self.MAX_MESSAGE_SIZE:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+
+                connection.settimeout(min(0.05, remaining))
+                chunk = connection.recv(4096)
+
+                if not chunk:
+                    break
+
+                total_size += len(chunk)
+
+                if total_size > self.MAX_MESSAGE_SIZE or b"\n" in chunk:
+                    break
+        except (OSError, TimeoutError):
+            pass
 
     def _handle_connection(self, connection: socket.socket) -> None:
         try:

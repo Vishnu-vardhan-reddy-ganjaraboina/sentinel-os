@@ -49,6 +49,13 @@ class ControlRequestValidator:
     def _validate_service_command(
         data: Mapping[str, Any],
     ) -> None:
+        unexpected_fields = set(data) - {"service"}
+        if unexpected_fields:
+            names = ", ".join(sorted(str(field) for field in unexpected_fields))
+            raise ValueError(
+                f"Unexpected service command field(s): {names}."
+            )
+
         if "service" not in data:
             raise ValueError(
                 "Command requires a non-empty 'service' value."

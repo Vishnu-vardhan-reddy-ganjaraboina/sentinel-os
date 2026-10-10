@@ -90,3 +90,14 @@ def test_service_command_rejects_empty_service() -> None:
             KernelCommand.SERVICE_START,
             {"service": "   "},
         )
+
+
+def test_service_command_rejects_unexpected_fields() -> None:
+    with pytest.raises(ValueError):
+        ControlRequestValidator.validate(
+            KernelCommand.SERVICE_START,
+            {
+                "service": "memory",
+                "force": True,
+            },
+        )

@@ -243,6 +243,73 @@ def test_server_rejects_second_start() -> None:
         server.stop()
 
 
+def test_server_stop_closes_idle_client_connection() -> None:
+    server = create_server()
+    server.start()
+
+    connection = None
+    server_thread = None
+
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+
+        # Allow the server to accept the connection and wait for its data.
+        time.sleep(0.1)
+        server_thread = server._thread
+
+        assert server_thread is not None
+        assert server_thread.is_alive()
+
+        server.stop()
+
+        assert not server_thread.is_alive(), (
+            "Server thread remained alive after stopping with an idle client."
+        )
+    finally:
+        if connection is not None:
+            connection.close()
+        server.stop()
+
+
+def test_server_can_restart_after_stop() -> None:
+    server = create_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+    finally:
+        server.stop()
+
+    assert server.running is False
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        request = ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=ControlContext(
+                caller_id="restart-client",
+                caller_type="cli",
+            ),
+        )
+
+        result = send_request(server, request)
+
+        assert result.success is True
+        assert result.command == KernelCommand.SYSTEM_STATUS.value
+    finally:
+        server.stop()
+
+    assert server.running is False
+
+
 def test_server_stop_is_idempotent() -> None:
     server = create_server()
 

@@ -54,6 +54,7 @@ class ControlPlaneTransportServer:
 
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
+        self._active_connection: socket.socket | None = None
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
 
@@ -101,13 +102,19 @@ class ControlPlaneTransportServer:
 
     def stop(self) -> None:
         with self._lock:
-            if not self.running and self._socket is None:
+            if (
+                not self.running
+                and self._socket is None
+                and self._active_connection is None
+            ):
                 return
 
             self._stop_event.set()
 
             server_socket = self._socket
             self._socket = None
+            active_connection = self._active_connection
+            thread = self._thread
 
         if server_socket is not None:
             try:
@@ -115,15 +122,28 @@ class ControlPlaneTransportServer:
             except OSError:
                 pass
 
-        thread = self._thread
+        if active_connection is not None:
+            try:
+                active_connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+            try:
+                active_connection.close()
+            except OSError:
+                pass
+
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
 
         with self._lock:
-            self._thread = None
+            if thread is not None and not thread.is_alive():
+                if self._thread is thread:
+                    self._thread = None
 
     def _serve(self) -> None:
-        server_socket = self._socket
+        with self._lock:
+            server_socket = self._socket
 
         if server_socket is None:
             return
@@ -136,9 +156,25 @@ class ControlPlaneTransportServer:
                     break
                 continue
 
+            with self._lock:
+                stopping = self._stop_event.is_set()
+                if not stopping:
+                    self._active_connection = connection
+
+            if stopping:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+                break
+
             try:
                 self._handle_connection(connection)
             finally:
+                with self._lock:
+                    if self._active_connection is connection:
+                        self._active_connection = None
+
                 try:
                     connection.close()
                 except OSError:

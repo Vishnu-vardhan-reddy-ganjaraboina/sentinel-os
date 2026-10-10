@@ -4,6 +4,7 @@ import json
 import select
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -444,6 +445,73 @@ def test_server_rejects_invalid_connection_rate_limit(limit: object) -> None:
             port=0,
             max_connections_per_minute=limit,
         )
+
+
+def test_concurrent_connections_respect_global_rate_limit() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=100,
+        max_total_connections_per_minute=10,
+    )
+
+    client_ips = [f"192.0.2.{index}" for index in range(1, 31)]
+
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        results = list(
+            executor.map(server._is_rate_limited, client_ips)
+        )
+
+    assert results.count(False) == 10
+    assert results.count(True) == 20
+    assert len(server._total_connection_times) == 10
+
+
+def test_concurrent_connections_respect_per_ip_rate_limit() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=5,
+        max_total_connections_per_minute=100,
+    )
+
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        results = list(
+            executor.map(
+                server._is_rate_limited,
+                ["192.0.2.60"] * 30,
+            )
+        )
+
+    assert results.count(False) == 5
+    assert results.count(True) == 25
+    assert len(server._total_connection_times) == 5
+
+
+def test_expired_client_ip_entries_are_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_time = [100.0]
+    monkeypatch.setattr(
+        "sentinel.control_plane.transport_server.time",
+        SimpleNamespace(monotonic=lambda: current_time[0]),
+    )
+
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=1,
+        max_total_connections_per_minute=100,
+    )
+
+    assert server._is_rate_limited("192.0.2.70") is False
+    assert "192.0.2.70" in server._connection_times_by_ip
+
+    current_time[0] = 160.0
+    assert server._is_rate_limited("192.0.2.71") is False
+
+    assert "192.0.2.70" not in server._connection_times_by_ip
+    assert len(server._total_connection_times) == 1
 
 
 def test_connection_rate_limit_is_isolated_per_ip() -> None:

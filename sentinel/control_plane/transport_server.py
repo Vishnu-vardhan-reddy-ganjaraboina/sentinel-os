@@ -42,6 +42,7 @@ class ControlPlaneTransportServer:
         message_timeout: float = 30.0,
         listen_backlog: int = 5,
         max_connections_per_minute: int = 60,
+        max_total_connections_per_minute: int = 300,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -94,7 +95,21 @@ class ControlPlaneTransportServer:
         self._port = port
         self._listen_backlog = listen_backlog
         self._max_connections_per_minute = max_connections_per_minute
+        if (
+            isinstance(max_total_connections_per_minute, bool)
+            or not isinstance(max_total_connections_per_minute, int)
+            or max_total_connections_per_minute <= 0
+        ):
+            raise ValueError(
+                "max_total_connections_per_minute must be a positive integer."
+            )
+
+        self._max_total_connections_per_minute = (
+            max_total_connections_per_minute
+        )
         self._connection_times_by_ip: dict[str, deque[float]] = {}
+        self._total_connection_times: deque[float] = deque()
+        self._rate_limit_lock = threading.Lock()
         self._read_timeout = float(read_timeout)
         self._message_timeout = float(message_timeout)
 
@@ -238,6 +253,21 @@ class ControlPlaneTransportServer:
         now = time.monotonic()
         cutoff = now - 60.0
 
+        with self._rate_limit_lock:
+            return self._check_rate_limits(client_ip, now, cutoff)
+
+    def _check_rate_limits(
+        self,
+        client_ip: str,
+        now: float,
+        cutoff: float,
+    ) -> bool:
+        while (
+            self._total_connection_times
+            and self._total_connection_times[0] <= cutoff
+        ):
+            self._total_connection_times.popleft()
+
         # Discard expired entries for all tracked client IPs.
         for tracked_ip, timestamps in list(
             self._connection_times_by_ip.items()
@@ -250,10 +280,15 @@ class ControlPlaneTransportServer:
         timestamps = self._connection_times_by_ip.setdefault(
             client_ip, deque()
         )
-        if len(timestamps) >= self._max_connections_per_minute:
+        if (
+            len(timestamps) >= self._max_connections_per_minute
+            or len(self._total_connection_times)
+            >= self._max_total_connections_per_minute
+        ):
             return True
 
         timestamps.append(now)
+        self._total_connection_times.append(now)
         return False
 
     def _discard_pending_message(

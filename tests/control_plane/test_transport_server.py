@@ -458,6 +458,65 @@ def test_connection_rate_limit_is_isolated_per_ip() -> None:
     assert server._is_rate_limited("192.0.2.11") is False
 
 
+def test_global_connection_rate_limit_applies_across_ips() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=2,
+        max_total_connections_per_minute=2,
+    )
+
+    assert server._is_rate_limited("192.0.2.40") is False
+    assert server._is_rate_limited("192.0.2.41") is False
+    assert server._is_rate_limited("192.0.2.42") is True
+
+
+def test_global_connection_rate_limit_expires_after_sixty_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    current_time = [100.0]
+    monkeypatch.setattr(
+        "sentinel.control_plane.transport_server.time",
+        SimpleNamespace(monotonic=lambda: current_time[0]),
+    )
+
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=10,
+        max_total_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.50") is False
+
+    current_time[0] = 159.999
+    assert server._is_rate_limited("192.0.2.51") is True
+
+    current_time[0] = 160.0
+    assert server._is_rate_limited("192.0.2.51") is False
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [0, -1, True, 1.5],
+)
+def test_server_rejects_invalid_global_connection_rate_limit(
+    limit: object,
+) -> None:
+    base_server = create_server()
+
+    with pytest.raises(
+        ValueError,
+        match="max_total_connections_per_minute",
+    ):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            max_total_connections_per_minute=limit,
+        )
+
+
 def test_connection_rate_limit_expires_after_sixty_seconds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

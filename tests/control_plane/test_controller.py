@@ -221,7 +221,7 @@ def test_execute_request_uses_request_context() -> None:
         command=KernelCommand.SYSTEM_HEALTH,
         context=ControlContext(
             caller_id="explicit-caller",
-            caller_type="test",
+            caller_type="api",
         ),
     )
 
@@ -473,3 +473,40 @@ def test_audit_failure_does_not_hide_denied_operation() -> None:
     )
     assert result.audit_error == "Audit database unavailable"
     assert recorder.calls == 1
+
+
+def test_api_caller_cannot_start_service_with_default_control_authorizer() -> None:
+    kernel, controller = create_controller()
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_START,
+        context=ControlContext(
+            caller_id="external-api",
+            caller_type="api",
+        ),
+        data={"service": "memory"},
+    )
+
+    result = controller.execute_request(request)
+
+    assert result.success is False
+    assert result.error == (
+        "Permission denied: 'control' permission required."
+    )
+    assert kernel.running("memory") is False
+
+
+def test_unknown_caller_type_cannot_start_service() -> None:
+    kernel, controller = create_controller()
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_START,
+        context=ControlContext(
+            caller_id="unknown-caller",
+            caller_type="unrecognized_type",
+        ),
+        data={"service": "memory"},
+    )
+
+    result = controller.execute_request(request)
+
+    assert result.success is False
+    assert kernel.running("memory") is False

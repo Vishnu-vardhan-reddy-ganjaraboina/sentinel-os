@@ -195,7 +195,7 @@ class KernelController:
                 request.context,
             )
 
-        return self._authorizer
+        return ControlAuthorizer(permissions=())
 
     def _execute_and_audit(
         self,

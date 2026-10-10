@@ -4,6 +4,8 @@ Credentials implementation for the Sentinel Security subsystem.
 
 from __future__ import annotations
 
+import hmac
+
 from sentinel.security.interfaces import Credentials
 
 
@@ -39,9 +41,12 @@ class SecurityCredentials(Credentials):
         secret: str,
     ) -> bool:
         """
-        Verify the supplied secret.
+        Verify the supplied secret using constant-time comparison.
         """
-        return self._secret == secret
+        return hmac.compare_digest(
+            self._secret.encode("utf-8"),
+            secret.encode("utf-8"),
+        )
 
     def to_dict(self) -> dict[str, str]:
         """

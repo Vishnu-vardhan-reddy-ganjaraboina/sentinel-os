@@ -460,3 +460,68 @@ def test_restart_missing_service_raises() -> None:
 
     with pytest.raises(ServiceNotFoundError):
         kernel.restart("missing")
+
+def test_boot_records_rollback_failure_without_hiding_startup_error() -> None:
+    kernel = Kernel()
+
+    class CleanupFailingService(DummyService):
+        def shutdown(self) -> None:
+            raise RuntimeError("cleanup failed")
+
+    class StartupFailingService(Service):
+        def __init__(self) -> None:
+            super().__init__("startup_failing", ("cleanup_failing",))
+
+        def initialize(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def shutdown(self) -> None:
+            pass
+
+    cleanup_service = CleanupFailingService("cleanup_failing")
+    startup_service = StartupFailingService()
+
+    kernel.register(startup_service)
+    kernel.register(cleanup_service)
+
+    with pytest.raises(RuntimeError, match="startup failed") as exc_info:
+        kernel.boot()
+
+    assert kernel.state("startup_failing") is ServiceState.FAILED
+    assert kernel.state("cleanup_failing") is ServiceState.FAILED
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("cleanup failed" in note for note in notes)
+
+
+def test_start_records_rollback_failure_without_hiding_startup_error() -> None:
+    kernel = Kernel()
+
+    class CleanupFailingService(DummyService):
+        def shutdown(self) -> None:
+            raise RuntimeError("cleanup failed")
+
+    class StartupFailingService(Service):
+        def __init__(self) -> None:
+            super().__init__("startup_failing", ("cleanup_failing",))
+
+        def initialize(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def shutdown(self) -> None:
+            pass
+
+    cleanup_service = CleanupFailingService("cleanup_failing")
+    startup_service = StartupFailingService()
+
+    kernel.register(startup_service)
+    kernel.register(cleanup_service)
+
+    with pytest.raises(RuntimeError, match="startup failed") as exc_info:
+        kernel.start("startup_failing")
+
+    assert kernel.state("startup_failing") is ServiceState.FAILED
+    assert kernel.state("cleanup_failing") is ServiceState.FAILED
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("cleanup failed" in note for note in notes)

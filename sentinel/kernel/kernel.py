@@ -69,12 +69,15 @@ class Kernel:
                     self._lifecycle.start(service)
                     started.append(service)
 
-            except Exception:
+            except Exception as startup_error:
                 for service in reversed(started):
                     try:
                         self._lifecycle.stop(service)
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        startup_error.add_note(
+                            f"Rollback cleanup failed for service '{service.name}': "
+                            f"{cleanup_error}"
+                        )
                 raise
 
     def shutdown(self) -> None:
@@ -133,12 +136,15 @@ class Kernel:
                     self._lifecycle.start(service)
                     started.append(service)
 
-            except Exception:
+            except Exception as startup_error:
                 for service in reversed(started):
                     try:
                         self._lifecycle.stop(service)
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        startup_error.add_note(
+                            f"Rollback cleanup failed for service '{service.name}': "
+                            f"{cleanup_error}"
+                        )
                 raise
 
     def stop(self, name: str) -> None:

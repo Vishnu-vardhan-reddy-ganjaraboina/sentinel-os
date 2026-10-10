@@ -168,3 +168,35 @@ def test_connect_closes_connection_when_initialization_fails(
         SQLiteBackend(tmp_path / "failure.db")
 
     connection.close.assert_called_once()
+
+
+def test_set_preserves_write_error_when_rollback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "rollback_failure.db")
+    connection = Mock()
+    connection.execute.side_effect = sqlite3.OperationalError(
+        "simulated write failure"
+    )
+    connection.rollback.side_effect = sqlite3.OperationalError(
+        "simulated rollback failure"
+    )
+
+    monkeypatch.setattr(backend, "_connection", connection)
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated write failure",
+    ) as exc_info:
+        backend.set("key", "value")
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("simulated rollback failure" in note for note in notes)
+
+    backend.disconnect()

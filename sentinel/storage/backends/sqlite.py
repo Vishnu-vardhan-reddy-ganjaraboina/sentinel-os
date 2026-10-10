@@ -192,11 +192,14 @@ class SQLiteBackend(StorageBackend):
                 connection.commit()
 
             except sqlite3.Error as exc:
-                connection.rollback()
+                self._rollback_safely(connection, exc)
 
-                raise StorageWriteError(
+                error = StorageWriteError(
                     f"Failed to write key '{key}': {exc}"
-                ) from exc
+                )
+                for note in getattr(exc, "__notes__", []):
+                    error.add_note(note)
+                raise error from exc
 
     def delete(self, key: str) -> None:
         """
@@ -216,11 +219,14 @@ class SQLiteBackend(StorageBackend):
                 connection.commit()
 
             except sqlite3.Error as exc:
-                connection.rollback()
+                self._rollback_safely(connection, exc)
 
-                raise StorageWriteError(
+                error = StorageWriteError(
                     f"Failed to delete key '{key}': {exc}"
-                ) from exc
+                )
+                for note in getattr(exc, "__notes__", []):
+                    error.add_note(note)
+                raise error from exc
 
     def clear(self) -> None:
         """
@@ -234,11 +240,14 @@ class SQLiteBackend(StorageBackend):
                 connection.commit()
 
             except sqlite3.Error as exc:
-                connection.rollback()
+                self._rollback_safely(connection, exc)
 
-                raise StorageWriteError(
+                error = StorageWriteError(
                     f"Failed to clear storage: {exc}"
-                ) from exc
+                )
+                for note in getattr(exc, "__notes__", []):
+                    error.add_note(note)
+                raise error from exc
 
     def keys(self) -> list[str]:
         """
@@ -280,6 +289,19 @@ class SQLiteBackend(StorageBackend):
         Backward-compatible alias for get().
         """
         return self.get(key)
+
+    @staticmethod
+    def _rollback_safely(
+        connection: sqlite3.Connection,
+        original_error: sqlite3.Error,
+    ) -> None:
+        """Attempt rollback without masking the original SQLite error."""
+        try:
+            connection.rollback()
+        except sqlite3.Error as rollback_error:
+            original_error.add_note(
+                f"SQLite rollback failed: {rollback_error}"
+            )
 
     def _ensure_connected(self) -> sqlite3.Connection:
         """

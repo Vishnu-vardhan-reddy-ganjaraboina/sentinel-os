@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import select
 import socket
 import time
 
@@ -305,6 +306,60 @@ def test_server_times_out_when_client_sends_incomplete_message() -> None:
         assert result.success is False
         assert result.command == "transport.error"
         assert result.error is not None
+    finally:
+        server.stop()
+
+
+def test_server_enforces_total_message_deadline() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        read_timeout=1.0,
+        message_timeout=0.5,
+    )
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            data = b""
+
+            for _ in range(20):
+                try:
+                    connection.sendall(b"x")
+                except OSError:
+                    break
+
+                readable, _, _ = select.select(
+                    [connection], [], [], 0.1
+                )
+                if readable:
+                    try:
+                        chunk = connection.recv(4096)
+                    except OSError:
+                        break
+
+                    if not chunk:
+                        break
+
+                    data += chunk
+                    if b"\\n" in data:
+                        break
+
+        assert data, "Server closed the connection without a response."
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert result.command == "transport.error"
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
     finally:
         server.stop()
 

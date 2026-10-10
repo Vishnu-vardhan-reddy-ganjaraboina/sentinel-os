@@ -7,6 +7,7 @@ from __future__ import annotations
 import math
 import socket
 import threading
+import time
 
 from sentinel.control.exceptions import ControlProtocolError
 from sentinel.control_plane.result import ControlResult
@@ -37,6 +38,7 @@ class ControlPlaneTransportServer:
         host: str = "127.0.0.1",
         port: int = 0,
         read_timeout: float = 5.0,
+        message_timeout: float = 30.0,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
@@ -58,10 +60,21 @@ class ControlPlaneTransportServer:
         ):
             raise ValueError("read_timeout must be a finite positive number.")
 
+        if (
+            isinstance(message_timeout, bool)
+            or not isinstance(message_timeout, (int, float))
+            or not math.isfinite(message_timeout)
+            or message_timeout <= 0
+        ):
+            raise ValueError(
+                "message_timeout must be a finite positive number."
+            )
+
         self._control_plane = control_plane
         self._host = host
         self._port = port
         self._read_timeout = float(read_timeout)
+        self._message_timeout = float(message_timeout)
 
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -193,8 +206,8 @@ class ControlPlaneTransportServer:
 
     def _handle_connection(self, connection: socket.socket) -> None:
         try:
-            connection.settimeout(self._read_timeout)
-            message = self._receive_message(connection)
+            deadline = time.monotonic() + self._message_timeout
+            message = self._receive_message(connection, deadline)
             request = ControlPlaneProtocol.decode_request(message)
 
             result = self._control_plane.execute_request(request)
@@ -213,11 +226,20 @@ class ControlPlaneTransportServer:
                 f"Control Plane request failed: {exc}",
             )
 
-    def _receive_message(self, connection: socket.socket) -> bytes:
+    def _receive_message(
+        self,
+        connection: socket.socket,
+        deadline: float,
+    ) -> bytes:
         chunks: list[bytes] = []
         total_size = 0
 
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Control message timed out.")
+
+            connection.settimeout(min(self._read_timeout, remaining))
             chunk = connection.recv(4096)
 
             if not chunk:

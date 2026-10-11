@@ -216,7 +216,7 @@ def test_audit_failure_is_reported_over_tls_and_server_recovers() -> None:
         result = client.execute(request)
 
         assert result.success is True
-        assert result.audit_error == "Audit database unavailable"
+        assert result.audit_error == "Audit recording failed."
         assert target.started == ["alpha"]
         assert failing_recorder.calls == 1
 
@@ -232,7 +232,7 @@ def test_audit_failure_is_reported_over_tls_and_server_recovers() -> None:
         )
 
         assert recovery_result.success is True
-        assert recovery_result.audit_error == "Audit database unavailable"
+        assert recovery_result.audit_error == "Audit recording failed."
         assert failing_recorder.calls == 2
     finally:
         server.stop()

@@ -23,6 +23,89 @@ from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.validator import ControlRequestValidator
 
 
+_SENSITIVE_AUDIT_KEYS = {
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "authorization",
+    "credential",
+    "credentials",
+    "private_key",
+    "client_secret",
+}
+
+
+def _safe_audit_error(
+    command: KernelCommand,
+    error: str | None,
+) -> str | None:
+    """Return a safe, bounded error description for audit records."""
+    if error is None:
+        return None
+
+    # Preserve known controller-generated messages that contain no
+    # arbitrary exception details or credential values.
+    if error == "Permission denied: 'control' permission required.":
+        return error
+
+    if error == "Service value must be a string.":
+        return error
+
+    if error.startswith("Service '") and error.endswith(
+        "' is not registered."
+    ):
+        service = error[len("Service '"):-len("' is not registered.")]
+        if service and all(
+            char.isalnum() or char in "._- " for char in service
+        ):
+            return error
+
+    return f"Command '{command.value}' failed."
+
+
+def _sanitize_audit_value(value: Any) -> Any:
+    """Redact sensitive fields in audit data without changing the request."""
+    if isinstance(value, Mapping):
+        sanitized: dict[str, Any] = {}
+
+        for key, item in value.items():
+            raw_key = str(key).replace("-", "_").replace(".", "_")
+            normalized_key = "".join(
+                "_" + char.lower()
+                if char.isupper()
+                and index > 0
+                and (
+                    raw_key[index - 1].islower()
+                    or raw_key[index - 1].isdigit()
+                )
+                else char.lower()
+                for index, char in enumerate(raw_key)
+            )
+            key_parts = normalized_key.split("_")
+
+            sensitive = (
+                normalized_key in _SENSITIVE_AUDIT_KEYS
+                or any(
+                    part in _SENSITIVE_AUDIT_KEYS
+                    for part in key_parts
+                )
+            )
+
+            if sensitive:
+                sanitized[key] = "[REDACTED]"
+            else:
+                sanitized[key] = _sanitize_audit_value(item)
+
+        return sanitized
+
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_audit_value(item) for item in value]
+
+    return value
+
 class KernelController:
     """
     Execute and authorize Kernel Control Plane requests.
@@ -413,8 +496,8 @@ class KernelController:
                 success=result.success,
                 command=result.command,
                 data=result.data,
-                error=result.error,
-                audit_error=str(exc) or type(exc).__name__,
+                error=_safe_audit_error(request.command, result.error),
+                audit_error="Audit recording failed.",
             )
 
         return result
@@ -435,8 +518,8 @@ class KernelController:
             caller_type=request.context.caller_type,
             command=request.command.value,
             success=result.success,
-            data=request.data,
-            error=result.error,
+            data=_sanitize_audit_value(request.data),
+            error=_safe_audit_error(request.command, result.error),
         )
 
         self._audit_recorder.record(event)

@@ -54,14 +54,6 @@ def _safe_audit_error(
     if error == "Service value must be a string.":
         return error
 
-    if error.startswith("Service '") and error.endswith(
-        "' is not registered."
-    ):
-        service = error[len("Service '"):-len("' is not registered.")]
-        if service and all(
-            char.isalnum() or char in "._- " for char in service
-        ):
-            return error
 
     return f"Command '{command.value}' failed."
 

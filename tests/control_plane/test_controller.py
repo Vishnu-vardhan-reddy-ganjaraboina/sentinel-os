@@ -356,8 +356,10 @@ def test_failed_request_is_audited() -> None:
     assert event.command == str(KernelCommand.SERVICE_STATUS)
     assert event.success is False
     assert event.data == {"service": "does-not-exist"}
-    assert event.error is not None
-    assert "does-not-exist" in event.error
+    assert event.error == "Command 'service.status' failed."
+    assert "does-not-exist" not in event.error
+    assert result.error is not None
+    assert "does-not-exist" in result.error
 
 
 def test_audit_redacts_sensitive_nested_request_data() -> None:

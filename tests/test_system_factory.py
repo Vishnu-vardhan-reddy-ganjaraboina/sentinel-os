@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 
 import pytest
 
@@ -267,3 +268,199 @@ def test_control_plane_composition_does_not_start_kernel() -> None:
 
     assert system.running is False
     assert system.kernel.health()["healthy"] is False
+import ssl
+
+from sentinel.infrastructure.configuration import Configuration
+from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.request import ControlRequest
+from sentinel.control_plane.transport_client import ControlPlaneTransportClient
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
+from sentinel.security.service import SecurityService
+from sentinel.security.constants import Permission, Role
+from sentinel.security.credentials import SecurityCredentials
+from sentinel.security.identity import SecurityIdentity
+
+
+def test_factory_configures_tls_transport_from_configuration() -> None:
+    cert_path = (
+        Path(__file__).resolve().parent
+        / "certs"
+        / "transport-test-cert.pem"
+    )
+    key_path = (
+        Path(__file__).resolve().parent
+        / "certs"
+        / "transport-test-key.pem"
+    )
+
+    configuration = BootConfiguration(
+        Configuration.from_dict(
+            {
+                "control_plane": {
+                    "tls": {
+                        "enabled": True,
+                        "certfile": str(cert_path),
+                        "keyfile": str(key_path),
+                    },
+                },
+            }
+        )
+    )
+
+    system = SystemFactory(configuration).create()
+    system.start()
+
+    try:
+        assert system.control_transport is not None
+
+        client_context = ssl.create_default_context(
+            ssl.Purpose.SERVER_AUTH,
+            cafile=str(cert_path),
+        )
+
+        client = ControlPlaneTransportClient(
+            host=system.control_transport.host,
+            port=system.control_transport.port,
+            ssl_context=client_context,
+        )
+
+        result = client.execute(
+            ControlRequest(
+                command=KernelCommand.SYSTEM_HEALTH,
+                context=ControlContext(
+                    caller_id="system",
+                    caller_type="system",
+                ),
+            )
+        )
+
+        assert result.success is True
+    finally:
+        system.shutdown()
+def test_factory_uses_injected_security_service_with_tls() -> None:
+    cert_dir = Path(__file__).resolve().parent / "certs"
+    cert_path = cert_dir / "transport-test-cert.pem"
+    key_path = cert_dir / "transport-test-key.pem"
+
+    configuration = BootConfiguration(
+        Configuration.from_dict(
+            {
+                "control_plane": {
+                    "tls": {
+                        "enabled": True,
+                        "certfile": str(cert_path),
+                        "keyfile": str(key_path),
+                    },
+                },
+            }
+        )
+    )
+    security = SecurityService()
+
+    factory = SystemFactory(
+        configuration,
+        security_service=security,
+    )
+    system = factory.create()
+
+    assert system.control_plane is not None
+    authorizer = system.control_plane.controller.authorizer
+    assert isinstance(authorizer, SecurityControlAuthorizer)
+    assert authorizer.security is security
+
+
+def test_factory_rejects_security_service_without_tls() -> None:
+    factory = SystemFactory(
+        security_service=SecurityService(),
+    )
+
+    with pytest.raises(ValueError, match="TLS"):
+        factory.create()
+
+def test_factory_security_authorizes_authenticated_identity_end_to_end() -> None:
+    cert_dir = Path(__file__).resolve().parent / "certs"
+    cert_path = cert_dir / "transport-test-cert.pem"
+    key_path = cert_dir / "transport-test-key.pem"
+
+    configuration = BootConfiguration(
+        Configuration.from_dict(
+            {
+                "control_plane": {
+                    "tls": {
+                        "enabled": True,
+                        "certfile": str(cert_path),
+                        "keyfile": str(key_path),
+                    },
+                },
+            }
+        )
+    )
+
+    security = SecurityService()
+    security.grant(Role.ADMIN, [Permission.READ, Permission.EXECUTE])
+    security.grant(Role.USER, [Permission.READ])
+
+    security.register_identity(
+        SecurityIdentity("admin-client", "Admin Client", {Role.ADMIN}),
+        SecurityCredentials("admin", "admin-secret"),
+    )
+    security.register_identity(
+        SecurityIdentity("read-client", "Read Client", {Role.USER}),
+        SecurityCredentials("read-client", "read-secret"),
+    )
+
+    system = SystemFactory(
+        configuration,
+        security_service=security,
+    ).create()
+
+    system.start()
+
+    try:
+        assert system.control_transport is not None
+
+        client_context = ssl.create_default_context(
+            ssl.Purpose.SERVER_AUTH,
+            cafile=str(cert_path),
+        )
+
+        read_client = ControlPlaneTransportClient(
+            host=system.control_transport.host,
+            port=system.control_transport.port,
+            ssl_context=client_context,
+            credentials=SecurityCredentials(
+                "read-client",
+                "read-secret",
+            ),
+        )
+
+        health_result = read_client.execute(
+            ControlRequest(
+                command=KernelCommand.SYSTEM_HEALTH,
+                context=ControlContext(
+                    caller_id="read-client",
+                    caller_type="api",
+                ),
+            )
+        )
+
+        assert health_result.success is True
+        assert health_result.data["healthy"] is True
+
+        spoofed_control_result = read_client.execute(
+            ControlRequest(
+                command=KernelCommand.SERVICE_START,
+                context=ControlContext(
+                    caller_id="admin-client",
+                    caller_type="system",
+                ),
+                data={"service": "orchestration"},
+            )
+        )
+
+        assert spoofed_control_result.success is False
+        assert spoofed_control_result.error is not None
+
+    finally:
+        system.shutdown()

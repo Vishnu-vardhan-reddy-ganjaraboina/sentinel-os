@@ -22,6 +22,7 @@ class SecurityManager:
         self._authenticator = SecurityAuthenticator()
         self._authorizer = SecurityAuthorizer()
         self._identities: dict[str, SecurityIdentity] = {}
+        self._identity_ids_by_username: dict[str, str] = {}
 
     @property
     def authenticator(self) -> SecurityAuthenticator:
@@ -39,7 +40,23 @@ class SecurityManager:
         """
         Register a new identity and its credentials.
         """
+        previous_id = self._identity_ids_by_username.get(
+            credentials.username,
+        )
+        if previous_id is not None and previous_id != identity.id:
+            self._identities.pop(previous_id, None)
+
+        previous_identity = self._identities.get(identity.id)
+        if previous_identity is not None:
+            for username, registered_id in list(
+                self._identity_ids_by_username.items(),
+            ):
+                if registered_id == identity.id:
+                    self._identity_ids_by_username.pop(username, None)
+                    self._authenticator.unregister(username)
+
         self._identities[identity.id] = identity
+        self._identity_ids_by_username[credentials.username] = identity.id
         self._authenticator.register(credentials)
 
     def unregister_identity(
@@ -50,8 +67,18 @@ class SecurityManager:
         """
         Remove an identity and its credentials.
         """
+        registered_id = self._identity_ids_by_username.get(username)
+        if registered_id == identity_id:
+            self._identity_ids_by_username.pop(username, None)
+            self._authenticator.unregister(username)
+
         self._identities.pop(identity_id, None)
-        self._authenticator.unregister(username)
+        for registered_username, registered_id in list(
+            self._identity_ids_by_username.items(),
+        ):
+            if registered_id == identity_id:
+                self._identity_ids_by_username.pop(registered_username, None)
+                self._authenticator.unregister(registered_username)
 
     def get_identity(
         self,
@@ -70,6 +97,24 @@ class SecurityManager:
         Authenticate credentials.
         """
         return self._authenticator.authenticate(credentials)
+
+    def authenticate_identity(
+        self,
+        credentials: SecurityCredentials,
+    ) -> SecurityIdentity | None:
+        """
+        Authenticate credentials and return their registered identity.
+        """
+        if not self._authenticator.authenticate(credentials):
+            return None
+
+        identity_id = self._identity_ids_by_username.get(
+            credentials.username,
+        )
+        if identity_id is None:
+            return None
+
+        return self._identities.get(identity_id)
 
     def authorize(
         self,
@@ -115,6 +160,7 @@ class SecurityManager:
         Clear all registered identities and permissions.
         """
         self._identities.clear()
+        self._identity_ids_by_username.clear()
         self._authenticator.clear()
         self._authorizer.clear()
 

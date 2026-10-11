@@ -80,4 +80,4 @@ The Brain remains the center of the platform while AI models act only as reasoni
 
 ## License
 
-To be determined.
+Sentinel OS is licensed under the [MIT License](LICENSE).

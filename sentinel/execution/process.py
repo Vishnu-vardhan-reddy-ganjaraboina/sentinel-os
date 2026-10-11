@@ -27,7 +27,9 @@ class ProcessManager:
         shell: bool = DEFAULT_SHELL,
         cwd: str | Path | None = None,
     ) -> None:
-        self._shell = shell
+        if shell:
+            raise ValueError("shell=True is not supported; pass an argument sequence")
+        self._shell = False
         self._cwd = Path(cwd).resolve() if cwd else None
         self._process: subprocess.Popen[str] | None = None
 
@@ -74,7 +76,6 @@ class ProcessManager:
                 stderr=subprocess.PIPE,
                 stdin=subprocess.PIPE,
                 text=TEXT_MODE,
-                shell=self._shell,
                 cwd=self._cwd,
             )
 

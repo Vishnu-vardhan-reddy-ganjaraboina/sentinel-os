@@ -26,6 +26,9 @@ from sentinel.control_plane.endpoint_registry import (
 from sentinel.control_plane.result import ControlResult
 from sentinel.infrastructure.logger import configure_logging, shutdown_logging
 from sentinel.process import ProcessHost
+from sentinel.security.production_bootstrap import (
+    create_production_security_service,
+)
 
 DEFAULT_CONFIG = Path("configs/development.yaml")
 
@@ -307,10 +310,24 @@ class CLI:
             )
 
             profile = BootProfile(name=profile_name)
-            boot_manager = BootManager.from_configuration(
-                configuration,
-                profile,
+            infrastructure_configuration = configuration.configuration
+            authentication_enabled = infrastructure_configuration.get(
+                "control_plane.authentication.enabled",
+                False,
             )
+
+            if authentication_enabled:
+                security_service = create_production_security_service()
+                boot_manager = BootManager.from_configuration(
+                    configuration,
+                    profile,
+                    security_service=security_service,
+                )
+            else:
+                boot_manager = BootManager.from_configuration(
+                    configuration,
+                    profile,
+                )
             process = ProcessHost(
                 boot_manager,
                 endpoint_registry=self._endpoint_registry,

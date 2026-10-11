@@ -183,3 +183,157 @@ def test_load_uses_copy() -> None:
     exported["feature"]["enabled"] = False
 
     assert config.get("feature.enabled") is True
+
+
+def test_validate_accepts_disabled_control_plane_tls() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": False,
+                },
+            },
+        }
+    )
+
+    config.validate()
+
+
+def test_validate_accepts_enabled_control_plane_tls() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": True,
+                    "certfile": "certs/server-cert.pem",
+                    "keyfile": "certs/server-key.pem",
+                },
+            },
+        }
+    )
+
+    config.validate()
+
+
+def test_validate_rejects_non_mapping_control_plane_configuration() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": [],
+        }
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="control_plane",
+    ):
+        config.validate()
+
+
+def test_validate_rejects_non_boolean_tls_enabled() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": "true",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="enabled",
+    ):
+        config.validate()
+
+
+def test_validate_rejects_enabled_tls_without_certificate_paths() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": True,
+                },
+            },
+        }
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="certfile|keyfile",
+    ):
+        config.validate()
+
+
+def test_validate_rejects_empty_tls_certificate_path() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": True,
+                    "certfile": " ",
+                    "keyfile": "certs/server-key.pem",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="certfile",
+    ):
+        config.validate()
+
+
+def test_validate_accepts_authentication_with_tls() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": True,
+                    "certfile": "secrets/tls/server-cert.pem",
+                    "keyfile": "secrets/tls/server-key.pem",
+                },
+                "authentication": {"enabled": True},
+            },
+        }
+    )
+    config.validate()
+
+
+def test_authentication_requires_tls() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {"enabled": False},
+                "authentication": {"enabled": True},
+            },
+        }
+    )
+    with pytest.raises(ConfigurationError, match="requires TLS"):
+        config.validate()
+
+
+def test_authentication_enabled_must_be_boolean() -> None:
+    config = Configuration.from_dict(
+        {
+            "control_plane": {
+                "tls": {
+                    "enabled": True,
+                    "certfile": "certs/server.pem",
+                    "keyfile": "certs/server-key.pem",
+                },
+                "authentication": {"enabled": "true"},
+            },
+        }
+    )
+    with pytest.raises(ConfigurationError, match="must be a Boolean"):
+        config.validate()
+
+
+def test_authentication_configuration_must_be_mapping() -> None:
+    config = Configuration.from_dict(
+        {"control_plane": {"authentication": []}}
+    )
+    with pytest.raises(ConfigurationError, match="authentication"):
+        config.validate()

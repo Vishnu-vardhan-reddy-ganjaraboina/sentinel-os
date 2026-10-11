@@ -10,3 +10,11 @@ dist/
 build/
 # Local runtime data and databases
 /data/
+
+# Local production secrets and private keys
+/secrets/
+*.key
+*.key.pem
+*.p12
+*.pfx
+*.priv

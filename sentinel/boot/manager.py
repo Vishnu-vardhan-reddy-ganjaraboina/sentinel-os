@@ -17,6 +17,7 @@ from sentinel.boot.exceptions import (
 from sentinel.boot.profile import BootProfile
 from sentinel.boot.result import BootResult
 from sentinel.boot.system_factory import SystemFactory
+from sentinel.security.service import SecurityService
 from sentinel.system import System
 
 
@@ -79,6 +80,8 @@ class BootManager:
         cls,
         configuration: BootConfiguration,
         profile: BootProfile | None = None,
+        *,
+        security_service: SecurityService | None = None,
     ) -> BootManager:
         """
         Compose a System from boot configuration and return a BootManager.
@@ -99,7 +102,10 @@ class BootManager:
         ):
             raise TypeError("profile must be a BootProfile instance.")
 
-        factory = SystemFactory(configuration)
+        factory = SystemFactory(
+            configuration,
+            security_service=security_service,
+        )
         system = factory.create()
 
         return cls(

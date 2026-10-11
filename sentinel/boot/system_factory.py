@@ -4,6 +4,8 @@ Factory for composing the Sentinel OS system from boot configuration.
 
 from __future__ import annotations
 
+import ssl
+
 from sentinel.application import Application
 from sentinel.boot.configuration import BootConfiguration
 from sentinel.control_plane.adapter import KernelAdapter
@@ -14,6 +16,8 @@ from sentinel.control_plane.endpoint_registry import (
     ControlPlaneEndpointRegistry,
 )
 from sentinel.control_plane.service import ControlPlane
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
+from sentinel.security.service import SecurityService
 from sentinel.control_plane.transport_server import (
     ControlPlaneTransportServer,
 )
@@ -33,6 +37,8 @@ class SystemFactory:
     def __init__(
         self,
         configuration: BootConfiguration | None = None,
+        *,
+        security_service: SecurityService | None = None,
     ) -> None:
         if configuration is not None and not isinstance(
             configuration,
@@ -42,7 +48,16 @@ class SystemFactory:
                 "configuration must be a BootConfiguration instance."
             )
 
+        if security_service is not None and not isinstance(
+            security_service,
+            SecurityService,
+        ):
+            raise TypeError(
+                "security_service must be a SecurityService instance."
+            )
+
         self._configuration = configuration
+        self._security_service = security_service
         self._bootstrap: Bootstrap | None = None
         self._system: System | None = None
 
@@ -103,6 +118,51 @@ class SystemFactory:
             )
             infrastructure_configuration.validate()
 
+        authentication_enabled = False
+        if infrastructure_configuration is not None:
+            authentication_enabled = infrastructure_configuration.get(
+                "control_plane.authentication.enabled",
+                False,
+            )
+            if not isinstance(authentication_enabled, bool):
+                raise ValueError(
+                    "control_plane.authentication.enabled must be a Boolean."
+                )
+
+            if authentication_enabled:
+                tls_enabled = infrastructure_configuration.get(
+                    "control_plane.tls.enabled",
+                    False,
+                )
+                if not tls_enabled:
+                    raise RuntimeError(
+                        "Production authentication requires Control Plane TLS."
+                    )
+                if self._security_service is None:
+                    raise RuntimeError(
+                        "Control Plane authentication is enabled, but no "
+                        "SecurityService was provided."
+                    )
+
+        ssl_context: ssl.SSLContext | None = None
+        if infrastructure_configuration is not None:
+            tls_enabled = infrastructure_configuration.get(
+                "control_plane.tls.enabled",
+                False,
+            )
+            if tls_enabled:
+                certfile = infrastructure_configuration.get(
+                    "control_plane.tls.certfile",
+                )
+                keyfile = infrastructure_configuration.get(
+                    "control_plane.tls.keyfile",
+                )
+                ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ssl_context.load_cert_chain(
+                    certfile=certfile,
+                    keyfile=keyfile,
+                )
+
         application = Application(
             configuration=infrastructure_configuration,
         )
@@ -118,14 +178,22 @@ class SystemFactory:
             caller_type="system",
         )
 
-        authorizer = ControlAuthorizer.from_context(
-            context,
-        )
+        if self._security_service is not None:
+            authorizer = SecurityControlAuthorizer(
+                self._security_service,
+            )
+            use_caller_policy = False
+        else:
+            authorizer = ControlAuthorizer.from_context(
+                context,
+            )
+            use_caller_policy = True
 
         controller = KernelController(
             target=adapter,
             authorizer=authorizer,
             context=context,
+            use_caller_policy=use_caller_policy,
         )
 
         control_plane = ControlPlane(
@@ -136,11 +204,7 @@ class SystemFactory:
             control_plane=control_plane,
             host="127.0.0.1",
             port=0,
-        )
-        control_transport = ControlPlaneTransportServer(
-            control_plane=control_plane,
-            host="127.0.0.1",
-            port=0,
+            ssl_context=ssl_context,
         )
 
         endpoint_registry = ControlPlaneEndpointRegistry()

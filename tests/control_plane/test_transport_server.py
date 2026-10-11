@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import select
+import ssl
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -72,6 +74,27 @@ def create_server(
         host="127.0.0.1",
         port=0,
         read_timeout=read_timeout,
+    )
+
+
+def create_tls_server(
+    max_connections_per_minute: int = 60,
+) -> ControlPlaneTransportServer:
+    base_server = create_server()
+    cert_dir = Path(__file__).resolve().parents[1] / "certs"
+
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(
+        certfile=cert_dir / "transport-test-cert.pem",
+        keyfile=cert_dir / "transport-test-key.pem",
+    )
+
+    return ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        max_connections_per_minute=max_connections_per_minute,
+        ssl_context=ssl_context,
     )
 
 
@@ -231,6 +254,47 @@ def test_server_can_handle_multiple_connections() -> None:
 
             assert result.success is True
             assert result.command == KernelCommand.SYSTEM_STATUS.value
+    finally:
+        server.stop()
+
+
+def test_server_recovers_after_client_disconnects_mid_request() -> None:
+    server = create_server(read_timeout=0.5)
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        # Send an incomplete request, then disconnect before completing it.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.sendall(b'{"version":1,"type":"request"')
+
+        # The server should recover and accept a subsequent valid request.
+        deadline = time.monotonic() + 2.0
+        result = None
+
+        while time.monotonic() < deadline:
+            try:
+                result = send_request(
+                    server,
+                    ControlRequest(
+                        command=KernelCommand.SYSTEM_STATUS,
+                        context=ControlContext(
+                            caller_id="recovery-client",
+                            caller_type="cli",
+                        ),
+                    ),
+                )
+                break
+            except (OSError, TimeoutError):
+                time.sleep(0.05)
+
+        assert result is not None, "Server did not recover after client disconnect."
+        assert result.success is True
+        assert result.command == KernelCommand.SYSTEM_STATUS.value
     finally:
         server.stop()
 
@@ -747,4 +811,97 @@ def test_server_stops_when_shutdown_races_with_rate_limit_check(
         release_rate_check.set()
         if connection is not None:
             connection.close()
+        server.stop()
+
+
+
+def test_server_stop_interrupts_stalled_tls_handshake() -> None:
+    server = create_tls_server()
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            active = server._active_connection
+            if isinstance(active, ssl.SSLSocket):
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("Server did not begin the TLS handshake.")
+
+        server_thread = server._thread
+        assert server_thread is not None
+
+        server.stop()
+
+        assert not server_thread.is_alive(), (
+            "Server thread remained alive during TLS handshake shutdown."
+        )
+        assert server._active_connection is None
+    finally:
+        if connection is not None:
+            connection.close()
+        server.stop()
+
+def test_rate_limited_tls_connection_is_closed_before_handshake() -> None:
+    server = create_tls_server(max_connections_per_minute=1)
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        # Consume the only allowed connection.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ):
+            pass
+
+        # The next connection must close without a TLS handshake.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            data = connection.recv(4096)
+
+        assert data == b""
+    finally:
+        server.stop()
+
+
+def test_unexpected_exception_is_not_exposed_to_client() -> None:
+    server = create_server()
+    original_execute = server.control_plane.execute_request
+
+    def raise_internal_error(request: ControlRequest) -> ControlResult:
+        raise RuntimeError("internal-secret-database-detail")
+
+    server.control_plane.execute_request = raise_internal_error
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_HEALTH,
+        context=ControlContext(
+            caller_id="test-client",
+            caller_type="cli",
+        ),
+    )
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+        result = send_request(server, request)
+
+        assert result.success is False
+        assert result.error is not None
+        assert "internal-secret-database-detail" not in result.error
+    finally:
+        server.control_plane.execute_request = original_execute
         server.stop()

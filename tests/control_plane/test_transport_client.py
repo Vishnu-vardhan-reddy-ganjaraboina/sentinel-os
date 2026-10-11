@@ -214,3 +214,63 @@ def test_client_rejects_oversized_response(monkeypatch) -> None:
 
     with pytest.raises(ControlProtocolError):
         client.execute(make_request())
+
+def test_client_rejects_credentials_without_tls():
+    import pytest
+
+    from sentinel.security.credentials import SecurityCredentials
+
+    with pytest.raises(ValueError, match="TLS"):
+        ControlPlaneTransportClient(
+            host="127.0.0.1",
+            port=12345,
+            credentials=SecurityCredentials("admin", "secret"),
+        )
+
+
+def test_client_accepts_tls_context_and_credentials():
+    import ssl
+
+    from sentinel.security.credentials import SecurityCredentials
+
+    context = ssl.create_default_context()
+
+    client = ControlPlaneTransportClient(
+        host="127.0.0.1",
+        port=12345,
+        ssl_context=context,
+        credentials=SecurityCredentials("admin", "secret"),
+    )
+
+    assert client.host == "127.0.0.1"
+    assert client.port == 12345
+
+def test_client_rejects_tls_context_without_certificate_verification():
+    import ssl
+    import pytest
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    with pytest.raises(ValueError, match="certificate verification"):
+        ControlPlaneTransportClient(
+            host="127.0.0.1",
+            port=12345,
+            ssl_context=context,
+        )
+
+
+def test_client_rejects_tls_context_without_hostname_verification():
+    import ssl
+    import pytest
+
+    context = ssl.create_default_context()
+    context.check_hostname = False
+
+    with pytest.raises(ValueError, match="hostname verification"):
+        ControlPlaneTransportClient(
+            host="127.0.0.1",
+            port=12345,
+            ssl_context=context,
+        )

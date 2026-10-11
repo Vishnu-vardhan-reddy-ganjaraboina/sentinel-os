@@ -7,10 +7,31 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+
 
 if TYPE_CHECKING:
     from sentinel.control_plane.audit_store import ControlAuditStore
+
+
+def _freeze_value(value: Any) -> Any:
+    """Recursively freeze containers in audit event data."""
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze_value(item) for item in value)
+    return value
+
+
+def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return a read-only mapping with recursively frozen values."""
+    return MappingProxyType({
+        key: _freeze_value(item)
+        for key, item in value.items()
+    })
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,11 +84,10 @@ class ControlAuditEvent:
                 "timestamp must be timezone-aware."
             )
 
-        object.__setattr__(
-            self,
-            "data",
-            dict(self.data),
-        )
+        if not isinstance(self.data, Mapping):
+            raise TypeError("data must be a mapping.")
+
+        object.__setattr__(self, "data", _freeze_mapping(self.data))
 
 
 class ControlAuditRecorder:

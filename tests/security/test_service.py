@@ -138,3 +138,59 @@ def test_clear():
     service.clear()
 
     assert len(service) == 0
+
+def test_authenticate_identity_returns_registered_identity():
+    service = SecurityService()
+    identity = SecurityIdentity("admin-id", "Admin", {Role.ADMIN})
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    result = service.authenticate_identity(
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    assert result == identity
+
+
+def test_authenticate_identity_rejects_invalid_secret():
+    service = SecurityService()
+    identity = SecurityIdentity("admin-id", "Admin", {Role.ADMIN})
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    result = service.authenticate_identity(
+        SecurityCredentials("admin", "wrong-secret"),
+    )
+
+    assert result is None
+
+
+def test_authenticate_identity_rejects_unknown_username():
+    service = SecurityService()
+
+    result = service.authenticate_identity(
+        SecurityCredentials("unknown", "some-secret"),
+    )
+
+    assert result is None
+
+
+def test_authenticate_identity_returns_none_after_unregister():
+    service = SecurityService()
+    identity = SecurityIdentity("admin-id", "Admin", {Role.ADMIN})
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    service.unregister_identity("admin-id", "admin")
+
+    result = service.authenticate_identity(
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    assert result is None

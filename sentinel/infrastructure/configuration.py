@@ -200,6 +200,63 @@ class Configuration:
                 If a configured value has an invalid type or value.
         """
         with self._lock:
+            control_plane = deepcopy(
+                self._config.get("control_plane", {})
+            )
+
+        if not isinstance(control_plane, dict):
+            raise ConfigurationError(
+                "The control_plane configuration must be a mapping."
+            )
+
+        tls = control_plane.get("tls", {})
+        if not isinstance(tls, dict):
+            raise ConfigurationError(
+                "control_plane.tls must be a mapping."
+            )
+
+        tls_enabled = tls.get("enabled", False)
+        if not isinstance(tls_enabled, bool):
+            raise ConfigurationError(
+                "control_plane.tls.enabled must be a Boolean."
+            )
+
+        for path_key in ("certfile", "keyfile"):
+            if path_key in tls:
+                path_value = tls[path_key]
+                if not isinstance(path_value, str) or not path_value.strip():
+                    raise ConfigurationError(
+                        f"control_plane.tls.{path_key} must be a non-empty string."
+                    )
+
+        if tls_enabled:
+            for path_key in ("certfile", "keyfile"):
+                path_value = tls.get(path_key)
+                if not isinstance(path_value, str) or not path_value.strip():
+                    raise ConfigurationError(
+                        f"control_plane.tls.{path_key} is required when TLS is enabled."
+                    )
+
+
+        authentication = control_plane.get("authentication", {})
+        if not isinstance(authentication, dict):
+            raise ConfigurationError(
+                "control_plane.authentication must be a mapping."
+            )
+
+        authentication_enabled = authentication.get("enabled", False)
+        if not isinstance(authentication_enabled, bool):
+            raise ConfigurationError(
+                "control_plane.authentication.enabled must be a Boolean."
+            )
+
+        if authentication_enabled and not tls_enabled:
+            raise ConfigurationError(
+                "control_plane.authentication.enabled requires TLS."
+            )
+
+
+        with self._lock:
             knowledge = deepcopy(
                 self._config.get("knowledge", {})
             )

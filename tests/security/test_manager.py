@@ -132,3 +132,48 @@ def test_clear():
     manager.clear()
 
     assert len(manager) == 0
+def test_reassign_username_removes_previous_identity_and_credentials():
+    manager = SecurityManager()
+
+    old_identity = SecurityIdentity("ID-1", "Old Admin", {Role.ADMIN})
+    new_identity = SecurityIdentity("ID-2", "New Admin", {Role.ADMIN})
+
+    manager.register_identity(
+        old_identity,
+        SecurityCredentials("alice", "old-secret"),
+    )
+    manager.register_identity(
+        new_identity,
+        SecurityCredentials("alice", "new-secret"),
+    )
+
+    assert manager.get_identity("ID-1") is None
+    assert manager.get_identity("ID-2") == new_identity
+    assert manager.authenticate_identity(
+        SecurityCredentials("alice", "old-secret")
+    ) is None
+    assert manager.authenticate_identity(
+        SecurityCredentials("alice", "new-secret")
+    ) == new_identity
+
+
+def test_reregister_identity_with_new_username_invalidates_old_credentials():
+    manager = SecurityManager()
+
+    identity = SecurityIdentity("ID-1", "Admin", {Role.ADMIN})
+
+    manager.register_identity(
+        identity,
+        SecurityCredentials("alice", "alice-secret"),
+    )
+    manager.register_identity(
+        identity,
+        SecurityCredentials("bob", "bob-secret"),
+    )
+
+    assert manager.authenticate_identity(
+        SecurityCredentials("alice", "alice-secret")
+    ) is None
+    assert manager.authenticate_identity(
+        SecurityCredentials("bob", "bob-secret")
+    ) == identity

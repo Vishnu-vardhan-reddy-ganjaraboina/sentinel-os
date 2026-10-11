@@ -1,0 +1,25 @@
+logging:
+  level: INFO
+  file: logs/sentinel.log
+
+kernel:
+  max_services: 100
+
+brain:
+  default_model: local
+
+storage:
+  backend: sqlite
+  database: data/sentinel.db
+
+knowledge:
+  backend: sqlite
+  database_path: data/sentinel-knowledge.db
+
+control_plane:
+  tls:
+    enabled: true
+    certfile: secrets/tls/server-cert.pem
+    keyfile: secrets/tls/server-key.pem
+  authentication:
+    enabled: true

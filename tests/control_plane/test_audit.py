@@ -232,3 +232,32 @@ def test_persistent_recorder_rejects_invalid_event() -> None:
 
     with pytest.raises(TypeError):
         recorder.record("invalid")  # type: ignore[arg-type]
+
+
+def test_audit_event_data_cannot_be_mutated() -> None:
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data={"service": "execution"},
+    )
+
+    with pytest.raises(TypeError):
+        event.data["service"] = "memory"
+
+
+def test_audit_event_nested_data_cannot_be_mutated() -> None:
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data={"metadata": {"role": "user"}, "tags": ["safe"]},
+    )
+
+    with pytest.raises(TypeError):
+        event.data["metadata"]["role"] = "admin"
+
+    with pytest.raises(AttributeError):
+        event.data["tags"].append("modified")

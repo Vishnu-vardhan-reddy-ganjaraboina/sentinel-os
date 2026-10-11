@@ -62,3 +62,7 @@ def test_wait_without_process():
 
     with pytest.raises(ProcessError):
         manager.wait()
+
+def test_shell_execution_is_rejected():
+    with pytest.raises(ValueError, match='shell=True is not supported'):
+        ProcessManager(shell=True)

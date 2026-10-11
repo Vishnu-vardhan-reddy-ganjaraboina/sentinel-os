@@ -71,6 +71,15 @@ class SecurityService:
         """
         return self._manager.authenticate(credentials)
 
+    def authenticate_identity(
+        self,
+        credentials: SecurityCredentials,
+    ) -> SecurityIdentity | None:
+        """
+        Authenticate credentials and return the registered identity.
+        """
+        return self._manager.authenticate_identity(credentials)
+
     def authorize(
         self,
         identity: SecurityIdentity,

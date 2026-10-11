@@ -270,3 +270,68 @@ def test_response_round_trips_audit_error() -> None:
     assert decoded == result
     assert decoded.success is True
     assert decoded.audit_error == "Audit database unavailable"
+
+
+def test_authenticated_request_round_trips_credentials():
+    from sentinel.security.credentials import SecurityCredentials
+
+    request = create_request()
+    credentials = SecurityCredentials("admin", "test-secret")
+
+    encoded = ControlPlaneProtocol.encode_request(
+        request,
+        credentials=credentials,
+    )
+
+    decoded_request, decoded_credentials = (
+        ControlPlaneProtocol.decode_authenticated_request(encoded)
+    )
+
+    assert decoded_request == request
+    assert decoded_credentials == credentials
+
+
+def test_authenticated_request_keeps_credentials_separate_from_context():
+    import json
+
+    from sentinel.security.credentials import SecurityCredentials
+
+    request = create_request()
+    credentials = SecurityCredentials("admin", "test-secret")
+
+    encoded = ControlPlaneProtocol.encode_request(
+        request,
+        credentials=credentials,
+    )
+    payload = json.loads(encoded)
+
+    assert payload["auth"] == {
+        "username": "admin",
+        "secret": "test-secret",
+    }
+    assert payload["context"]["caller_id"] == request.context.caller_id
+
+
+def test_authenticated_request_rejects_malformed_credentials():
+    import json
+
+    from sentinel.control import ControlProtocolError
+
+    payload = {
+        "version": ControlPlaneProtocol.VERSION,
+        "type": "request",
+        "command": KernelCommand.SYSTEM_HEALTH.value,
+        "context": {
+            "caller_id": "test-client",
+            "caller_type": "cli",
+        },
+        "data": {},
+        "auth": {
+            "username": "admin",
+        },
+    }
+
+    with pytest.raises(ControlProtocolError):
+        ControlPlaneProtocol.decode_authenticated_request(
+            json.dumps(payload)
+        )

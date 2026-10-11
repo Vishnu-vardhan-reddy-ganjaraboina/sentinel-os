@@ -6,11 +6,15 @@ from __future__ import annotations
 
 import math
 import socket
+import ssl
 import threading
 import time
 from collections import deque
 
 from sentinel.control.exceptions import ControlProtocolError
+from sentinel.control_plane.callers import ControlCallerType
+from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
@@ -43,9 +47,29 @@ class ControlPlaneTransportServer:
         listen_backlog: int = 5,
         max_connections_per_minute: int = 60,
         max_total_connections_per_minute: int = 300,
+        ssl_context: ssl.SSLContext | None = None,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
+
+        if ssl_context is not None and not isinstance(
+            ssl_context, ssl.SSLContext
+        ):
+            raise TypeError("ssl_context must be an SSLContext or None.")
+
+        from sentinel.control_plane.security_authorizer import (
+            SecurityControlAuthorizer,
+        )
+
+        authorizer = control_plane.controller.authorizer
+        security_backed = isinstance(
+            authorizer, SecurityControlAuthorizer
+        )
+
+        if security_backed and ssl_context is None:
+            raise ValueError(
+                "TLS is required for security-backed Control Plane servers."
+            )
 
         if not isinstance(host, str) or not host.strip():
             raise ValueError("host must not be empty.")
@@ -91,6 +115,8 @@ class ControlPlaneTransportServer:
             )
 
         self._control_plane = control_plane
+        self._ssl_context = ssl_context
+        self._security_backed = security_backed
         self._host = host
         self._port = port
         self._listen_backlog = listen_backlog
@@ -229,25 +255,57 @@ class ControlPlaneTransportServer:
                     pass
                 break
 
+            transport_connection = connection
             try:
                 client_ip = address[0]
                 if self._is_rate_limited(client_ip):
-                    self._discard_pending_message(connection)
-                    self._send_protocol_error(
+                    # Do not perform a TLS handshake for rate-limited clients.
+                    # A plaintext protocol error must never be sent to a TLS peer.
+                    if self._ssl_context is None:
+                        self._discard_pending_message(connection)
+                        self._send_protocol_error(
+                            connection,
+                            "Connection rate limit exceeded.",
+                        )
+                    continue
+
+                if self._ssl_context is not None:
+                    connection.settimeout(self._read_timeout)
+                    transport_connection = self._ssl_context.wrap_socket(
                         connection,
-                        "Connection rate limit exceeded.",
+                        server_side=True,
+                        do_handshake_on_connect=False,
                     )
-                else:
-                    self._handle_connection(connection)
+                    with self._lock:
+                        if self._active_connection is connection:
+                            self._active_connection = transport_connection
+
+                    transport_connection.settimeout(self._read_timeout)
+                    transport_connection.do_handshake()
+
+                self._handle_connection(transport_connection)
+            except (OSError, ssl.SSLError, TimeoutError):
+                # A failed TLS handshake or disconnected client must not
+                # terminate the server's listening thread.
+                if self._stop_event.is_set():
+                    break
             finally:
                 with self._lock:
-                    if self._active_connection is connection:
+                    if self._active_connection in (
+                        connection, transport_connection
+                    ):
                         self._active_connection = None
 
                 try:
-                    connection.close()
+                    transport_connection.close()
                 except OSError:
                     pass
+
+                if transport_connection is not connection:
+                    try:
+                        connection.close()
+                    except OSError:
+                        pass
 
     def _is_rate_limited(self, client_ip: str) -> bool:
         now = time.monotonic()
@@ -322,7 +380,41 @@ class ControlPlaneTransportServer:
         try:
             deadline = time.monotonic() + self._message_timeout
             message = self._receive_message(connection, deadline)
-            request = ControlPlaneProtocol.decode_request(message)
+            request, credentials = (
+                ControlPlaneProtocol.decode_authenticated_request(message)
+            )
+
+            if self._security_backed:
+                authorizer = self._control_plane.controller.authorizer
+                if credentials is None:
+                    self._send_protocol_error(
+                        connection,
+                        "Authentication required or invalid credentials.",
+                    )
+                    return
+
+                identity = authorizer.security.authenticate_identity(
+                    credentials
+                )
+                if identity is None:
+                    self._send_protocol_error(
+                        connection,
+                        "Authentication required or invalid credentials.",
+                    )
+                    return
+
+                # Never authorize using caller identity or caller type
+                # supplied by the remote client.
+                verified_context = ControlContext(
+                    caller_id=identity.id,
+                    caller_type=ControlCallerType.API,
+                    metadata=request.context.metadata,
+                )
+                request = ControlRequest(
+                    command=request.command,
+                    context=verified_context,
+                    data=request.data,
+                )
 
             result = self._control_plane.execute_request(request)
 
@@ -334,10 +426,11 @@ class ControlPlaneTransportServer:
         except ControlProtocolError as exc:
             self._send_protocol_error(connection, str(exc))
 
-        except Exception as exc:
+        except Exception:
+            # Do not disclose internal exception details to remote clients.
             self._send_protocol_error(
                 connection,
-                f"Control Plane request failed: {exc}",
+                "Control Plane request failed.",
             )
 
     def _receive_message(

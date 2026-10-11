@@ -302,3 +302,60 @@ def test_query_rejects_invalid_query(tmp_path: Path) -> None:
         store.query("invalid")  # type: ignore[arg-type]
 
     store.close()
+
+
+def test_nested_audit_data_round_trips_through_sqlite(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteControlAuditStore(tmp_path / "nested-audit.db")
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data={
+            "metadata": {"role": "user"},
+            "tags": ["safe", "verified"],
+        },
+    )
+
+    store.append(event)
+    restored = store.events()[0]
+
+    assert restored.data["metadata"]["role"] == "user"
+    assert restored.data["tags"] == ("safe", "verified")
+    store.close()
+
+
+def test_append_rejects_non_json_audit_data(tmp_path: Path) -> None:
+    store = SQLiteControlAuditStore(tmp_path / "invalid-audit.db")
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data={"invalid": object()},
+    )
+
+    with pytest.raises(TypeError):
+        store.append(event)
+
+    store.close()
+
+
+def test_append_rejects_non_string_audit_data_keys(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteControlAuditStore(tmp_path / "invalid-key-audit.db")
+    event = ControlAuditEvent(
+        caller_id="user",
+        caller_type="user",
+        command="service.status",
+        success=True,
+        data={1: "value"},
+    )
+
+    with pytest.raises(TypeError):
+        store.append(event)
+
+    store.close()

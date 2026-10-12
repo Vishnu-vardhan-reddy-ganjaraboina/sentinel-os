@@ -89,6 +89,30 @@ def test_client_rejects_invalid_timeout() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "timeout",
+    [float("nan"), float("inf"), float("-inf"), -1],
+)
+def test_client_rejects_non_finite_or_non_positive_timeout(
+    timeout: float,
+) -> None:
+    with pytest.raises(ValueError):
+        ControlPlaneTransportClient(
+            host="127.0.0.1",
+            port=12345,
+            timeout=timeout,
+        )
+
+
+def test_client_rejects_boolean_timeout() -> None:
+    with pytest.raises(TypeError):
+        ControlPlaneTransportClient(
+            host="127.0.0.1",
+            port=12345,
+            timeout=True,
+        )
+
+
 def test_client_rejects_invalid_request() -> None:
     client = ControlPlaneTransportClient(
         host="127.0.0.1",
@@ -247,6 +271,7 @@ def test_client_accepts_tls_context_and_credentials():
 
 def test_client_rejects_tls_context_without_certificate_verification():
     import ssl
+
     import pytest
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -263,6 +288,7 @@ def test_client_rejects_tls_context_without_certificate_verification():
 
 def test_client_rejects_tls_context_without_hostname_verification():
     import ssl
+
     import pytest
 
     context = ssl.create_default_context()

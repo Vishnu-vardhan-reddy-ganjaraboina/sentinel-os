@@ -4,6 +4,7 @@ TCP client for the Sentinel Kernel Control Plane transport.
 
 from __future__ import annotations
 
+import math
 import socket
 import ssl
 
@@ -47,11 +48,16 @@ class ControlPlaneTransportClient:
         if port < 1 or port > 65535:
             raise ValueError("port must be between 1 and 65535.")
 
-        if not isinstance(timeout, (int, float)):
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise TypeError("timeout must be a number.")
 
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than zero.")
+        try:
+            valid_timeout = math.isfinite(timeout) and timeout > 0
+        except OverflowError:
+            valid_timeout = False
+
+        if not valid_timeout:
+            raise ValueError("timeout must be a finite positive number.")
 
         if ssl_context is not None and not isinstance(
             ssl_context,

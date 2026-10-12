@@ -177,3 +177,30 @@ def test_reregister_identity_with_new_username_invalidates_old_credentials():
     assert manager.authenticate_identity(
         SecurityCredentials("bob", "bob-secret")
     ) == identity
+
+
+def test_unregister_identity_rejects_mismatched_username():
+    manager = SecurityManager()
+
+    alice = SecurityIdentity("ID-1", "Alice", {Role.ADMIN})
+    bob = SecurityIdentity("ID-2", "Bob", {Role.USER})
+
+    manager.register_identity(
+        alice,
+        SecurityCredentials("alice", "alice-secret"),
+    )
+    manager.register_identity(
+        bob,
+        SecurityCredentials("bob", "bob-secret"),
+    )
+
+    manager.unregister_identity("ID-1", "bob")
+
+    assert manager.get_identity("ID-1") == alice
+    assert manager.get_identity("ID-2") == bob
+    assert manager.authenticate_identity(
+        SecurityCredentials("alice", "alice-secret")
+    ) == alice
+    assert manager.authenticate_identity(
+        SecurityCredentials("bob", "bob-secret")
+    ) == bob

@@ -65,20 +65,15 @@ class SecurityManager:
         username: str,
     ) -> None:
         """
-        Remove an identity and its credentials.
+        Remove an identity only when the supplied username belongs to it.
         """
         registered_id = self._identity_ids_by_username.get(username)
-        if registered_id == identity_id:
-            self._identity_ids_by_username.pop(username, None)
-            self._authenticator.unregister(username)
+        if registered_id != identity_id:
+            return
 
+        self._identity_ids_by_username.pop(username, None)
+        self._authenticator.unregister(username)
         self._identities.pop(identity_id, None)
-        for registered_username, registered_id in list(
-            self._identity_ids_by_username.items(),
-        ):
-            if registered_id == identity_id:
-                self._identity_ids_by_username.pop(registered_username, None)
-                self._authenticator.unregister(registered_username)
 
     def get_identity(
         self,

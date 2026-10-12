@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import select
-import ssl
 import socket
+import ssl
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -905,3 +905,106 @@ def test_unexpected_exception_is_not_exposed_to_client() -> None:
     finally:
         server.control_plane.execute_request = original_execute
         server.stop()
+
+
+
+def test_stalled_client_does_not_delay_healthy_client() -> None:
+    server = create_server(read_timeout=0.8)
+    server.start()
+    stalled_connection = None
+
+    try:
+        wait_for_server(server)
+
+        stalled_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        stalled_connection.sendall(b'{"version":1,"type":"request"')
+
+        # Give the server time to accept the stalled client.
+        time.sleep(0.1)
+
+        started = time.monotonic()
+        healthy_result = send_request(
+            server,
+            ControlRequest(
+                command=KernelCommand.SYSTEM_STATUS,
+                context=ControlContext(
+                    caller_id="healthy-client",
+                    caller_type="cli",
+                ),
+            ),
+        )
+        elapsed = time.monotonic() - started
+
+        assert healthy_result.success is True
+        assert elapsed < 0.5, (
+            "A stalled client delayed a healthy request: "
+            f"{elapsed:.3f}s."
+        )
+    finally:
+        if stalled_connection is not None:
+            stalled_connection.close()
+        server.stop()
+
+
+
+def test_server_rejects_restart_while_worker_is_alive() -> None:
+    import threading
+
+    server = create_server()
+    request_started = threading.Event()
+    release_request = threading.Event()
+    original_execute = server.control_plane.execute_request
+
+    def blocked_execute(request: ControlRequest) -> ControlResult:
+        request_started.set()
+        if not release_request.wait(timeout=10.0):
+            raise TimeoutError("Test request release timed out.")
+        return original_execute(request)
+
+    server.control_plane.execute_request = blocked_execute
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        connection.sendall(
+            ControlPlaneProtocol.encode_request(
+                ControlRequest(
+                    command=KernelCommand.SYSTEM_STATUS,
+                    context=ControlContext(
+                        caller_id="blocked-client",
+                        caller_type="cli",
+                    ),
+                )
+            )
+        )
+
+        assert request_started.wait(timeout=2.0), (
+            "The request worker did not enter blocked execution."
+        )
+
+        server.stop()
+
+        assert any(worker.is_alive() for worker in server._worker_threads), (
+            "Expected the deliberately blocked worker to remain alive."
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="client workers are still shutting down",
+        ):
+            server.start()
+    finally:
+        release_request.set()
+        if connection is not None:
+            connection.close()
+        server.stop()
+        server.control_plane.execute_request = original_execute

@@ -142,6 +142,9 @@ class ControlPlaneTransportServer:
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._active_connection: socket.socket | None = None
+        self._active_connections: set[socket.socket] = set()
+        self._worker_threads: set[threading.Thread] = set()
+        self._request_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
 
@@ -170,6 +173,12 @@ class ControlPlaneTransportServer:
             if self.running:
                 raise RuntimeError("Control Plane transport server is already running.")
 
+            if any(worker.is_alive() for worker in self._worker_threads):
+                raise RuntimeError(
+                    "Control Plane transport server cannot restart while "
+                    "client workers are still shutting down."
+                )
+
             self._stop_event.clear()
 
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -192,16 +201,16 @@ class ControlPlaneTransportServer:
             if (
                 not self.running
                 and self._socket is None
-                and self._active_connection is None
+                and not self._active_connections
             ):
                 return
 
             self._stop_event.set()
-
             server_socket = self._socket
             self._socket = None
-            active_connection = self._active_connection
-            thread = self._thread
+            active_connections = tuple(self._active_connections)
+            listener_thread = self._thread
+            worker_threads = tuple(self._worker_threads)
 
         if server_socket is not None:
             try:
@@ -209,24 +218,35 @@ class ControlPlaneTransportServer:
             except OSError:
                 pass
 
-        if active_connection is not None:
+        for connection in active_connections:
             try:
-                active_connection.shutdown(socket.SHUT_RDWR)
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                connection.close()
             except OSError:
                 pass
 
-            try:
-                active_connection.close()
-            except OSError:
-                pass
+        current = threading.current_thread()
+        if listener_thread is not None and listener_thread is not current:
+            listener_thread.join(timeout=2.0)
 
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=2.0)
+        for worker in worker_threads:
+            if worker is not current:
+                worker.join(timeout=2.0)
 
         with self._lock:
-            if thread is not None and not thread.is_alive():
-                if self._thread is thread:
+            if listener_thread is not None and not listener_thread.is_alive():
+                if self._thread is listener_thread:
                     self._thread = None
+
+            self._active_connection = next(
+                iter(self._active_connections), None
+            )
+            self._worker_threads = {
+                worker for worker in self._worker_threads if worker.is_alive()
+            }
 
     def _serve(self) -> None:
         with self._lock:
@@ -246,66 +266,103 @@ class ControlPlaneTransportServer:
             with self._lock:
                 stopping = self._stop_event.is_set()
                 if not stopping:
-                    self._active_connection = connection
+                    self._active_connections.add(connection)
+                    if self._active_connection is None:
+                        self._active_connection = connection
 
             if stopping:
-                try:
-                    connection.close()
-                except OSError:
-                    pass
+                connection.close()
                 break
 
-            transport_connection = connection
-            try:
-                client_ip = address[0]
-                if self._is_rate_limited(client_ip):
-                    # Do not perform a TLS handshake for rate-limited clients.
-                    # A plaintext protocol error must never be sent to a TLS peer.
-                    if self._ssl_context is None:
-                        self._discard_pending_message(connection)
-                        self._send_protocol_error(
-                            connection,
-                            "Connection rate limit exceeded.",
-                        )
-                    continue
+            worker = threading.Thread(
+                target=self._handle_client,
+                args=(connection, address),
+                name="sentinel-control-plane-client",
+                daemon=True,
+            )
 
-                if self._ssl_context is not None:
-                    connection.settimeout(self._read_timeout)
-                    transport_connection = self._ssl_context.wrap_socket(
-                        connection,
-                        server_side=True,
-                        do_handshake_on_connect=False,
-                    )
-                    with self._lock:
-                        if self._active_connection is connection:
-                            self._active_connection = transport_connection
-
-                    transport_connection.settimeout(self._read_timeout)
-                    transport_connection.do_handshake()
-
-                self._handle_connection(transport_connection)
-            except (OSError, ssl.SSLError, TimeoutError):
-                # A failed TLS handshake or disconnected client must not
-                # terminate the server's listening thread.
+            with self._lock:
                 if self._stop_event.is_set():
-                    break
-            finally:
-                with self._lock:
-                    if self._active_connection in (
-                        connection, transport_connection
-                    ):
-                        self._active_connection = None
+                    self._active_connections.discard(connection)
+                    if self._active_connection is connection:
+                        self._active_connection = next(
+                            iter(self._active_connections), None
+                        )
+                    should_start = False
+                else:
+                    self._worker_threads.add(worker)
+                    should_start = True
 
+            if not should_start:
+                connection.close()
+                continue
+
+            try:
+                worker.start()
+            except RuntimeError:
+                with self._lock:
+                    self._worker_threads.discard(worker)
+                    self._active_connections.discard(connection)
+                    if self._active_connection is connection:
+                        self._active_connection = next(
+                            iter(self._active_connections), None
+                        )
+                connection.close()
+
+    def _handle_client(
+        self,
+        connection: socket.socket,
+        address: tuple[str, int],
+    ) -> None:
+        transport_connection = connection
+        try:
+            if self._is_rate_limited(address[0]):
+                if self._ssl_context is None:
+                    self._discard_pending_message(connection)
+                    self._send_protocol_error(
+                        connection,
+                        "Connection rate limit exceeded.",
+                    )
+                return
+
+            if self._ssl_context is not None:
+                connection.settimeout(self._read_timeout)
+                transport_connection = self._ssl_context.wrap_socket(
+                    connection,
+                    server_side=True,
+                    do_handshake_on_connect=False,
+                )
+                with self._lock:
+                    if self._stop_event.is_set():
+                        return
+
+                    self._active_connections.discard(connection)
+                    self._active_connections.add(transport_connection)
+                    if self._active_connection is connection:
+                        self._active_connection = transport_connection
+
+                transport_connection.settimeout(self._read_timeout)
+                transport_connection.do_handshake()
+
+            if not self._stop_event.is_set():
+                self._handle_connection(transport_connection)
+        except (OSError, ssl.SSLError, TimeoutError):
+            pass
+        finally:
+            for active in (connection, transport_connection):
                 try:
-                    transport_connection.close()
+                    active.close()
                 except OSError:
                     pass
 
-                if transport_connection is not connection:
-                    try:
-                        connection.close()
-                    except OSError:
-                        pass
+            with self._lock:
+                self._active_connections.discard(connection)
+                self._active_connections.discard(transport_connection)
+                if self._active_connection in (connection, transport_connection):
+                    self._active_connection = next(
+                        iter(self._active_connections), None
+                    )
+                self._worker_threads.discard(threading.current_thread())
 
     def _is_rate_limited(self, client_ip: str) -> bool:
         now = time.monotonic()
@@ -416,7 +473,8 @@ class ControlPlaneTransportServer:
                     data=request.data,
                 )
 
-            result = self._control_plane.execute_request(request)
+            with self._request_lock:
+                result = self._control_plane.execute_request(request)
 
             response = ControlPlaneProtocol.encode_response(result)
             connection.sendall(response)

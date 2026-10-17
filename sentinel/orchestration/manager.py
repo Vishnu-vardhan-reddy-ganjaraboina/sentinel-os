@@ -271,9 +271,9 @@ class OrchestrationManager:
             result_context["memories"] = memory_context
             result_context["knowledge"] = knowledge_context
 
-            context_data = result_context.get("data")
-            if isinstance(context_data, dict):
-                discovery = context_data.get("capability_discovery")
+            result_data = result_context.get("data")
+            if isinstance(result_data, dict):
+                discovery = result_data.get("capability_discovery")
                 if (
                     isinstance(discovery, dict)
                     and discovery.get("selection_reason")

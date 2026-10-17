@@ -16,6 +16,7 @@ from sentinel.control_plane.callers import ControlCallerType
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
 
@@ -443,6 +444,13 @@ class ControlPlaneTransportServer:
 
             if self._security_backed:
                 authorizer = self._control_plane.controller.authorizer
+                if not isinstance(authorizer, SecurityControlAuthorizer):
+                    self._send_protocol_error(
+                        connection,
+                        "Security authorizer is not configured correctly.",
+                    )
+                    return
+
                 if credentials is None:
                     self._send_protocol_error(
                         connection,

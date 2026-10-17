@@ -20,8 +20,6 @@ from sentinel.security.identity import SecurityIdentity
 from sentinel.security.service import SecurityService
 
 
-
-
 def create_client_ssl_context() -> ssl.SSLContext:
     cert_path = (
         Path(__file__).resolve().parents[1]

@@ -15,14 +15,15 @@ from sentinel.control_plane.controller import KernelController
 from sentinel.control_plane.endpoint_registry import (
     ControlPlaneEndpointRegistry,
 )
-from sentinel.control_plane.service import ControlPlane
+from sentinel.control_plane.interfaces import ControlAuthorizerProtocol
 from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
-from sentinel.security.service import SecurityService
+from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport_server import (
     ControlPlaneTransportServer,
 )
 from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
+from sentinel.security.service import SecurityService
 from sentinel.system import System
 
 
@@ -178,6 +179,7 @@ class SystemFactory:
             caller_type="system",
         )
 
+        authorizer: ControlAuthorizerProtocol
         if self._security_service is not None:
             authorizer = SecurityControlAuthorizer(
                 self._security_service,

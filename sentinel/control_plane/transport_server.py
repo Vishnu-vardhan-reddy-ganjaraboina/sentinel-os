@@ -16,6 +16,7 @@ from sentinel.control_plane.callers import ControlCallerType
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
 
@@ -183,6 +184,7 @@ class ControlPlaneTransportServer:
 
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_socket.settimeout(0.2)
             server_socket.bind((self._host, self._port))
             server_socket.listen(self._listen_backlog)
 
@@ -258,6 +260,10 @@ class ControlPlaneTransportServer:
         while not self._stop_event.is_set():
             try:
                 connection, address = server_socket.accept()
+            except TimeoutError:
+                if self._stop_event.is_set():
+                    break
+                continue
             except OSError:
                 if self._stop_event.is_set():
                     break
@@ -443,6 +449,13 @@ class ControlPlaneTransportServer:
 
             if self._security_backed:
                 authorizer = self._control_plane.controller.authorizer
+                if not isinstance(authorizer, SecurityControlAuthorizer):
+                    self._send_protocol_error(
+                        connection,
+                        "Security authorizer is not configured correctly.",
+                    )
+                    return
+
                 if credentials is None:
                     self._send_protocol_error(
                         connection,

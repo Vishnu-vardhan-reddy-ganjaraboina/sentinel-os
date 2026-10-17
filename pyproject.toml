@@ -13,7 +13,7 @@ authors = [
     { name = "Vishnu Vardhan Reddy" }
 ]
 
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "jsonschema>=4.23,<5"]
 
 [project.scripts]
 sentinel = "sentinel.cli.main:main"
@@ -24,6 +24,8 @@ dev = [
     "pytest-cov>=7.0",
     "ruff>=0.12",
     "mypy>=1.17",
+    "types-jsonschema>=4.25",
+    "types-PyYAML>=6.0",
 ]
 
 # -------------------------------------------------------------------

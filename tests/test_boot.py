@@ -15,10 +15,10 @@ from sentinel.boot import (
 )
 from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
 from sentinel.infrastructure.configuration import Configuration
-from sentinel.security.service import SecurityService
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.platform import Platform
+from sentinel.security.service import SecurityService
 from sentinel.system import System
 
 

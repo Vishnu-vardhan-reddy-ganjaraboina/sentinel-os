@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-
 if TYPE_CHECKING:
     from sentinel.control_plane.audit_store import ControlAuditStore
 

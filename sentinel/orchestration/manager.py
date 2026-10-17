@@ -7,8 +7,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from sentinel.brain.intent_resolver import DefaultIntentResolver
 from sentinel.brain.manager import BrainManager
 from sentinel.capabilities.manager import CapabilityManager
+from sentinel.capabilities.validation import (
+    CapabilityArgumentValidationError,
+    validate_capability_arguments,
+)
 from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.memory.service import MemoryService
 from sentinel.orchestration.exceptions import (
@@ -46,19 +51,20 @@ class OrchestrationManager:
         knowledge: KnowledgeService | None = None,
     ) -> None:
         self._handler = handler
-
-        self._brain = (
-            brain
-            if brain is not None
-            else BrainManager()
-        )
-
         self._capabilities = (
             capabilities
             if capabilities is not None
             else CapabilityManager()
         )
-
+        self._brain = (
+            brain
+            if brain is not None
+            else BrainManager(
+                intent_resolver=DefaultIntentResolver(
+                    capabilities=self._capabilities,
+                )
+            )
+        )
         self._security = (
             security
             if security is not None
@@ -265,6 +271,34 @@ class OrchestrationManager:
             result_context["memories"] = memory_context
             result_context["knowledge"] = knowledge_context
 
+            result_data = result_context.get("data")
+            if isinstance(result_data, dict):
+                discovery = result_data.get("capability_discovery")
+                if (
+                    isinstance(discovery, dict)
+                    and discovery.get("selection_reason")
+                    == "needs_clarification"
+                ):
+                    missing = discovery.get("missing_required_arguments")
+                    capability_id = discovery.get("capability_id")
+
+                    if (
+                        isinstance(missing, list)
+                        and missing
+                        and all(isinstance(item, str) for item in missing)
+                        and isinstance(capability_id, str)
+                    ):
+                        names = ", ".join(missing)
+                        return {
+                            "status": "needs_clarification",
+                            "capability_id": capability_id,
+                            "missing_arguments": missing,
+                            "message": (
+                                "Please provide the required information: "
+                                f"{names}."
+                            ),
+                        }
+
         return self._execute_plan(result)
 
     def _execute_plan(
@@ -318,15 +352,32 @@ class OrchestrationManager:
                 capability_id,
             )
 
-            self._authorize_capability(
-                capability_id,
-            )
+            self._authorize_capability(capability_id)
 
-            capability_result = self._capabilities.execute(
-                capability_id,
-                **arguments,
-            )
-            
+            capability = self._capabilities.registry.get(capability_id)
+
+            try:
+                validate_capability_arguments(
+                    capability.metadata.input_schema,
+                    arguments,
+                )
+            except CapabilityArgumentValidationError as exc:
+                raise OrchestrationExecutionError(
+                    f"Invalid arguments for capability '{capability_id}': "
+                    f"{exc}"
+                ) from exc
+
+            try:
+                capability_result = self._capabilities.execute(
+                    capability_id,
+                    **arguments,
+                )
+            except OrchestrationExecutionError:
+                raise
+            except Exception as exc:
+                raise OrchestrationExecutionError(
+                    f"Capability '{capability_id}' execution failed."
+                ) from exc
 
             capability_results.append(
                 {

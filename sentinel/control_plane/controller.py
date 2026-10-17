@@ -22,7 +22,6 @@ from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.validator import ControlRequestValidator
 
-
 _SENSITIVE_AUDIT_KEYS = {
     "password",
     "passwd",
@@ -483,7 +482,7 @@ class KernelController:
         """Preserve the operation result when audit recording fails."""
         try:
             self._record_audit(request, result)
-        except Exception as exc:
+        except Exception:
             return ControlResult(
                 success=result.success,
                 command=result.command,

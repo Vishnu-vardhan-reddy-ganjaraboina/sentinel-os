@@ -90,7 +90,8 @@ class CLIKernelControl:
             "SENTINEL_ADMIN_SECRET",
             "SENTINEL_TLS_CA_FILE",
         )
-        client_options: dict[str, object] = {}
+        ssl_context: ssl.SSLContext | None = None
+        credentials: SecurityCredentials | None = None
         if any(key in self._environ for key in security_keys):
             username = self._environ.get("SENTINEL_ADMIN_USERNAME", "")
             secret = self._environ.get("SENTINEL_ADMIN_SECRET", "")
@@ -116,16 +117,20 @@ class CLIKernelControl:
                 raise RuntimeError(
                     "TLS certificate and hostname verification are required."
                 )
-            client_options = {
-                "ssl_context": ssl_context,
-                "credentials": SecurityCredentials(username, secret),
-            }
+            credentials = SecurityCredentials(username, secret)
 
-        client = ControlPlaneTransportClient(
-            host=endpoint.host,
-            port=endpoint.port,
-            **client_options,
-        )
+        if ssl_context is None:
+            client = ControlPlaneTransportClient(
+                host=endpoint.host,
+                port=endpoint.port,
+            )
+        else:
+            client = ControlPlaneTransportClient(
+                host=endpoint.host,
+                port=endpoint.port,
+                ssl_context=ssl_context,
+                credentials=credentials,
+            )
 
         context = ControlContext(
             caller_id="cli",

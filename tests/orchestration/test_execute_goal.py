@@ -199,6 +199,57 @@ def test_execute_goal_executes_resolved_capability() -> None:
     }
 
 
+class RequiredArgumentCapability(BaseCapability):
+    """Capability used to test missing-argument clarification."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            CapabilityMetadata(
+                capability_id="database.query",
+                name="Database Query",
+                description="Handles database query requests.",
+                category=CapabilityCategory.CUSTOM,
+                input_schema={
+                    "type": "object",
+                    "properties": {"table": {"type": "string"}},
+                    "required": ["table"],
+                    "additionalProperties": False,
+                },
+            )
+        )
+        self.run_called = False
+
+    def run(self, **kwargs: object) -> dict[str, object]:
+        self.run_called = True
+        return dict(kwargs)
+
+
+def test_execute_goal_requests_missing_arguments_without_execution() -> None:
+    capabilities = CapabilityManager()
+    capability = RequiredArgumentCapability()
+    capabilities.register(capability)
+    security, identity = create_authorized_security()
+
+    manager = OrchestrationManager(
+        capabilities=capabilities,
+        security=security,
+        identity=identity,
+    )
+
+    result = manager.execute_goal(
+        request_id="req.goal.clarification",
+        input="database query",
+    )
+
+    assert result.success is True
+    assert isinstance(result.data, dict)
+    assert result.data["status"] == "needs_clarification"
+    assert result.data["capability_id"] == "database.query"
+    assert result.data["missing_arguments"] == ["table"]
+    assert "table" in result.data["message"]
+    assert capability.run_called is False
+
+
 def test_execute_goal_requires_capability_authorization() -> None:
     capabilities = CapabilityManager()
 

@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import ssl
 from pathlib import Path
 
 import pytest
@@ -6,10 +8,19 @@ import pytest
 from sentinel.boot import BootConfiguration
 from sentinel.boot.system_factory import SystemFactory
 from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.request import ControlRequest
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
 from sentinel.control_plane.service import ControlPlane
+from sentinel.control_plane.transport_client import ControlPlaneTransportClient
+from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.platform import Platform
+from sentinel.security.constants import Permission, Role
+from sentinel.security.credentials import SecurityCredentials
+from sentinel.security.identity import SecurityIdentity
+from sentinel.security.service import SecurityService
 from sentinel.system import System
 
 
@@ -268,20 +279,6 @@ def test_control_plane_composition_does_not_start_kernel() -> None:
 
     assert system.running is False
     assert system.kernel.health()["healthy"] is False
-import ssl
-
-from sentinel.infrastructure.configuration import Configuration
-from sentinel.control_plane.commands import KernelCommand
-from sentinel.control_plane.context import ControlContext
-from sentinel.control_plane.request import ControlRequest
-from sentinel.control_plane.transport_client import ControlPlaneTransportClient
-from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
-from sentinel.security.service import SecurityService
-from sentinel.security.constants import Permission, Role
-from sentinel.security.credentials import SecurityCredentials
-from sentinel.security.identity import SecurityIdentity
-
-
 def test_factory_configures_tls_transport_from_configuration() -> None:
     cert_path = (
         Path(__file__).resolve().parent

@@ -184,6 +184,7 @@ class ControlPlaneTransportServer:
 
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_socket.settimeout(0.2)
             server_socket.bind((self._host, self._port))
             server_socket.listen(self._listen_backlog)
 
@@ -259,6 +260,10 @@ class ControlPlaneTransportServer:
         while not self._stop_event.is_set():
             try:
                 connection, address = server_socket.accept()
+            except TimeoutError:
+                if self._stop_event.is_set():
+                    break
+                continue
             except OSError:
                 if self._stop_event.is_set():
                     break

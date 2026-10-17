@@ -13,7 +13,7 @@ authors = [
     { name = "Vishnu Vardhan Reddy" }
 ]
 
-dependencies = []
+dependencies = ["jsonschema>=4.23,<5"]
 
 [project.scripts]
 sentinel = "sentinel.cli.main:main"

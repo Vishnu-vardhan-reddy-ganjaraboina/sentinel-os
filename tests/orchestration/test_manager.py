@@ -880,3 +880,15 @@ def test_intent_capability_still_requires_authorization() -> None:
 
     with pytest.raises(AuthorizationError):
         manager.execute(request)
+
+def test_default_brain_discovers_registered_capability() -> None:
+    """Default orchestration wires discovery to its capability manager."""
+    manager = OrchestrationManager()
+    capability = EchoCapability()
+    manager.capabilities.register(capability)
+
+    intent = manager.brain.resolve_intent("system echo")
+
+    assert intent.capability_id == "system.echo"
+    assert intent.context["capability_discovery"]["selected"] is True
+    assert capability.enabled is True

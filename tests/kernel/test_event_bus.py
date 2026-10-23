@@ -1,3 +1,4 @@
+import threading
 
 from sentinel.kernel.event import Event
 from sentinel.kernel.event_bus import EventBus
@@ -97,3 +98,62 @@ def test_handler_failure():
     )
 
     assert called
+
+
+def test_concurrent_duplicate_subscription_registers_once():
+    bus = EventBus()
+
+    def handler(event: Event):
+        pass
+
+    threads = [
+        threading.Thread(
+            target=bus.subscribe,
+            args=("Started", handler),
+        )
+        for _ in range(20)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert bus.subscriber_count("Started") == 1
+
+
+def test_publish_uses_subscriber_snapshot():
+    bus = EventBus()
+
+    received: list[str] = []
+
+    def first_handler(event: Event):
+        received.append("first")
+
+        bus.unsubscribe("Started", second_handler)
+        bus.subscribe("Started", third_handler)
+
+    def second_handler(event: Event):
+        received.append("second")
+
+    def third_handler(event: Event):
+        received.append("third")
+
+    bus.subscribe("Started", first_handler)
+    bus.subscribe("Started", second_handler)
+
+    event = Event(
+        name="Started",
+        source="Logger",
+    )
+
+    bus.publish(event)
+
+    assert received == ["first", "second"]
+
+    received.clear()
+
+    bus.publish(event)
+
+    assert received == ["first", "third"]

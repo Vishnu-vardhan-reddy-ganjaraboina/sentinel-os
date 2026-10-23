@@ -4,6 +4,7 @@ from sentinel.kernel.dependency_resolver import DependencyResolver
 from sentinel.kernel.exceptions import (
     CircularDependencyError,
     DependencyNotFoundError,
+    DuplicateServiceError,
 )
 from sentinel.kernel.service import Service
 
@@ -48,3 +49,15 @@ def test_cycle():
 
     with pytest.raises(CircularDependencyError):
         DependencyResolver().resolve([a, b])
+
+
+
+def test_duplicate_service_names_are_rejected():
+    first = Dummy("database")
+    second = Dummy("database")
+
+    with pytest.raises(
+        DuplicateServiceError,
+        match="already registered",
+    ):
+        DependencyResolver().resolve([first, second])

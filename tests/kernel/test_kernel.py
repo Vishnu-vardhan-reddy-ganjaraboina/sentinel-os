@@ -525,3 +525,142 @@ def test_start_records_rollback_failure_without_hiding_startup_error() -> None:
 
     notes = getattr(exc_info.value, "__notes__", [])
     assert any("cleanup failed" in note for note in notes)
+
+
+def test_restart_failure_sets_service_to_failed() -> None:
+    kernel = Kernel()
+
+    class FailingRestartService(Service):
+        def __init__(self) -> None:
+            super().__init__("failing")
+            self.initialize_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+            if self.initialize_calls == 2:
+                raise RuntimeError("restart failed")
+
+        def shutdown(self) -> None:
+            pass
+
+    service = FailingRestartService()
+    kernel.register(service)
+
+    kernel.start("failing")
+
+    with pytest.raises(RuntimeError, match="restart failed"):
+        kernel.restart("failing")
+
+    assert service.initialize_calls == 2
+    assert kernel.state("failing") is ServiceState.FAILED
+    assert not kernel.running("failing")
+
+
+def test_failed_restart_can_be_retried() -> None:
+    kernel = Kernel()
+
+    class RecoveringService(Service):
+        def __init__(self) -> None:
+            super().__init__("recovering")
+            self.initialize_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+            if self.initialize_calls == 2:
+                raise RuntimeError("temporary restart failure")
+
+        def shutdown(self) -> None:
+            pass
+
+    service = RecoveringService()
+    kernel.register(service)
+
+    kernel.start("recovering")
+
+    with pytest.raises(RuntimeError, match="temporary restart failure"):
+        kernel.restart("recovering")
+
+    assert kernel.state("recovering") is ServiceState.FAILED
+
+    kernel.start("recovering")
+
+    assert service.initialize_calls == 3
+    assert kernel.state("recovering") is ServiceState.RUNNING
+    assert kernel.running("recovering")
+
+def test_restart_failure_preserves_running_dependencies() -> None:
+    kernel = Kernel()
+
+    class FailingApplication(Service):
+        def __init__(self) -> None:
+            super().__init__("application", ("database",))
+            self.initialize_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+            if self.initialize_calls == 2:
+                raise RuntimeError("application restart failed")
+
+        def shutdown(self) -> None:
+            pass
+
+    logger = DummyService("logger")
+    database = DummyService("database", ("logger",))
+    application = FailingApplication()
+
+    kernel.register(application)
+    kernel.register(database)
+    kernel.register(logger)
+
+    kernel.boot()
+
+    with pytest.raises(
+        RuntimeError,
+        match="application restart failed",
+    ):
+        kernel.restart("application")
+
+    assert kernel.state("application") is ServiceState.FAILED
+    assert not kernel.running("application")
+
+    assert kernel.running("database")
+    assert kernel.running("logger")
+
+def test_failed_boot_can_be_retried() -> None:
+    kernel = Kernel()
+
+    logger = DummyService("logger")
+
+    class RecoveringService(Service):
+        def __init__(self) -> None:
+            super().__init__("recovering", ("logger",))
+            self.initialize_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+            if self.initialize_calls == 1:
+                raise RuntimeError("temporary startup failure")
+
+        def shutdown(self) -> None:
+            pass
+
+    recovering = RecoveringService()
+
+    kernel.register(recovering)
+    kernel.register(logger)
+
+    with pytest.raises(
+        RuntimeError,
+        match="temporary startup failure",
+    ):
+        kernel.boot()
+
+    assert kernel.state("recovering") is ServiceState.FAILED
+    assert kernel.state("logger") is ServiceState.STOPPED
+
+    kernel.boot()
+
+    assert kernel.state("recovering") is ServiceState.RUNNING
+    assert kernel.state("logger") is ServiceState.RUNNING
+    assert kernel.running("recovering")
+    assert kernel.running("logger")

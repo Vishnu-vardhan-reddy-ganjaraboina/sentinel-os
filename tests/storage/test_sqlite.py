@@ -239,6 +239,8 @@ def test_set_preserves_commit_and_rollback_errors(
     from sentinel.storage.exceptions import StorageWriteError
 
     backend = SQLiteBackend(tmp_path / "commit_rollback_failure.db")
+    backend.disconnect()
+
     connection = Mock()
     connection.commit.side_effect = sqlite3.OperationalError(
         "simulated commit failure"

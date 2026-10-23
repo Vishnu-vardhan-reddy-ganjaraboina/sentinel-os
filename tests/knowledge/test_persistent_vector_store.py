@@ -4,6 +4,7 @@ Tests for the persistent knowledge vector store.
 
 import json
 from collections.abc import Generator
+from math import inf, nan
 from pathlib import Path
 
 import pytest
@@ -309,3 +310,45 @@ def test_invalid_embedding_is_rejected(
 
     with pytest.raises(ValueError, match="Stored embedding"):
         store.get("broken")
+
+@pytest.mark.parametrize(
+    "embedding",
+    [
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_add_rejects_non_finite_embedding(
+    tmp_path: Path,
+    embedding: list[float],
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+
+    chunk = Chunk(
+        id="chunk.nonfinite",
+        document_id="doc.1",
+        text="Test embedding",
+        index=0,
+    )
+
+    with pytest.raises(ValueError, match="finite"):
+        store.add(chunk, embedding)
+
+
+@pytest.mark.parametrize(
+    "embedding",
+    [
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_search_rejects_non_finite_query_embedding(
+    tmp_path: Path,
+    embedding: list[float],
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+
+    with pytest.raises(ValueError, match="finite"):
+        store.search(embedding)

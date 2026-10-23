@@ -8,6 +8,7 @@ interface while reusing Sentinel's existing storage abstraction.
 from __future__ import annotations
 
 import json
+from math import isfinite
 
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.similarity import (
@@ -64,6 +65,10 @@ class PersistentVectorStore(VectorStore):
         """
         Add or replace a chunk and its embedding.
         """
+        values = [float(value) for value in embedding]
+        if not all(isfinite(value) for value in values):
+            raise ValueError("Embedding must contain only finite values.")
+
         payload = {
             "chunk": {
                 "id": chunk.id,
@@ -72,10 +77,7 @@ class PersistentVectorStore(VectorStore):
                 "index": chunk.index,
                 "metadata": dict(chunk.metadata),
             },
-            "embedding": [
-                float(value)
-                for value in embedding
-            ],
+            "embedding": values,
         }
 
         self._backend.set(
@@ -118,6 +120,10 @@ class PersistentVectorStore(VectorStore):
         """
         Return chunks ranked by similarity.
         """
+        query_embedding = [float(value) for value in embedding]
+        if not all(isfinite(value) for value in query_embedding):
+            raise ValueError("Query embedding must contain only finite values.")
+
         if limit <= 0:
             return []
 
@@ -132,7 +138,7 @@ class PersistentVectorStore(VectorStore):
             chunk, stored_embedding = stored
 
             score = self._similarity.similarity(
-                embedding,
+                query_embedding,
                 stored_embedding,
             )
 

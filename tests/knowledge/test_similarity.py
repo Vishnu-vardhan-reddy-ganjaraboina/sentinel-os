@@ -1,3 +1,5 @@
+from math import inf, nan
+
 import pytest
 
 from sentinel.knowledge.similarity import (
@@ -58,3 +60,32 @@ def test_empty_vector():
 
     with pytest.raises(ValueError):
         metric.similarity([], [])
+
+@pytest.mark.parametrize(
+    "vector",
+    [
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_cosine_rejects_non_finite_values(
+    vector: list[float],
+) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        CosineSimilarity().similarity(vector, [1.0])
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        CosineSimilarity(),
+        DotProductSimilarity(),
+        EuclideanSimilarity(),
+    ],
+)
+def test_similarity_metrics_reject_non_finite_values(
+    metric,
+) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        metric.similarity([nan], [1.0])

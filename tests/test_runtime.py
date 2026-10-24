@@ -2,7 +2,9 @@ import pytest
 
 from sentinel.execution.runtime import ExecutionRuntimeService
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
+from sentinel.knowledge.vector_store import InMemoryVectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
+from sentinel.memory.service import MemoryService
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
 from sentinel.runtime import Runtime, RuntimeComposer
 
@@ -135,6 +137,7 @@ def test_runtime_rejects_duplicate_service_names() -> None:
             )
         )
 
+
 def test_runtime_exposes_execution_accessor() -> None:
     runtime = RuntimeComposer().compose()
 
@@ -157,3 +160,69 @@ def test_runtime_exposes_knowledge_accessor() -> None:
     runtime = RuntimeComposer().compose()
 
     assert runtime.knowledge is runtime.get("knowledge")
+
+
+def test_runtime_preserves_injected_memory_service() -> None:
+    memory = MemoryService()
+
+    runtime = RuntimeComposer(memory=memory).compose()
+
+    assert runtime.memory.memory is memory
+    assert runtime.orchestration.orchestration.memory is memory
+
+
+def test_runtime_preserves_injected_vector_store() -> None:
+    vector_store = InMemoryVectorStore()
+
+    runtime = RuntimeComposer(
+        knowledge_vector_store=vector_store,
+    ).compose()
+
+    assert runtime.knowledge.knowledge.retriever.vector_store is vector_store
+
+
+def test_runtime_get_typed_rejects_invalid_service_type() -> None:
+    runtime = RuntimeComposer().compose()
+
+    with pytest.raises(
+        TypeError,
+        match="service_type must be a type",
+    ):
+        runtime.get_typed(
+            "memory",
+            "not-a-type",  # type: ignore[arg-type]
+        )
+
+
+def test_runtime_services_are_tuple() -> None:
+    runtime = RuntimeComposer().compose()
+
+    assert isinstance(runtime.services, tuple)
+
+
+def test_runtime_iteration_matches_services() -> None:
+    runtime = RuntimeComposer().compose()
+
+    assert tuple(runtime) == runtime.services
+
+
+def test_runtime_length_matches_services() -> None:
+    runtime = RuntimeComposer().compose()
+
+    assert len(runtime) == len(runtime.services)
+
+
+def test_runtime_rejects_non_tuple_services() -> None:
+    with pytest.raises(
+        TypeError,
+        match="services must be a tuple",
+    ):
+        Runtime([])  # type: ignore[arg-type]
+
+
+def test_runtime_rejects_non_service_entries() -> None:
+    with pytest.raises(
+        TypeError,
+        match="only Service instances",
+    ):
+        Runtime((object(),))  # type: ignore[arg-type]

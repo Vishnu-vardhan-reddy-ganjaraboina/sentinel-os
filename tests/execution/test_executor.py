@@ -73,19 +73,26 @@ def test_cancel_unknown_task() -> None:
 
     executor.shutdown()
 
-
 def test_submit() -> None:
     executor = DefaultExecutor()
+    completed = threading.Event()
 
-    task_id = executor.submit(add, 4, 6)
+    def add_and_signal(a: int, b: int) -> int:
+        result = add(a, b)
+        completed.set()
+        return result
 
-    context = executor.get_context(task_id)
+    try:
+        task_id = executor.submit(add_and_signal, 4, 6)
 
-    assert context is not None
-    assert context.result == 10
-    assert context.status == TaskStatus.COMPLETED
+        assert completed.wait(timeout=2)
 
-    executor.shutdown()
+        context = executor.get_context(task_id)
+        assert context is not None
+        assert context.result == 10
+        assert context.status == TaskStatus.COMPLETED
+    finally:
+        executor.shutdown()
 
 
 def test_shutdown() -> None:
@@ -178,3 +185,32 @@ def test_multiple_tasks_can_execute_concurrently() -> None:
 
     release.set()
     executor.shutdown()
+
+def test_shutdown_is_idempotent() -> None:
+    executor = DefaultExecutor()
+
+    executor.shutdown()
+    executor.shutdown()
+
+
+def test_submit_failure_rolls_back_state() -> None:
+    executor = DefaultExecutor()
+    original_submit = executor._pool.submit
+
+    def failing_submit(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("submit failed")
+
+    executor._pool.submit = failing_submit  # type: ignore[method-assign]
+
+    try:
+        with pytest.raises(RuntimeError, match="submit failed"):
+            executor.submit(add, 1, 2)
+
+        stats = executor.stats()
+        assert stats["submitted"] == 0
+        assert stats["completed"] == 0
+        assert stats["failed"] == 0
+        assert stats["cancelled"] == 0
+    finally:
+        executor._pool.submit = original_submit  # type: ignore[method-assign]
+        executor.shutdown()

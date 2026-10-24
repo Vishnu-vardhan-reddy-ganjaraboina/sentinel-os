@@ -4,6 +4,7 @@ Base implementation of a Sentinel memory entry.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -34,7 +35,7 @@ class BaseMemoryEntry(MemoryEntry):
             raise ValueError("memory_id cannot be empty.")
 
         self._id = memory_id
-        self._content = content
+        self._content = deepcopy(content)
         self._type = memory_type
         self._importance = importance
         self._ttl = ttl
@@ -51,7 +52,7 @@ class BaseMemoryEntry(MemoryEntry):
     @property
     def content(self) -> Any:
         self.touch()
-        return self._content
+        return deepcopy(self._content)
 
     @property
     def importance(self) -> int:
@@ -95,7 +96,7 @@ class BaseMemoryEntry(MemoryEntry):
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "content": self._content,
+            "content": deepcopy(self._content),
             "memory_type": self.memory_type.value,
             "importance": self.importance,
             "status": self.status.value,

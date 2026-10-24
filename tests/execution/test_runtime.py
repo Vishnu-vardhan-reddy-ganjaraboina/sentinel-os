@@ -5,6 +5,7 @@ Tests for the Sentinel Execution runtime service.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 from sentinel.execution.command import CommandResult
@@ -137,17 +138,23 @@ def test_runtime_delegates_execute_task() -> None:
 
 def test_runtime_delegates_submit() -> None:
     runtime = ExecutionRuntimeService()
+    completed = threading.Event()
 
-    task_id = runtime.submit(
-        add,
-        4,
-        6,
-    )
+    def add_and_signal(a: int, b: int) -> int:
+        result = add(a, b)
+        completed.set()
+        return result
 
-    context = runtime.get_context(task_id)
+    try:
+        task_id = runtime.submit(add_and_signal, 4, 6)
 
-    assert isinstance(context, ExecutionContext)
-    assert context.result == 10
+        assert completed.wait(timeout=2)
+
+        context = runtime.get_context(task_id)
+        assert isinstance(context, ExecutionContext)
+        assert context.result == 10
+    finally:
+        runtime.shutdown()
 
 
 def test_runtime_delegates_cancel() -> None:

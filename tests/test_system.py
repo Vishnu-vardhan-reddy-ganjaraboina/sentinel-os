@@ -4,6 +4,8 @@ Tests for the Sentinel OS system lifecycle coordinator.
 
 from __future__ import annotations
 
+from threading import Event, Thread
+
 import pytest
 
 from sentinel.application import Application
@@ -72,6 +74,36 @@ class SystemTestService(Service):
 
         if self.fail_shutdown:
             raise RuntimeError("kernel shutdown failed")
+
+
+class BlockingSystemTestService(SystemTestService):
+    """Service that pauses initialization until the test releases it."""
+
+    def __init__(self, name: str, events: list[str]) -> None:
+        super().__init__(name, events)
+        self.initialize_entered = Event()
+        self.allow_initialize = Event()
+
+    def initialize(self) -> None:
+        self.initialize_entered.set()
+        if not self.allow_initialize.wait(timeout=5):
+            raise TimeoutError("Test did not release service initialization.")
+        super().initialize()
+
+
+class BlockingShutdownApplication(SystemTestApplication):
+    """Application that pauses shutdown until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shutdown_entered = Event()
+        self.allow_shutdown = Event()
+
+    def shutdown(self) -> None:
+        self.shutdown_entered.set()
+        if not self.allow_shutdown.wait(timeout=5):
+            raise TimeoutError("Test did not release application shutdown.")
+        super().shutdown()
 
 
 def test_system_starts_stopped() -> None:
@@ -352,3 +384,97 @@ def test_repr() -> None:
     assert repr(system) == (
         "System(running=False, applications=0)"
     )
+
+def test_start_rejects_concurrent_start_during_startup() -> None:
+    events: list[str] = []
+    kernel = Kernel()
+    service = BlockingSystemTestService("blocking", events)
+    kernel.register(service)
+    system = System(kernel)
+    errors: list[BaseException] = []
+
+    def start_system() -> None:
+        try:
+            system.start()
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=start_system)
+    worker.start()
+
+    try:
+        assert service.initialize_entered.wait(timeout=3)
+
+        with pytest.raises(RuntimeError, match="transitioning"):
+            system.start()
+    finally:
+        service.allow_initialize.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert errors == []
+    assert system.running
+    system.shutdown()
+
+
+def test_register_application_rejects_during_system_startup() -> None:
+    events: list[str] = []
+    kernel = Kernel()
+    service = BlockingSystemTestService("blocking", events)
+    kernel.register(service)
+    system = System(kernel)
+    errors: list[BaseException] = []
+
+    def start_system() -> None:
+        try:
+            system.start()
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=start_system)
+    worker.start()
+
+    try:
+        assert service.initialize_entered.wait(timeout=3)
+
+        with pytest.raises(RuntimeError, match="transitioning"):
+            system.register_application("late", SystemTestApplication())
+    finally:
+        service.allow_initialize.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert errors == []
+    assert system.running
+    assert len(system.platform) == 0
+    system.shutdown()
+
+
+def test_shutdown_rejects_concurrent_shutdown() -> None:
+    application = BlockingShutdownApplication()
+    system = System(Kernel())
+    system.register_application("blocking", application)
+    system.start()
+    errors: list[BaseException] = []
+
+    def shutdown_system() -> None:
+        try:
+            system.shutdown()
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=shutdown_system)
+    worker.start()
+
+    try:
+        assert application.shutdown_entered.wait(timeout=3)
+
+        with pytest.raises(RuntimeError, match="transitioning"):
+            system.shutdown()
+    finally:
+        application.allow_shutdown.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert errors == []
+    assert not system.running

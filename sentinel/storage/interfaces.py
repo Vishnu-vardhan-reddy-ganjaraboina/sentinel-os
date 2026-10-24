@@ -7,6 +7,8 @@ Defines the contract implemented by all storage backends.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 
@@ -39,6 +41,14 @@ class StorageBackend(ABC):
         default no-op implementation.
         """
         return None
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """Execute operations atomically when supported by the backend."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support atomic transactions."
+        )
+        yield
 
     @abstractmethod
     def exists(self, key: str) -> bool:

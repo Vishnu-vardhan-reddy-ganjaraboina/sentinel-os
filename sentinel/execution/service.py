@@ -91,10 +91,19 @@ class ExecutionService:
         return self._executor.get_context(task_id)
 
     def shutdown(self) -> None:
-        """
-        Shut down the executor.
-        """
-        self._executor.shutdown()
+        """Shut down the executor and process manager."""
+        errors: list[Exception] = []
+
+        for component in (self._executor, self._process_manager):
+            try:
+                component.shutdown()
+            except Exception as exc:
+                errors.append(exc)
+
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise ExceptionGroup("Execution service shutdown failed.", errors)
 
     # ------------------------------------------------------------------
     # Command execution

@@ -103,6 +103,8 @@ class System:
         self._endpoint_registry = endpoint_registry
 
         self._running = False
+        self._starting = False
+        self._stopping = False
         self._lock = RLock()
 
     @property
@@ -145,16 +147,21 @@ class System:
         manifest: Any | None = None,
     ) -> None:
         with self._lock:
+            if self._starting or self._stopping:
+                raise RuntimeError(
+                    "Cannot register applications while system is transitioning."
+                )
+
             if self._running:
                 raise RuntimeError(
                     "Cannot register applications while system is running."
                 )
 
-        self._platform.register_application(
-            name,
-            application,
-            manifest,
-        )
+            self._platform.register_application(
+                name,
+                application,
+                manifest,
+            )
 
     def start(self) -> None:
         """
@@ -178,7 +185,17 @@ class System:
                     "Sentinel system is already running."
                 )
 
-        self._kernel.boot()
+            if self._starting or self._stopping:
+                raise RuntimeError("Sentinel system is transitioning.")
+
+            self._starting = True
+
+        try:
+            self._kernel.boot()
+        except Exception:
+            with self._lock:
+                self._starting = False
+            raise
 
         try:
             self._platform.start()
@@ -227,9 +244,13 @@ class System:
             except Exception:
                 pass
 
+            with self._lock:
+                self._starting = False
+                self._running = False
             raise
 
         with self._lock:
+            self._starting = False
             self._running = True
 
     def shutdown(self) -> None:
@@ -250,40 +271,48 @@ class System:
         fails. The first failure is raised after cleanup is attempted.
         """
         with self._lock:
+            if self._starting or self._stopping:
+                raise RuntimeError("Sentinel system is transitioning.")
+
             if not self._running:
                 raise RuntimeError(
                     "Sentinel system is not running."
                 )
 
+            self._stopping = True
+
         first_error: Exception | None = None
 
         try:
-            if self._endpoint_registry is not None:
-                self._endpoint_registry.clear()
-        except Exception as exc:
-            first_error = exc
-
-        try:
-            if self._control_transport is not None:
-                self._control_transport.stop()
-        except Exception as exc:
-            if first_error is None:
+            try:
+                if self._endpoint_registry is not None:
+                    self._endpoint_registry.clear()
+            except Exception as exc:
                 first_error = exc
 
-        try:
-            self._platform.shutdown()
-        except Exception as exc:
-            if first_error is None:
-                first_error = exc
+            try:
+                if self._control_transport is not None:
+                    self._control_transport.stop()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
 
-        try:
-            self._kernel.shutdown()
-        except Exception as exc:
-            if first_error is None:
-                first_error = exc
+            try:
+                self._platform.shutdown()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
 
-        with self._lock:
-            self._running = False
+            try:
+                self._kernel.shutdown()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+
+        finally:
+            with self._lock:
+                self._running = False
+                self._stopping = False
 
         if first_error is not None:
             raise first_error

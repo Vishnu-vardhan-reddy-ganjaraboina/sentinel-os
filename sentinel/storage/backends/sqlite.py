@@ -5,6 +5,8 @@ Production SQLite storage backend for Sentinel OS.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -35,6 +37,7 @@ class SQLiteBackend(StorageBackend):
         self._connection: sqlite3.Connection | None = None
         self._lock = RLock()
         self._serializer = JsonSerializer()
+        self._transaction_depth = 0
 
         self._database.parent.mkdir(
             parents=True,
@@ -93,6 +96,11 @@ class SQLiteBackend(StorageBackend):
         with self._lock:
             if self._connection is None:
                 return
+
+            if self._transaction_depth != 0:
+                raise StorageConnectionError(
+                    "Cannot disconnect while a transaction is active."
+                )
 
             try:
                 self._connection.close()
@@ -189,10 +197,12 @@ class SQLiteBackend(StorageBackend):
                     (key, serialized),
                 )
 
-                connection.commit()
+                if self._transaction_depth == 0:
+                    connection.commit()
 
             except sqlite3.Error as exc:
-                self._rollback_safely(connection, exc)
+                if self._transaction_depth == 0:
+                    self._rollback_safely(connection, exc)
 
                 error = StorageWriteError(
                     f"Failed to write key '{key}': {exc}"
@@ -216,10 +226,12 @@ class SQLiteBackend(StorageBackend):
                     (key,),
                 )
 
-                connection.commit()
+                if self._transaction_depth == 0:
+                    connection.commit()
 
             except sqlite3.Error as exc:
-                self._rollback_safely(connection, exc)
+                if self._transaction_depth == 0:
+                    self._rollback_safely(connection, exc)
 
                 error = StorageWriteError(
                     f"Failed to delete key '{key}': {exc}"
@@ -237,10 +249,12 @@ class SQLiteBackend(StorageBackend):
 
             try:
                 connection.execute("DELETE FROM storage")
-                connection.commit()
+                if self._transaction_depth == 0:
+                    connection.commit()
 
             except sqlite3.Error as exc:
-                self._rollback_safely(connection, exc)
+                if self._transaction_depth == 0:
+                    self._rollback_safely(connection, exc)
 
                 error = StorageWriteError(
                     f"Failed to clear storage: {exc}"
@@ -270,6 +284,46 @@ class SQLiteBackend(StorageBackend):
                 raise StorageReadError(
                     f"Failed to list storage keys: {exc}"
                 ) from exc
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """Execute operations in a shared, nested SQLite transaction."""
+        with self._lock:
+            connection = self._ensure_connected()
+            outermost = self._transaction_depth == 0
+
+            if outermost:
+                try:
+                    connection.execute("BEGIN")
+                except sqlite3.Error as exc:
+                    raise StorageWriteError(
+                        f"Failed to begin transaction: {exc}"
+                    ) from exc
+
+            self._transaction_depth += 1
+
+            try:
+                yield
+            except BaseException:
+                self._transaction_depth -= 1
+
+                if outermost:
+                    # Preserve a rollback failure rather than masking it.
+                    connection.rollback()
+
+                raise
+            else:
+                self._transaction_depth -= 1
+
+                if outermost:
+                    try:
+                        connection.commit()
+                    except sqlite3.Error as exc:
+                        # If rollback also fails, expose that failure.
+                        connection.rollback()
+                        raise StorageWriteError(
+                            f"Failed to commit transaction: {exc}"
+                        ) from exc
 
     def save(
         self,

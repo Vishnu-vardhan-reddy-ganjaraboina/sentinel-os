@@ -7,6 +7,8 @@ StorageBackend contract.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from threading import RLock
 from typing import Any
@@ -144,6 +146,18 @@ class MemoryBackend(StorageBackend):
 
         with self._lock:
             return list(self._storage.keys())
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """Run operations atomically and restore state on failure."""
+        with self._lock:
+            self._ensure_open()
+            snapshot = deepcopy(self._storage)
+            try:
+                yield
+            except BaseException:
+                self._storage = snapshot
+                raise
 
     def close(self) -> None:
         """

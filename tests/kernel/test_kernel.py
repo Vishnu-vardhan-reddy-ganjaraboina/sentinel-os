@@ -1,6 +1,9 @@
 import pytest
 
-from sentinel.kernel.exceptions import ServiceNotFoundError
+from sentinel.kernel.exceptions import (
+    ServiceAlreadyRunningError,
+    ServiceNotFoundError,
+)
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.kernel.service_state import ServiceState
@@ -158,6 +161,7 @@ def test_get_typed_rejects_wrong_type() -> None:
             OtherService,
         )
 
+
 def test_boot_rolls_back_started_services_on_failure() -> None:
     kernel = Kernel()
 
@@ -232,6 +236,7 @@ def test_shutdown_continues_when_one_service_fails() -> None:
     assert application.stopped
     assert failing.stopped
     assert logger.stopped
+
 
 def test_health_reports_all_services() -> None:
     kernel = Kernel()
@@ -325,6 +330,7 @@ def test_health_is_unhealthy_after_services_stop() -> None:
 
     assert health["healthy"] is False
     assert health["services"]["logger"]["healthy"] is True
+
 
 def test_start_service_with_dependencies() -> None:
     kernel = Kernel()
@@ -461,6 +467,7 @@ def test_restart_missing_service_raises() -> None:
     with pytest.raises(ServiceNotFoundError):
         kernel.restart("missing")
 
+
 def test_boot_records_rollback_failure_without_hiding_startup_error() -> None:
     kernel = Kernel()
 
@@ -588,6 +595,7 @@ def test_failed_restart_can_be_retried() -> None:
     assert kernel.state("recovering") is ServiceState.RUNNING
     assert kernel.running("recovering")
 
+
 def test_restart_failure_preserves_running_dependencies() -> None:
     kernel = Kernel()
 
@@ -625,6 +633,7 @@ def test_restart_failure_preserves_running_dependencies() -> None:
 
     assert kernel.running("database")
     assert kernel.running("logger")
+
 
 def test_failed_boot_can_be_retried() -> None:
     kernel = Kernel()
@@ -664,3 +673,209 @@ def test_failed_boot_can_be_retried() -> None:
     assert kernel.state("logger") is ServiceState.RUNNING
     assert kernel.running("recovering")
     assert kernel.running("logger")
+
+
+def test_concurrent_kernel_start_only_starts_once() -> None:
+    from threading import Thread
+
+    kernel = Kernel()
+
+    class CountingService(Service):
+        def __init__(self) -> None:
+            super().__init__("counting")
+            self.initialize_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+
+        def shutdown(self) -> None:
+            pass
+
+    service = CountingService()
+    kernel.register(service)
+
+    errors: list[Exception] = []
+
+    def start_service() -> None:
+        try:
+            kernel.start("counting")
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=start_service) for _ in range(10)]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert service.initialize_calls == 1
+    assert kernel.running("counting")
+    assert errors == []
+
+
+def test_concurrent_kernel_stop_only_stops_once() -> None:
+    from threading import Thread
+
+    kernel = Kernel()
+
+    class CountingService(Service):
+        def __init__(self) -> None:
+            super().__init__("counting")
+            self.shutdown_calls = 0
+
+        def initialize(self) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+    service = CountingService()
+    kernel.register(service)
+    kernel.start("counting")
+
+    errors: list[Exception] = []
+
+    def stop_service() -> None:
+        try:
+            kernel.stop("counting")
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=stop_service) for _ in range(10)]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert service.shutdown_calls == 1
+    assert not kernel.running("counting")
+    assert len(errors) == 9
+
+
+def test_concurrent_kernel_restart_is_serialized() -> None:
+    from threading import Thread
+
+    kernel = Kernel()
+
+    class CountingService(Service):
+        def __init__(self) -> None:
+            super().__init__("counting")
+            self.initialize_calls = 0
+            self.shutdown_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+    service = CountingService()
+    kernel.register(service)
+    kernel.start("counting")
+
+    errors: list[Exception] = []
+
+    def restart_service() -> None:
+        try:
+            kernel.restart("counting")
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=restart_service) for _ in range(10)]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert service.initialize_calls == 11
+    assert service.shutdown_calls == 10
+    assert kernel.running("counting")
+    assert errors == []
+
+
+def test_concurrent_kernel_boot_is_serialized() -> None:
+    from threading import Thread
+
+    kernel = Kernel()
+
+    class CountingService(Service):
+        def __init__(self) -> None:
+            super().__init__("counting")
+            self.initialize_calls = 0
+
+        def initialize(self) -> None:
+            self.initialize_calls += 1
+
+        def shutdown(self) -> None:
+            pass
+
+    service = CountingService()
+    kernel.register(service)
+
+    errors: list[Exception] = []
+
+    def boot_kernel() -> None:
+        try:
+            kernel.boot()
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=boot_kernel) for _ in range(10)]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert service.initialize_calls == 1
+    assert kernel.running("counting")
+    assert len(errors) == 9
+    assert all(isinstance(error, ServiceAlreadyRunningError) for error in errors)
+
+
+def test_concurrent_kernel_shutdown_is_serialized() -> None:
+    from threading import Thread
+
+    kernel = Kernel()
+
+    class CountingService(Service):
+        def __init__(self) -> None:
+            super().__init__("counting")
+            self.shutdown_calls = 0
+
+        def initialize(self) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+    service = CountingService()
+    kernel.register(service)
+    kernel.boot()
+
+    errors: list[Exception] = []
+
+    def shutdown_kernel() -> None:
+        try:
+            kernel.shutdown()
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=shutdown_kernel) for _ in range(10)]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert service.shutdown_calls == 1
+    assert not kernel.running("counting")
+    assert errors == []

@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from threading import RLock
 
-from sentinel.security.authenticator import SecurityAuthenticator
+from sentinel.security.authenticator import (
+    SecurityAuthenticator,
+    _CredentialRecord,
+)
 from sentinel.security.authorizer import SecurityAuthorizer
 from sentinel.security.constants import Permission, Role
 from sentinel.security.credentials import SecurityCredentials
@@ -60,7 +63,7 @@ class SecurityManager:
                     if registered_id == identity.id
                 ),
             }
-            previous_credentials = {
+            previous_credentials: dict[str, _CredentialRecord | None] = {
                 username: self._authenticator._snapshot(username)
                 for username in affected_usernames
             }
@@ -92,8 +95,8 @@ class SecurityManager:
             except Exception:
                 self._identities = previous_identities
                 self._identity_ids_by_username = previous_username_map
-                for username, record in previous_credentials.items():
-                    self._authenticator._restore(username, record)
+                for username, previous_record in previous_credentials.items():
+                    self._authenticator._restore(username, previous_record)
                 raise
 
     def unregister_identity(

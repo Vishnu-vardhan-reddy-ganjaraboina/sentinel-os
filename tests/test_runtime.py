@@ -1,6 +1,10 @@
+from unittest.mock import patch
+
 import pytest
 
 from sentinel.execution.runtime import ExecutionRuntimeService
+from sentinel.infrastructure.configuration import Configuration
+from sentinel.knowledge.embeddings import DummyEmbeddingProvider
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
 from sentinel.knowledge.vector_store import InMemoryVectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
@@ -226,3 +230,72 @@ def test_runtime_rejects_non_service_entries() -> None:
         match="only Service instances",
     ):
         Runtime((object(),))  # type: ignore[arg-type]
+
+
+def test_runtime_uses_dummy_embedding_provider_by_default() -> None:
+    runtime = RuntimeComposer().compose()
+
+    indexer = runtime.knowledge.knowledge.indexer
+    retriever = runtime.knowledge.knowledge.retriever
+
+    assert isinstance(indexer.embedding_provider, DummyEmbeddingProvider)
+    assert indexer.embedding_provider is retriever._embedding_provider
+
+
+def test_runtime_selects_sentence_transformer_provider() -> None:
+    configuration = Configuration.from_dict(
+        {
+            "knowledge": {
+                "embedding": {
+                    "provider": "sentence-transformers",
+                    "model": "test-model",
+                    "device": "cpu",
+                    "batch_size": 16,
+                },
+            },
+        }
+    )
+
+    with patch(
+        "sentinel.runtime.SentenceTransformerEmbeddingProvider"
+    ) as provider_factory:
+        provider = provider_factory.return_value
+
+        runtime = RuntimeComposer(configuration=configuration).compose()
+
+    provider_factory.assert_called_once_with(
+        model_name="test-model",
+        device="cpu",
+        batch_size=16,
+    )
+    indexer = runtime.knowledge.knowledge.indexer
+    retriever = runtime.knowledge.knowledge.retriever
+
+    assert indexer.embedding_provider is provider
+    assert indexer.embedding_provider is retriever._embedding_provider
+
+
+def test_runtime_preserves_injected_knowledge_without_loading_model() -> None:
+    runtime_without_injection = RuntimeComposer().compose()
+    knowledge = runtime_without_injection.knowledge.knowledge
+
+    configuration = Configuration.from_dict(
+        {
+            "knowledge": {
+                "embedding": {
+                    "provider": "sentence-transformers",
+                },
+            },
+        }
+    )
+
+    with patch(
+        "sentinel.runtime.SentenceTransformerEmbeddingProvider"
+    ) as provider_factory:
+        runtime = RuntimeComposer(
+            knowledge=knowledge,
+            configuration=configuration,
+        ).compose()
+
+    provider_factory.assert_not_called()
+    assert runtime.knowledge.knowledge is knowledge

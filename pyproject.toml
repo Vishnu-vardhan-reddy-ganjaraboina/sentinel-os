@@ -19,6 +19,7 @@ dependencies = ["PyYAML>=6.0", "jsonschema>=4.23,<5"]
 sentinel = "sentinel.cli.main:main"
 
 [project.optional-dependencies]
+semantic = ["sentence-transformers>=5,<6"]
 dev = [
     "pytest>=9.0",
     "pytest-cov>=7.0",

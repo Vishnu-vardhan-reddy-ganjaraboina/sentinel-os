@@ -299,6 +299,42 @@ class Configuration:
                     "knowledge.database_path cannot be empty."
                 )
 
+        embedding = knowledge.get("embedding", {})
+        if not isinstance(embedding, dict):
+            raise ConfigurationError(
+                "knowledge.embedding must be a mapping."
+            )
+
+        provider = embedding.get("provider", "dummy")
+        if not isinstance(provider, str):
+            raise ConfigurationError(
+                "knowledge.embedding.provider must be a string."
+            )
+
+        provider = provider.strip().lower()
+        if provider not in {"dummy", "sentence-transformers"}:
+            raise ConfigurationError(
+                f"Unsupported knowledge embedding provider: '{provider}'."
+            )
+
+        for key in ("model", "device"):
+            if key in embedding:
+                value = embedding[key]
+                if not isinstance(value, str) or not value.strip():
+                    raise ConfigurationError(
+                        f"knowledge.embedding.{key} must be a non-empty string."
+                    )
+
+        if "batch_size" in embedding:
+            batch_size = embedding["batch_size"]
+            if (
+                isinstance(batch_size, bool)
+                or not isinstance(batch_size, int)
+                or batch_size <= 0
+            ):
+                raise ConfigurationError(
+                    "knowledge.embedding.batch_size must be a positive integer."
+                )
         with self._lock:
             storage = deepcopy(self._config.get("storage", {}))
 

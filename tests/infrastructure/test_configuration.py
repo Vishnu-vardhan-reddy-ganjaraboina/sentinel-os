@@ -337,3 +337,70 @@ def test_authentication_configuration_must_be_mapping() -> None:
     )
     with pytest.raises(ConfigurationError, match="authentication"):
         config.validate()
+
+
+def test_validate_embedding_configuration_defaults() -> None:
+    config = Configuration.from_dict({"knowledge": {}})
+    config.validate()
+
+    assert config.get("knowledge.embedding.provider", "dummy") == "dummy"
+
+
+def test_validate_sentence_transformer_configuration() -> None:
+    config = Configuration.from_dict(
+        {
+            "knowledge": {
+                "embedding": {
+                    "provider": "sentence-transformers",
+                    "model": (
+                        "sentence-transformers/"
+                        "paraphrase-multilingual-MiniLM-L12-v2"
+                    ),
+                    "device": "cpu",
+                    "batch_size": 32,
+                },
+            },
+        }
+    )
+
+    config.validate()
+
+
+@pytest.mark.parametrize("provider", ["unknown", "", 123])
+def test_validate_rejects_invalid_embedding_provider(provider) -> None:
+    config = Configuration.from_dict(
+        {"knowledge": {"embedding": {"provider": provider}}}
+    )
+
+    with pytest.raises(ConfigurationError, match="embedding.provider"):
+        config.validate()
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, True, "32"])
+def test_validate_rejects_invalid_embedding_batch_size(batch_size) -> None:
+    config = Configuration.from_dict(
+        {"knowledge": {"embedding": {"batch_size": batch_size}}}
+    )
+
+    with pytest.raises(ConfigurationError, match="embedding.batch_size"):
+        config.validate()
+
+
+@pytest.mark.parametrize("field", ["model", "device"])
+@pytest.mark.parametrize("value", ["", "   ", 123])
+def test_validate_rejects_invalid_embedding_text_settings(field, value) -> None:
+    config = Configuration.from_dict(
+        {"knowledge": {"embedding": {field: value}}}
+    )
+
+    with pytest.raises(ConfigurationError, match=f"embedding.{field}"):
+        config.validate()
+
+
+def test_validate_rejects_non_mapping_embedding_configuration() -> None:
+    config = Configuration.from_dict(
+        {"knowledge": {"embedding": []}}
+    )
+
+    with pytest.raises(ConfigurationError, match="knowledge.embedding"):
+        config.validate()

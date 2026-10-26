@@ -12,11 +12,18 @@ from sentinel.capabilities.manager import CapabilityManager
 from sentinel.execution.runtime import ExecutionRuntimeService
 from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.service import Service
+from sentinel.knowledge.embeddings import (
+    DummyEmbeddingProvider,
+    EmbeddingProvider,
+)
 from sentinel.knowledge.knowledge_service import KnowledgeService
 from sentinel.knowledge.persistent_vector_store import (
     PersistentVectorStore,
 )
 from sentinel.knowledge.runtime import KnowledgeRuntimeService
+from sentinel.knowledge.sentence_transformer_embeddings import (
+    SentenceTransformerEmbeddingProvider,
+)
 from sentinel.knowledge.vector_store import InMemoryVectorStore, VectorStore
 from sentinel.memory.runtime import MemoryRuntimeService
 from sentinel.memory.service import MemoryService
@@ -227,8 +234,15 @@ class RuntimeComposer:
             )
         )
 
+        embedding_provider = (
+            self._create_embedding_provider(self._configuration)
+            if self._knowledge is None
+            else None
+        )
+
         knowledge_runtime = KnowledgeRuntimeService(
             knowledge=self._knowledge,
+            embedding_provider=embedding_provider,
             vector_store=resolved_vector_store,
         )
 
@@ -270,6 +284,73 @@ class RuntimeComposer:
             services = (*services, storage_runtime)
 
         return Runtime(services)
+
+    @staticmethod
+    def _create_embedding_provider(
+        configuration: Configuration | None,
+    ) -> EmbeddingProvider:
+        """Create the configured Knowledge embedding provider.
+
+        The default remains deterministic and lightweight. The local
+        sentence-transformer model is loaded only when explicitly selected.
+        """
+        if configuration is None:
+            return DummyEmbeddingProvider()
+
+        provider_value = configuration.get(
+            "knowledge.embedding.provider",
+            "dummy",
+        )
+        if not isinstance(provider_value, str):
+            raise ValueError(
+                "knowledge.embedding.provider must be a string."
+            )
+
+        provider = provider_value.strip().lower()
+
+        if provider == "dummy":
+            return DummyEmbeddingProvider()
+
+        if provider == "sentence-transformers":
+            model = configuration.get(
+                "knowledge.embedding.model",
+                SentenceTransformerEmbeddingProvider.DEFAULT_MODEL,
+            )
+            device = configuration.get(
+                "knowledge.embedding.device",
+                "cpu",
+            )
+            batch_size = configuration.get(
+                "knowledge.embedding.batch_size",
+                32,
+            )
+
+            if not isinstance(model, str) or not model.strip():
+                raise ValueError(
+                    "knowledge.embedding.model must be a non-empty string."
+                )
+            if not isinstance(device, str) or not device.strip():
+                raise ValueError(
+                    "knowledge.embedding.device must be a non-empty string."
+                )
+            if (
+                isinstance(batch_size, bool)
+                or not isinstance(batch_size, int)
+                or batch_size <= 0
+            ):
+                raise ValueError(
+                    "knowledge.embedding.batch_size must be a positive integer."
+                )
+
+            return SentenceTransformerEmbeddingProvider(
+                model_name=model,
+                device=device,
+                batch_size=batch_size,
+            )
+
+        raise ValueError(
+            f"Unsupported knowledge embedding provider: '{provider}'."
+        )
 
     @staticmethod
     def _create_knowledge_vector_store(

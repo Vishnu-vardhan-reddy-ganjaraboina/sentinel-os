@@ -78,6 +78,11 @@ The Brain remains the center of the platform while AI models act only as reasoni
 
 ---
 
+## Knowledge Embeddings
+
+Optional local multilingual semantic embeddings can be enabled using the
+[Knowledge Embeddings guide](docs/knowledge-embeddings.md).
+
 ## License
 
 Sentinel OS is licensed under the [MIT License](LICENSE).

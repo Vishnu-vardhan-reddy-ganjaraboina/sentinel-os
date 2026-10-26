@@ -5,6 +5,7 @@ Vector store interfaces for Sentinel OS.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from math import isfinite
 
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.similarity import (
@@ -116,8 +117,19 @@ class InMemoryVectorStore(VectorStore):
         chunk: Chunk,
         embedding: list[float],
     ) -> None:
+        """Add or replace a chunk and its validated embedding."""
+        values = [float(value) for value in embedding]
+
+        if not values:
+            raise ValueError("Embedding cannot be empty.")
+
+        if not all(isfinite(value) for value in values):
+            raise ValueError(
+                "Embedding must contain only finite values."
+            )
+
         self._chunks[chunk.id] = chunk
-        self._embeddings[chunk.id] = embedding
+        self._embeddings[chunk.id] = values
 
     def delete(
         self,
@@ -145,14 +157,25 @@ class InMemoryVectorStore(VectorStore):
         *,
         limit: int = 5,
     ) -> list[Chunk]:
-        """
-        Perform semantic similarity search.
-        """
+        """Perform semantic similarity search."""
+        if limit <= 0:
+            return []
+
+        query_embedding = [float(value) for value in embedding]
+
+        if not query_embedding:
+            raise ValueError("Query embedding cannot be empty.")
+
+        if not all(isfinite(value) for value in query_embedding):
+            raise ValueError(
+                "Query embedding must contain only finite values."
+            )
+
         ranked: list[tuple[float, Chunk]] = []
 
         for chunk_id, stored_embedding in self._embeddings.items():
             score = self._similarity.similarity(
-                embedding,
+                query_embedding,
                 stored_embedding,
             )
 

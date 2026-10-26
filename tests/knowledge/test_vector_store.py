@@ -1,3 +1,7 @@
+from math import inf, nan
+
+import pytest
+
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.similarity import DotProductSimilarity
 from sentinel.knowledge.vector_store import (
@@ -252,3 +256,89 @@ def test_clear_removes_chunks_and_embeddings() -> None:
 
     assert len(store) == 0
     assert store.list_chunks() == []
+
+
+@pytest.mark.parametrize(
+    "embedding",
+    [
+        [],
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_add_rejects_invalid_embedding(
+    embedding: list[float],
+) -> None:
+    store = InMemoryVectorStore()
+    chunk = Chunk(
+        id="chunk.invalid",
+        document_id="doc.1",
+        text="Invalid embedding",
+        index=0,
+    )
+
+    with pytest.raises(ValueError):
+        store.add(chunk, embedding)
+
+    assert store.exists("chunk.invalid") is False
+
+
+@pytest.mark.parametrize(
+    "embedding",
+    [
+        [],
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_search_rejects_invalid_query_embedding(
+    embedding: list[float],
+) -> None:
+    store = InMemoryVectorStore()
+
+    with pytest.raises(ValueError):
+        store.search(embedding)
+
+
+def test_add_copies_embedding_values() -> None:
+    store = InMemoryVectorStore()
+    chunk = Chunk(
+        id="chunk.1",
+        document_id="doc.1",
+        text="Original",
+        index=0,
+    )
+    embedding = [1.0, 0.0]
+
+    store.add(chunk, embedding)
+    embedding[0] = 0.0
+
+    result = store.search([1.0, 0.0])
+
+    assert result == [chunk]
+
+
+def test_invalid_replacement_preserves_existing_chunk() -> None:
+    store = InMemoryVectorStore()
+    original = Chunk(
+        id="chunk.1",
+        document_id="doc.1",
+        text="Original",
+        index=0,
+    )
+    replacement = Chunk(
+        id="chunk.1",
+        document_id="doc.2",
+        text="Replacement",
+        index=0,
+    )
+
+    store.add(original, [1.0, 0.0])
+
+    with pytest.raises(ValueError):
+        store.add(replacement, [])
+
+    assert store.get("chunk.1") == original
+    assert store.search([1.0, 0.0]) == [original]

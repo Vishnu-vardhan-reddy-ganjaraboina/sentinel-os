@@ -83,6 +83,10 @@ class Memory(ABC):
         """Add a memory entry."""
 
     @abstractmethod
+    def upsert(self, entry: MemoryEntry) -> None:
+        """Insert an entry or atomically replace the entry with the same ID."""
+
+    @abstractmethod
     def get(self, memory_id: str) -> MemoryEntry:
         """Retrieve a memory entry."""
 

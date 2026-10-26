@@ -56,6 +56,26 @@ class MemoryManager:
 
         return entry
 
+    def upsert(
+        self,
+        memory_id: str,
+        content: Any,
+        *,
+        importance: int = 1,
+        memory_type: MemoryType = MemoryType.WORKING,
+        ttl: timedelta | None = None,
+    ) -> MemoryEntry:
+        """Insert a memory entry or atomically replace an existing entry."""
+        entry = BaseMemoryEntry(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            memory_type=memory_type,
+            ttl=ttl,
+        )
+        self._store.upsert(entry)
+        return entry
+
     def get(
         self,
         memory_id: str,

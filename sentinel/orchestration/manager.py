@@ -449,10 +449,7 @@ class OrchestrationManager:
         """
         memory_id = f"orchestration:{result.request_id}"
 
-        if self._memory.exists(memory_id):
-            self._memory.remove(memory_id)
-
-        self._memory.create(
+        self._memory.upsert(
             memory_id=memory_id,
             content=result.to_dict(),
         )

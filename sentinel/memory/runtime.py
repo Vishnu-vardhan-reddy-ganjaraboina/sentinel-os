@@ -61,6 +61,24 @@ class MemoryRuntimeService(Service):
             ttl=ttl,
         )
 
+    def upsert(
+        self,
+        memory_id: str,
+        content: Any,
+        *,
+        importance: int = 1,
+        memory_type: MemoryType = MemoryType.WORKING,
+        ttl: timedelta | None = None,
+    ) -> MemoryEntry:
+        """Insert a memory entry or atomically replace an existing entry."""
+        return self._memory.upsert(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            memory_type=memory_type,
+            ttl=ttl,
+        )
+
     def get(
         self,
         memory_id: str,

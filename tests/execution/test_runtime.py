@@ -193,10 +193,7 @@ def test_runtime_delegates_run_command() -> None:
 
     assert isinstance(result, CommandResult)
     assert result.succeeded
-    assert (
-        "Python" in result.stdout
-        or "Python" in result.stderr
-    )
+    assert "Python" in result.stdout or "Python" in result.stderr
 
 
 def test_runtime_delegates_run_command_checked() -> None:
@@ -216,31 +213,37 @@ def test_runtime_delegates_run_command_checked() -> None:
 def test_runtime_delegates_start_process() -> None:
     runtime = ExecutionRuntimeService()
 
-    pid = runtime.start_process(
-        [
-            sys.executable,
-            "-c",
-            "print('hello')",
-        ]
-    )
+    try:
+        pid = runtime.start_process(
+            [
+                sys.executable,
+                "-c",
+                "print('hello')",
+            ]
+        )
 
-    assert isinstance(pid, int)
+        assert isinstance(pid, int)
+    finally:
+        runtime.terminate_process()
 
 
 def test_runtime_delegates_wait_for_process() -> None:
     runtime = ExecutionRuntimeService()
 
-    runtime.start_process(
-        [
-            sys.executable,
-            "-c",
-            "print('hello')",
-        ]
-    )
+    try:
+        runtime.start_process(
+            [
+                sys.executable,
+                "-c",
+                "print('hello')",
+            ]
+        )
 
-    exit_code = runtime.wait_for_process()
+        exit_code = runtime.wait_for_process()
 
-    assert exit_code == 0
+        assert exit_code == 0
+    finally:
+        runtime.terminate_process()
 
 
 def test_runtime_delegates_read_process_output() -> None:

@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -144,3 +145,53 @@ def test_len() -> None:
 
     assert len(store) == 1
 
+
+def test_concurrent_adds_preserve_all_unique_entries() -> None:
+    store = InMemoryStore()
+
+    def add_entry(index: int) -> None:
+        store.add(create_entry(f"memory.{index}", f"value-{index}"))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(add_entry, range(200)))
+
+    assert len(store) == 200
+    assert len(store.list()) == 200
+    assert all(store.exists(f"memory.{index}") for index in range(200))
+
+
+def test_upsert_inserts_new_entry() -> None:
+    store = InMemoryStore()
+    entry = create_entry("memory.upsert", "first value")
+
+    store.upsert(entry)
+
+    assert store.get("memory.upsert") is entry
+    assert len(store) == 1
+
+
+def test_upsert_replaces_existing_entry() -> None:
+    store = InMemoryStore()
+    original = create_entry("memory.upsert", "first value")
+    replacement = create_entry("memory.upsert", "updated value")
+
+    store.add(original)
+    store.upsert(replacement)
+
+    assert store.get("memory.upsert") is replacement
+    assert store.get("memory.upsert").content == "updated value"
+    assert len(store) == 1
+
+
+def test_concurrent_upserts_keep_one_entry_per_id() -> None:
+    store = InMemoryStore()
+
+    def upsert_entry(index: int) -> None:
+        store.upsert(create_entry("memory.shared", f"value-{index}"))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(upsert_entry, range(100)))
+
+    assert len(store) == 1
+    assert store.exists("memory.shared")
+    assert store.get("memory.shared").id == "memory.shared"

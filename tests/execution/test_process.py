@@ -9,32 +9,32 @@ from sentinel.execution.process import ProcessManager
 def test_start_process():
     manager = ProcessManager()
 
-    pid = manager.start(
-        [sys.executable, "-c", "print('hello')"]
-    )
+    try:
+        pid = manager.start([sys.executable, "-c", "print('hello')"])
 
-    assert isinstance(pid, int)
-    assert manager.pid == pid
+        assert isinstance(pid, int)
+        assert manager.pid == pid
+    finally:
+        manager.terminate()
 
 
 def test_wait():
     manager = ProcessManager()
 
-    manager.start(
-        [sys.executable, "-c", "print('hello')"]
-    )
+    try:
+        manager.start([sys.executable, "-c", "print('hello')"])
 
-    exit_code = manager.wait()
+        exit_code = manager.wait()
 
-    assert exit_code == 0
+        assert exit_code == 0
+    finally:
+        manager.terminate()
 
 
 def test_read_output():
     manager = ProcessManager()
 
-    manager.start(
-        [sys.executable, "-c", "print('hello')"]
-    )
+    manager.start([sys.executable, "-c", "print('hello')"])
 
     stdout, stderr = manager.read_output()
 
@@ -45,14 +45,10 @@ def test_read_output():
 def test_double_start():
     manager = ProcessManager()
 
-    manager.start(
-        [sys.executable, "-c", "import time; time.sleep(1)"]
-    )
+    manager.start([sys.executable, "-c", "import time; time.sleep(1)"])
 
     with pytest.raises(ProcessError):
-        manager.start(
-            [sys.executable, "--version"]
-        )
+        manager.start([sys.executable, "--version"])
 
     manager.terminate()
 
@@ -63,8 +59,9 @@ def test_wait_without_process():
     with pytest.raises(ProcessError):
         manager.wait()
 
+
 def test_shell_execution_is_rejected():
-    with pytest.raises(ValueError, match='shell=True is not supported'):
+    with pytest.raises(ValueError, match="shell=True is not supported"):
         ProcessManager(shell=True)
 
 
@@ -92,9 +89,7 @@ def test_concurrent_starts_allow_only_one_process():
     def start_process():
         barrier.wait(timeout=2)
         try:
-            return manager.start(
-                [sys.executable, "-c", "import time; time.sleep(1)"]
-            )
+            return manager.start([sys.executable, "-c", "import time; time.sleep(1)"])
         except ProcessError:
             return None
 
@@ -113,11 +108,13 @@ def test_concurrent_wait_and_terminate():
     from threading import Event, Thread
 
     manager = ProcessManager()
-    manager.start([
-        sys.executable,
-        "-c",
-        "import time; print('ready', flush=True); time.sleep(30)",
-    ])
+    manager.start(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('ready', flush=True); time.sleep(30)",
+        ]
+    )
 
     wait_started = Event()
     wait_errors = []

@@ -144,6 +144,8 @@ def test_clear(tmp_path: Path) -> None:
     assert backend.keys() == []
 
     backend.disconnect()
+
+
 def test_connect_closes_connection_when_initialization_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -180,6 +182,7 @@ def test_set_preserves_write_error_when_rollback_fails(
     from sentinel.storage.exceptions import StorageWriteError
 
     backend = SQLiteBackend(tmp_path / "rollback_failure.db")
+    backend.disconnect()
     connection = Mock()
     connection.execute.side_effect = sqlite3.OperationalError(
         "simulated write failure"
@@ -212,6 +215,7 @@ def test_set_preserves_commit_error_when_rollback_succeeds(
     from sentinel.storage.exceptions import StorageWriteError
 
     backend = SQLiteBackend(tmp_path / "commit_failure.db")
+    backend.disconnect()
     connection = Mock()
     connection.commit.side_effect = sqlite3.OperationalError(
         "simulated commit failure"

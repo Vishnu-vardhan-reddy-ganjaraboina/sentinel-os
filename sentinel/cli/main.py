@@ -291,10 +291,10 @@ class CLI:
             print("Sentinel OS is already running.")
             return 1
 
-        configuration = BootConfiguration()
-        configuration.load(config_path)
-
         try:
+            configuration = BootConfiguration()
+            configuration.load(config_path)
+
             log_file_setting = configuration.get(
                 "logging.file",
                 "logs/sentinel.log",

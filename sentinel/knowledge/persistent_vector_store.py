@@ -111,6 +111,61 @@ class PersistentVectorStore(VectorStore):
             if chunk.document_id == document_id:
                 self.delete(chunk.id)
 
+    def replace_document(
+        self,
+        document_id: str,
+        chunks_with_embeddings: list[tuple[Chunk, list[float]]],
+    ) -> None:
+        """Replace a document's chunks in one backend transaction."""
+        if not document_id.strip():
+            raise ValueError("Document id cannot be empty.")
+
+        staged: list[tuple[Chunk, list[float]]] = []
+        replacement_ids: set[str] = set()
+
+        for chunk, embedding in chunks_with_embeddings:
+            if chunk.document_id != document_id:
+                raise ValueError(
+                    "Replacement chunk has a different document id."
+                )
+            if chunk.id in replacement_ids:
+                raise ValueError(
+                    f"Duplicate replacement chunk id: {chunk.id}"
+                )
+
+            values = [float(value) for value in embedding]
+            if not values:
+                raise ValueError("Embedding cannot be empty.")
+            if not all(isfinite(value) for value in values):
+                raise ValueError("Embedding must contain only finite values.")
+
+            replacement_ids.add(chunk.id)
+            staged.append((chunk, values))
+
+        with self._backend.atomic():
+            # Read current state only after acquiring the backend transaction.
+            for chunk, _ in staged:
+                existing = self._load(chunk.id)
+                if (
+                    existing is not None
+                    and existing[0].document_id != document_id
+                ):
+                    raise ValueError(
+                        f"Chunk id {chunk.id!r} belongs to another document."
+                    )
+
+            old_ids = {
+                chunk.id
+                for chunk in self.list_chunks()
+                if chunk.document_id == document_id
+            }
+
+            for chunk, embedding in staged:
+                self.add(chunk, embedding)
+
+            for chunk_id in old_ids - replacement_ids:
+                self.delete(chunk_id)
+
     def search(
         self,
         embedding: list[float],

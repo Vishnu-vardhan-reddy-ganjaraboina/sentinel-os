@@ -111,7 +111,23 @@ class Indexer:
         document: Document,
     ) -> list[Chunk]:
         """
-        Replace existing indexed data for a document.
+        Replace existing indexed data for a document safely.
+
+        Chunks and embeddings are prepared before the existing index is touched.
         """
-        self.remove(document.id)
-        return self.index(document)
+        chunks = self._chunker.chunk(document)
+        embeddings = self._embedding_provider.embed_many(
+            [chunk.text for chunk in chunks]
+        )
+
+        if len(embeddings) != len(chunks):
+            raise ValueError(
+                "Embedding provider returned a different number of embeddings "
+                "than chunks."
+            )
+
+        self._vector_store.replace_document(
+            document.id,
+            list(zip(chunks, embeddings, strict=True)),
+        )
+        return chunks

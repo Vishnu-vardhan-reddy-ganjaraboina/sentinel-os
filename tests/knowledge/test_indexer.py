@@ -102,3 +102,45 @@ def test_reindex_replaces_old_chunks() -> None:
     assert len(chunks) == 1
     assert chunks[0].document_id == "doc1"
     assert chunks[0].text == "New document"
+
+def test_reindex_embedding_failure_preserves_old_index() -> None:
+    indexer = create_indexer()
+    original = Document(id="doc1", text="Original document")
+    indexer.index(original)
+
+    class FailingEmbeddingProvider(DummyEmbeddingProvider):
+        def embed_many(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("simulated embedding failure")
+
+    failing_indexer = Indexer(
+        chunker=FixedSizeChunker(chunk_size=100),
+        embedding_provider=FailingEmbeddingProvider(),
+        vector_store=indexer.vector_store,
+    )
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="simulated embedding failure"):
+        failing_indexer.reindex(Document(id="doc1", text="Replacement"))
+
+    chunks = indexer.vector_store.list_chunks()
+    assert len(chunks) == 1
+    assert chunks[0].text == "Original document"
+
+
+def test_reindex_shorter_document_removes_stale_chunks() -> None:
+    indexer = Indexer(
+        chunker=FixedSizeChunker(chunk_size=4, overlap=0),
+        embedding_provider=DummyEmbeddingProvider(),
+        vector_store=InMemoryVectorStore(),
+    )
+
+    indexer.index(Document(id="doc1", text="abcdefghij"))
+    assert len(indexer.vector_store.list_chunks()) == 3
+
+    indexer.reindex(Document(id="doc1", text="new"))
+
+    chunks = indexer.vector_store.list_chunks()
+    assert len(chunks) == 1
+    assert chunks[0].id == "doc1:0"
+    assert chunks[0].text == "new"

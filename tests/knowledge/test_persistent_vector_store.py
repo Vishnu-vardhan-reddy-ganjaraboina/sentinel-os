@@ -352,3 +352,140 @@ def test_search_rejects_non_finite_query_embedding(
 
     with pytest.raises(ValueError, match="finite"):
         store.search(embedding)
+
+def test_replace_document_rolls_back_when_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+    old = Chunk(
+        id="doc.1:0",
+        document_id="doc.1",
+        text="Old text",
+        index=0,
+    )
+    store.add(old, [1.0, 0.0])
+
+    original_set = store.backend.set
+    calls = 0
+
+    def failing_set(key: str, value: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("simulated storage failure")
+        original_set(key, value)
+
+    monkeypatch.setattr(store.backend, "set", failing_set)
+
+    replacements = [
+        (
+            Chunk(
+                id="doc.1:0",
+                document_id="doc.1",
+                text="New first",
+                index=0,
+            ),
+            [0.0, 1.0],
+        ),
+        (
+            Chunk(
+                id="doc.1:1",
+                document_id="doc.1",
+                text="New second",
+                index=1,
+            ),
+            [0.5, 0.5],
+        ),
+    ]
+
+    with pytest.raises(RuntimeError, match="simulated storage failure"):
+        store.replace_document("doc.1", replacements)
+
+    stored = store.get("doc.1:0")
+    assert stored is not None
+    assert stored.text == "Old text"
+    assert store.get("doc.1:1") is None
+
+
+def test_replace_document_collision_preserves_both_documents(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+
+    original_doc1 = Chunk(
+        id="doc.1:0",
+        document_id="doc.1",
+        text="Original document one",
+        index=0,
+    )
+    original_doc2 = Chunk(
+        id="doc.2:0",
+        document_id="doc.2",
+        text="Original document two",
+        index=0,
+    )
+
+    store.add(original_doc1, [1.0, 0.0])
+    store.add(original_doc2, [0.0, 1.0])
+
+    conflicting_replacement = Chunk(
+        id="doc.2:0",
+        document_id="doc.1",
+        text="Must not overwrite document two",
+        index=0,
+    )
+
+    with pytest.raises(ValueError):
+        store.replace_document(
+            "doc.1",
+            [(conflicting_replacement, [0.5, 0.5])],
+        )
+
+    stored_doc1 = store.get("doc.1:0")
+    stored_doc2 = store.get("doc.2:0")
+
+    assert stored_doc1 == original_doc1
+    assert stored_doc2 == original_doc2
+    assert len(store) == 2
+
+
+def test_replace_document_removes_stale_chunks_and_preserves_other_documents(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+
+    old_chunks = [
+        Chunk(
+            id=f"doc.1:{index}",
+            document_id="doc.1",
+            text=f"Old chunk {index}",
+            index=index,
+        )
+        for index in range(3)
+    ]
+    other_document = Chunk(
+        id="doc.2:0",
+        document_id="doc.2",
+        text="Keep this document",
+        index=0,
+    )
+
+    for chunk in old_chunks:
+        store.add(chunk, [1.0, 0.0])
+    store.add(other_document, [0.0, 1.0])
+
+    replacement = Chunk(
+        id="doc.1:0",
+        document_id="doc.1",
+        text="Replacement chunk",
+        index=0,
+    )
+
+    store.replace_document("doc.1", [(replacement, [0.5, 0.5])])
+
+    assert store.get("doc.1:0") == replacement
+    assert store.get("doc.1:1") is None
+    assert store.get("doc.1:2") is None
+    assert store.get("doc.2:0") == other_document
+    assert len(store) == 2

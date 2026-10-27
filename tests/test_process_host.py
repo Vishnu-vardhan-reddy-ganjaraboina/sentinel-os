@@ -586,3 +586,72 @@ def test_process_can_restart_after_clean_shutdown(
 
     finally:
         host.stop()
+
+def test_control_server_stop_failure_still_stops_boot_manager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = ControlEndpointRegistry(tmp_path / "control.json")
+    host = ProcessHost(
+        make_boot_manager(),
+        endpoint_registry=registry,
+    )
+    host.start()
+    boot_manager_stop_called = False
+    original_boot_stop = host.boot_manager.stop
+    original_control_stop = host.control_server.stop
+
+    def tracked_boot_stop():
+        nonlocal boot_manager_stop_called
+        boot_manager_stop_called = True
+        return original_boot_stop()
+
+    def fail_control_stop() -> None:
+        original_control_stop()
+        raise RuntimeError("control server stop failed")
+
+    monkeypatch.setattr(host.boot_manager, "stop", tracked_boot_stop)
+    monkeypatch.setattr(host.control_server, "stop", fail_control_stop)
+
+    with pytest.raises(ProcessShutdownError) as exc_info:
+        host.stop()
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "control server stop failed"
+    assert boot_manager_stop_called is True
+    assert host.state == ProcessState.FAILED
+    assert host.running is False
+
+
+def test_endpoint_removal_failure_still_stops_boot_manager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = ControlEndpointRegistry(tmp_path / "control.json")
+    host = ProcessHost(
+        make_boot_manager(),
+        endpoint_registry=registry,
+    )
+    host.start()
+    boot_manager_stop_called = False
+    original_boot_stop = host.boot_manager.stop
+
+    def tracked_boot_stop():
+        nonlocal boot_manager_stop_called
+        boot_manager_stop_called = True
+        return original_boot_stop()
+
+    def fail_endpoint_remove() -> None:
+        raise RuntimeError("endpoint removal failed")
+
+    monkeypatch.setattr(host.boot_manager, "stop", tracked_boot_stop)
+    monkeypatch.setattr(registry, "remove", fail_endpoint_remove)
+
+    with pytest.raises(ProcessShutdownError) as exc_info:
+        host.stop()
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "endpoint removal failed"
+    assert boot_manager_stop_called is True
+    assert host.state == ProcessState.FAILED
+    assert host.running is False

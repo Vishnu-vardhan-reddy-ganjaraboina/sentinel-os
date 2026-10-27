@@ -48,6 +48,7 @@ class ControlPlaneTransportServer:
         listen_backlog: int = 5,
         max_connections_per_minute: int = 60,
         max_total_connections_per_minute: int = 300,
+        max_active_workers: int = 64,
         ssl_context: ssl.SSLContext | None = None,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
@@ -134,6 +135,14 @@ class ControlPlaneTransportServer:
         self._max_total_connections_per_minute = (
             max_total_connections_per_minute
         )
+        if (
+            isinstance(max_active_workers, bool)
+            or not isinstance(max_active_workers, int)
+            or max_active_workers <= 0
+        ):
+            raise ValueError("max_active_workers must be a positive integer.")
+
+        self._max_active_workers = max_active_workers
         self._connection_times_by_ip: dict[str, deque[float]] = {}
         self._total_connection_times: deque[float] = deque()
         self._rate_limit_lock = threading.Lock()
@@ -269,50 +278,48 @@ class ControlPlaneTransportServer:
                     break
                 continue
 
+            rejected = False
+            stopping = False
+            start_error = False
+
+            # Reserve a worker slot and register the connection atomically.
+            # Starting the thread while holding the lock also prevents stop()
+            # from trying to join a Thread object before it has started.
             with self._lock:
                 stopping = self._stop_event.is_set()
-                if not stopping:
+                if (
+                    not stopping
+                    and len(self._worker_threads) >= self._max_active_workers
+                ):
+                    rejected = True
+                elif not stopping:
                     self._active_connections.add(connection)
                     if self._active_connection is None:
                         self._active_connection = connection
+
+                    worker = threading.Thread(
+                        target=self._handle_client,
+                        args=(connection, address),
+                        name="sentinel-control-plane-client",
+                        daemon=True,
+                    )
+                    self._worker_threads.add(worker)
+                    try:
+                        worker.start()
+                    except RuntimeError:
+                        self._worker_threads.discard(worker)
+                        self._active_connections.discard(connection)
+                        if self._active_connection is connection:
+                            self._active_connection = next(
+                                iter(self._active_connections), None
+                            )
+                        start_error = True
 
             if stopping:
                 connection.close()
                 break
 
-            worker = threading.Thread(
-                target=self._handle_client,
-                args=(connection, address),
-                name="sentinel-control-plane-client",
-                daemon=True,
-            )
-
-            with self._lock:
-                if self._stop_event.is_set():
-                    self._active_connections.discard(connection)
-                    if self._active_connection is connection:
-                        self._active_connection = next(
-                            iter(self._active_connections), None
-                        )
-                    should_start = False
-                else:
-                    self._worker_threads.add(worker)
-                    should_start = True
-
-            if not should_start:
-                connection.close()
-                continue
-
-            try:
-                worker.start()
-            except RuntimeError:
-                with self._lock:
-                    self._worker_threads.discard(worker)
-                    self._active_connections.discard(connection)
-                    if self._active_connection is connection:
-                        self._active_connection = next(
-                            iter(self._active_connections), None
-                        )
+            if rejected or start_error:
                 connection.close()
 
     def _handle_client(

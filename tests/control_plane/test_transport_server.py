@@ -57,6 +57,7 @@ class FakeAuthorizer:
 
 def create_server(
     read_timeout: float = 5.0,
+    max_active_workers: int = 64,
 ) -> ControlPlaneTransportServer:
     controller = KernelController(
         target=FakeTarget(),
@@ -74,6 +75,7 @@ def create_server(
         host="127.0.0.1",
         port=0,
         read_timeout=read_timeout,
+        max_active_workers=max_active_workers,
     )
 
 
@@ -478,6 +480,94 @@ def test_server_rejects_connections_over_rate_limit() -> None:
         assert "rate limit" in result.error.lower()
     finally:
         server.stop()
+
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_server_rejects_invalid_max_active_workers(limit: object) -> None:
+    base_server = create_server()
+
+    with pytest.raises(ValueError, match="max_active_workers"):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            max_active_workers=limit,
+        )
+
+
+def test_server_enforces_worker_limit_and_recovers_capacity() -> None:
+    import threading
+
+    server = create_server(max_active_workers=1)
+    request_started = threading.Event()
+    release_request = threading.Event()
+    original_execute = server.control_plane.execute_request
+
+    def blocked_execute(request: ControlRequest) -> ControlResult:
+        request_started.set()
+        if not release_request.wait(timeout=5.0):
+            raise TimeoutError("Test request release timed out.")
+        return original_execute(request)
+
+    server.control_plane.execute_request = blocked_execute
+    server.start()
+    first_connection = None
+
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_STATUS,
+        context=ControlContext(caller_id="worker-cap-client", caller_type="cli"),
+    )
+
+    try:
+        wait_for_server(server)
+        first_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        first_connection.settimeout(2.0)
+        first_connection.sendall(ControlPlaneProtocol.encode_request(request))
+
+        assert request_started.wait(timeout=2.0), (
+            "The first request did not occupy the worker slot."
+        )
+        assert len(server._worker_threads) == 1
+
+        # With the only worker occupied, the next connection must be closed
+        # without creating another worker thread.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as excess_connection:
+            excess_connection.settimeout(2.0)
+            assert excess_connection.recv(1) == b""
+
+        assert len(server._worker_threads) == 1
+
+        # Release the first worker and verify the slot becomes reusable.
+        release_request.set()
+        response = b""
+        while b"\\n" not in response:
+            chunk = first_connection.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+
+        result = ControlPlaneProtocol.decode_response(response)
+        assert result.success is True
+
+        deadline = time.monotonic() + 2.0
+        while server._worker_threads and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not server._worker_threads, "Worker slot was not released."
+
+        server.control_plane.execute_request = original_execute
+        recovered = send_request(server, request)
+        assert recovered.success is True
+    finally:
+        release_request.set()
+        if first_connection is not None:
+            first_connection.close()
+        server.stop()
+        server.control_plane.execute_request = original_execute
 
 
 def test_server_rejects_invalid_listen_backlog() -> None:

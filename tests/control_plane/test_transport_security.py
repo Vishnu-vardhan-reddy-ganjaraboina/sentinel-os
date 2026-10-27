@@ -238,6 +238,44 @@ def test_unauthorized_remote_client_cannot_control_service() -> None:
         server.stop()
 
 
+def test_read_only_client_cannot_spoof_admin_identity() -> None:
+    target, server, _security = create_server()
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        client = ControlPlaneTransportClient(
+            host=server.host,
+            port=server.port,
+            ssl_context=create_client_ssl_context(),
+            credentials=SecurityCredentials(
+                "read-client",
+                "read-secret",
+            ),
+        )
+
+        request = ControlRequest(
+            command=KernelCommand.SERVICE_START,
+            context=ControlContext(
+                caller_id="admin-client",
+                caller_type="api",
+            ),
+            data={"service": "alpha"},
+        )
+
+        result = client.execute(request)
+
+        assert result.success is False
+        assert result.command == KernelCommand.SERVICE_START.value
+        assert result.error is not None
+        assert target.started == []
+
+    finally:
+        server.stop()
+
+
 def test_read_only_remote_client_can_read_health() -> None:
     _target, server, _security = create_server()
 

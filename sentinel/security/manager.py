@@ -58,8 +58,9 @@ class SecurityManager:
                 credentials.username,
                 *(
                     username
-                    for username, registered_id
-                    in self._identity_ids_by_username.items()
+                    for username, registered_id in (
+                        self._identity_ids_by_username.items()
+                    )
                     if registered_id == identity.id
                 ),
             }
@@ -69,9 +70,7 @@ class SecurityManager:
             }
 
             try:
-                previous_id = self._identity_ids_by_username.get(
-                    credentials.username
-                )
+                previous_id = self._identity_ids_by_username.get(credentials.username)
 
                 if previous_id is not None and previous_id != identity.id:
                     self._identities.pop(previous_id, None)
@@ -134,13 +133,23 @@ class SecurityManager:
         credentials: SecurityCredentials,
     ) -> SecurityIdentity | None:
         """Authenticate credentials and return their registered identity."""
+        authenticated, verified_record = self._authenticator._authenticate_record(
+            credentials
+        )
+
+        if not authenticated or verified_record is None:
+            return None
+
         with self._lock:
-            if not self._authenticator.authenticate(credentials):
+            # Reject authentication if the credential record changed
+            # while password verification was running.
+            if (
+                self._authenticator._snapshot(credentials.username)
+                is not verified_record
+            ):
                 return None
 
-            identity_id = self._identity_ids_by_username.get(
-                credentials.username
-            )
+            identity_id = self._identity_ids_by_username.get(credentials.username)
             if identity_id is None:
                 return None
 
@@ -161,9 +170,7 @@ class SecurityManager:
     ) -> None:
         """Grant one or more permissions to a role."""
         permission_set = (
-            {permissions}
-            if isinstance(permissions, Permission)
-            else permissions
+            {permissions} if isinstance(permissions, Permission) else permissions
         )
         self._authorizer.grant(role, permission_set)
 
@@ -174,9 +181,7 @@ class SecurityManager:
     ) -> None:
         """Revoke one or more permissions from a role."""
         permission_set = (
-            {permissions}
-            if isinstance(permissions, Permission)
-            else permissions
+            {permissions} if isinstance(permissions, Permission) else permissions
         )
         self._authorizer.revoke(role, permission_set)
 

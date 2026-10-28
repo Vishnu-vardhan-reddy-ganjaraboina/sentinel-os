@@ -3,6 +3,7 @@ from threading import Barrier, Event, Thread
 
 import pytest
 
+from sentinel.security.authenticator import SecurityAuthenticator
 from sentinel.security.constants import Permission, Role
 from sentinel.security.credentials import SecurityCredentials
 from sentinel.security.identity import SecurityIdentity
@@ -68,10 +69,13 @@ def test_authorize():
         {Permission.READ},
     )
 
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is True
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is True
+    )
 
 
 def test_grant_single_permission():
@@ -88,15 +92,21 @@ def test_grant_single_permission():
         Permission.READ,
     )
 
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is True
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is True
+    )
 
-    assert manager.authorize(
-        identity,
-        Permission.WRITE,
-    ) is False
+    assert (
+        manager.authorize(
+            identity,
+            Permission.WRITE,
+        )
+        is False
+    )
 
 
 def test_grant_multiple_permissions():
@@ -116,20 +126,29 @@ def test_grant_multiple_permissions():
         },
     )
 
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is True
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is True
+    )
 
-    assert manager.authorize(
-        identity,
-        Permission.WRITE,
-    ) is True
+    assert (
+        manager.authorize(
+            identity,
+            Permission.WRITE,
+        )
+        is True
+    )
 
-    assert manager.authorize(
-        identity,
-        Permission.DELETE,
-    ) is False
+    assert (
+        manager.authorize(
+            identity,
+            Permission.DELETE,
+        )
+        is False
+    )
 
 
 def test_revoke_single_permission():
@@ -146,20 +165,26 @@ def test_revoke_single_permission():
         Permission.READ,
     )
 
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is True
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is True
+    )
 
     manager.revoke(
         Role.ADMIN,
         Permission.READ,
     )
 
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is False
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is False
+    )
 
 
 def test_revoke_multiple_permissions():
@@ -187,15 +212,21 @@ def test_revoke_multiple_permissions():
         },
     )
 
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is False
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is False
+    )
 
-    assert manager.authorize(
-        identity,
-        Permission.WRITE,
-    ) is False
+    assert (
+        manager.authorize(
+            identity,
+            Permission.WRITE,
+        )
+        is False
+    )
 
 
 def test_unregister_identity():
@@ -256,10 +287,13 @@ def test_clear():
     assert len(manager) == 0
     assert manager.get_identity("1") is None
     assert manager.authenticate(credentials) is False
-    assert manager.authorize(
-        identity,
-        Permission.READ,
-    ) is False
+    assert (
+        manager.authorize(
+            identity,
+            Permission.READ,
+        )
+        is False
+    )
 
 
 def make_identity(index: int) -> SecurityIdentity:
@@ -298,9 +332,12 @@ def test_concurrent_registration_is_safe():
     assert len(manager) == 20
 
     for index in range(20):
-        assert manager.get_identity(
-            f"user-{index}",
-        ) is not None
+        assert (
+            manager.get_identity(
+                f"user-{index}",
+            )
+            is not None
+        )
 
 
 def test_concurrent_registration_preserves_authentication():
@@ -350,10 +387,7 @@ def test_concurrent_identity_lookup_is_safe():
             )
         )
 
-    assert all(
-        identity is not None
-        for identity in results
-    )
+    assert all(identity is not None for identity in results)
 
 
 def test_concurrent_registration_and_lookup_is_safe():
@@ -405,22 +439,11 @@ def test_concurrent_registration_and_lookup_is_safe():
                 )
             )
 
-        results = [
-            future.result()
-            for future in tasks
-        ]
+        results = [future.result() for future in tasks]
 
-    registrations = [
-        result
-        for result in results
-        if result[0] == "register"
-    ]
+    registrations = [result for result in results if result[0] == "register"]
 
-    lookups = [
-        result
-        for result in results
-        if result[0] == "lookup"
-    ]
+    lookups = [result for result in results if result[0] == "lookup"]
 
     assert len(registrations) == registration_count
     assert len(lookups) == registration_count
@@ -449,9 +472,7 @@ def test_registration_rolls_back_identity_when_credentials_fail(
     def fail_prepare(
         _credentials: SecurityCredentials,
     ):
-        raise RuntimeError(
-            "credential registration failed"
-        )
+        raise RuntimeError("credential registration failed")
 
     monkeypatch.setattr(
         manager._authenticator,
@@ -507,9 +528,7 @@ def test_registration_failure_restores_previous_identity(
     def fail_prepare(
         _credentials: SecurityCredentials,
     ):
-        raise RuntimeError(
-            "credential registration failed"
-        )
+        raise RuntimeError("credential registration failed")
 
     monkeypatch.setattr(
         manager._authenticator,
@@ -652,12 +671,14 @@ def test_reassign_username_removes_previous_identity_and_credentials():
 
     assert manager.get_identity("ID-1") is None
     assert manager.get_identity("ID-2") == new_identity
-    assert manager.authenticate_identity(
-        SecurityCredentials("alice", "old-secret")
-    ) is None
-    assert manager.authenticate_identity(
-        SecurityCredentials("alice", "new-secret")
-    ) == new_identity
+    assert (
+        manager.authenticate_identity(SecurityCredentials("alice", "old-secret"))
+        is None
+    )
+    assert (
+        manager.authenticate_identity(SecurityCredentials("alice", "new-secret"))
+        == new_identity
+    )
 
 
 def test_reregister_identity_with_new_username_invalidates_old_credentials():
@@ -674,12 +695,14 @@ def test_reregister_identity_with_new_username_invalidates_old_credentials():
         SecurityCredentials("bob", "bob-secret"),
     )
 
-    assert manager.authenticate_identity(
-        SecurityCredentials("alice", "alice-secret")
-    ) is None
-    assert manager.authenticate_identity(
-        SecurityCredentials("bob", "bob-secret")
-    ) == identity
+    assert (
+        manager.authenticate_identity(SecurityCredentials("alice", "alice-secret"))
+        is None
+    )
+    assert (
+        manager.authenticate_identity(SecurityCredentials("bob", "bob-secret"))
+        == identity
+    )
 
 
 def test_unregister_identity_rejects_mismatched_username():
@@ -701,12 +724,14 @@ def test_unregister_identity_rejects_mismatched_username():
 
     assert manager.get_identity("ID-1") == alice
     assert manager.get_identity("ID-2") == bob
-    assert manager.authenticate_identity(
-        SecurityCredentials("alice", "alice-secret")
-    ) == alice
-    assert manager.authenticate_identity(
-        SecurityCredentials("bob", "bob-secret")
-    ) == bob
+    assert (
+        manager.authenticate_identity(SecurityCredentials("alice", "alice-secret"))
+        == alice
+    )
+    assert (
+        manager.authenticate_identity(SecurityCredentials("bob", "bob-secret")) == bob
+    )
+
 
 def test_registration_commit_failure_restores_credentials(monkeypatch):
     manager = SecurityManager()
@@ -744,3 +769,112 @@ def test_registration_commit_failure_restores_credentials(monkeypatch):
     assert manager.get_identity("user-1") == original_identity
     assert manager.authenticate(original_credentials) is True
     assert manager.authenticate(replacement_credentials) is False
+
+
+def test_authenticate_identity_does_not_hold_manager_lock_during_derivation(
+    monkeypatch,
+):
+    from threading import Event, Thread
+
+    manager = SecurityManager()
+    identity = make_identity(1)
+    credentials = make_credentials(1)
+    manager.register_identity(identity, credentials)
+
+    derivation_started = Event()
+    release_derivation = Event()
+    lookup_completed = Event()
+    results = []
+
+    original_derive = SecurityAuthenticator._derive
+
+    def blocked_derive(secret, salt):
+        derivation_started.set()
+        if not release_derivation.wait(timeout=20):
+            raise TimeoutError("Test did not release password derivation.")
+        return original_derive(secret, salt)
+
+    monkeypatch.setattr(
+        SecurityAuthenticator,
+        "_derive",
+        staticmethod(blocked_derive),
+    )
+
+    authentication_thread = Thread(
+        target=lambda: results.append(manager.authenticate_identity(credentials))
+    )
+    authentication_thread.start()
+
+    try:
+        assert derivation_started.wait(timeout=10)
+
+        def lookup():
+            manager.get_identity(identity.id)
+            lookup_completed.set()
+
+        lookup_thread = Thread(target=lookup)
+        lookup_thread.start()
+
+        try:
+            assert lookup_completed.wait(timeout=2), (
+                "Identity lookup was blocked during password derivation."
+            )
+        finally:
+            lookup_thread.join(timeout=10)
+    finally:
+        release_derivation.set()
+        authentication_thread.join(timeout=10)
+
+    assert not authentication_thread.is_alive()
+    assert results == [identity]
+
+
+def test_authenticate_identity_rejects_credentials_replaced_during_derivation(
+    monkeypatch,
+):
+    from threading import Event, Thread
+
+    manager = SecurityManager()
+    old_identity = SecurityIdentity("ID-OLD", "Old Admin", {Role.ADMIN})
+    new_identity = SecurityIdentity("ID-NEW", "New Admin", {Role.ADMIN})
+    old_credentials = SecurityCredentials("alice", "old-secret")
+    new_credentials = SecurityCredentials("alice", "new-secret")
+
+    manager.register_identity(old_identity, old_credentials)
+
+    derivation_started = Event()
+    release_derivation = Event()
+    results = []
+
+    original_derive = SecurityAuthenticator._derive
+
+    def blocked_derive(secret, salt):
+        if secret == old_credentials.secret:
+            derivation_started.set()
+            if not release_derivation.wait(timeout=20):
+                raise TimeoutError("Test did not release password derivation.")
+        return original_derive(secret, salt)
+
+    monkeypatch.setattr(
+        SecurityAuthenticator,
+        "_derive",
+        staticmethod(blocked_derive),
+    )
+
+    thread = Thread(
+        target=lambda: results.append(manager.authenticate_identity(old_credentials))
+    )
+    thread.start()
+
+    try:
+        assert derivation_started.wait(timeout=10)
+
+        # Reassign the username while the old password is being verified.
+        manager.register_identity(new_identity, new_credentials)
+    finally:
+        release_derivation.set()
+        thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert results == [None]
+    assert manager.authenticate_identity(new_credentials) == new_identity

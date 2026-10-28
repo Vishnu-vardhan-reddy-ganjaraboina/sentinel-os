@@ -127,9 +127,7 @@ def test_hash():
         "password123",
     )
 
-    assert hash(credentials) == hash(
-        ("admin", "password123")
-    )
+    assert hash(credentials) == hash(("admin", "password123"))
 
 
 def test_equal_credentials_have_equal_hash():
@@ -215,3 +213,15 @@ def test_to_dict_does_not_expose_secret():
     }
 
     assert "super-secret-value" not in repr(data)
+
+
+@pytest.mark.parametrize("username", [None, 123, [], {}])
+def test_invalid_username_type(username):
+    with pytest.raises(ValueError, match="username must be a string"):
+        SecurityCredentials(username, "password123")
+
+
+@pytest.mark.parametrize("secret", [None, 123, [], {}])
+def test_invalid_secret_type(secret):
+    with pytest.raises(ValueError, match="secret must be a string"):
+        SecurityCredentials("admin", secret)

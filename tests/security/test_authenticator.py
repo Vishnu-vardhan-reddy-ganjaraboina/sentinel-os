@@ -236,3 +236,48 @@ def test_unknown_user_dummy_derivation_does_not_register_user(monkeypatch):
 
     assert authenticator.exists("unknown") is False
     assert len(authenticator) == 0
+
+
+def test_authentication_derivation_runs_outside_credential_lock(
+    monkeypatch,
+):
+    from threading import Event, Thread
+
+    authenticator = SecurityAuthenticator()
+    authenticator.register(SecurityCredentials("admin", "password123"))
+
+    derivation_started = Event()
+    release_derivation = Event()
+    original_derive = SecurityAuthenticator._derive
+
+    def blocked_derive(secret, salt):
+        derivation_started.set()
+        assert release_derivation.wait(timeout=10)
+        return original_derive(secret, salt)
+
+    monkeypatch.setattr(
+        SecurityAuthenticator,
+        "_derive",
+        staticmethod(blocked_derive),
+    )
+
+    result = []
+
+    thread = Thread(
+        target=lambda: result.append(
+            authenticator.authenticate(SecurityCredentials("admin", "password123"))
+        )
+    )
+    thread.start()
+
+    try:
+        assert derivation_started.wait(timeout=10)
+
+        # This operation must not wait for the PBKDF2 derivation.
+        assert authenticator.exists("admin") is True
+    finally:
+        release_derivation.set()
+        thread.join(timeout=10)
+
+    assert not thread.is_alive()
+    assert result == [True]

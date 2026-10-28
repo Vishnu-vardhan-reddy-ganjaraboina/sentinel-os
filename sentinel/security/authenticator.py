@@ -159,6 +159,14 @@ class SecurityAuthenticator(Authenticator):
         Unknown usernames perform a dummy PBKDF2 derivation to reduce
         the timing difference between known and unknown usernames.
         """
+        authenticated, _ = self._authenticate_record(credentials)
+        return authenticated
+
+    def _authenticate_record(
+        self,
+        credentials: Credentials,
+    ) -> tuple[bool, _CredentialRecord | None]:
+        """Authenticate credentials and return the verified record snapshot."""
         with self._lock:
             stored = self._credentials.get(credentials.username)
 
@@ -167,17 +175,14 @@ class SecurityAuthenticator(Authenticator):
                 credentials.secret,
                 _DUMMY_SALT,
             )
-            return False
+            return False, None
 
         candidate = self._derive(
             credentials.secret,
             stored.salt,
         )
 
-        return hmac.compare_digest(
-            stored.digest,
-            candidate,
-        )
+        return hmac.compare_digest(stored.digest, candidate), stored
 
     def exists(
         self,

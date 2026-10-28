@@ -1098,3 +1098,68 @@ def test_server_rejects_restart_while_worker_is_alive() -> None:
             connection.close()
         server.stop()
         server.control_plane.execute_request = original_execute
+
+def test_invalid_tls_handshake_does_not_prevent_healthy_client() -> None:
+    server = create_tls_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        # Malformed TLS data may cause a graceful close or a TCP reset.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(b"not a TLS handshake")
+
+            try:
+                response = connection.recv(4096)
+            except ConnectionResetError:
+                response = b""
+
+            assert response == b""
+
+        # Verify that a legitimate TLS client can still make a request.
+        cert_path = (
+            Path(__file__).resolve().parents[1]
+            / "certs"
+            / "transport-test-cert.pem"
+        )
+        client_context = ssl.create_default_context(
+            ssl.Purpose.SERVER_AUTH,
+            cafile=str(cert_path),
+        )
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            with client_context.wrap_socket(
+                connection,
+                server_hostname="localhost",
+            ) as tls_connection:
+                request = ControlRequest(
+                    command=KernelCommand.SYSTEM_HEALTH,
+                    context=ControlContext(
+                        caller_id="test-client",
+                        caller_type="cli",
+                    ),
+                )
+                tls_connection.sendall(
+                    ControlPlaneProtocol.encode_request(request)
+                )
+
+                data = b""
+                while b"\\n" not in data:
+                    chunk = tls_connection.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+        assert result.success is True
+        assert result.data["healthy"] is True
+    finally:
+        server.stop()

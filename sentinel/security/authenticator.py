@@ -16,6 +16,7 @@ from sentinel.security.interfaces import Authenticator, Credentials
 _PBKDF2_ITERATIONS = 600_000
 _SALT_SIZE = 16
 _DIGEST_SIZE = 32
+_DUMMY_SALT = b"sentinel-auth-dummy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,13 +155,18 @@ class SecurityAuthenticator(Authenticator):
     ) -> bool:
         """
         Authenticate supplied credentials.
+
+        Unknown usernames perform a dummy PBKDF2 derivation to reduce
+        the timing difference between known and unknown usernames.
         """
         with self._lock:
-            stored = self._credentials.get(
-                credentials.username,
-            )
+            stored = self._credentials.get(credentials.username)
 
         if stored is None:
+            self._derive(
+                credentials.secret,
+                _DUMMY_SALT,
+            )
             return False
 
         candidate = self._derive(

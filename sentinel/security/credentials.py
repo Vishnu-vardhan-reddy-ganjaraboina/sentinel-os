@@ -19,6 +19,12 @@ class SecurityCredentials(Credentials):
         username: str,
         secret: str,
     ) -> None:
+        if not isinstance(username, str):
+            raise ValueError("username must be a string")
+
+        if not isinstance(secret, str):
+            raise ValueError("secret must be a string")
+
         if not username.strip():
             raise ValueError("username cannot be empty.")
 
@@ -60,16 +66,10 @@ class SecurityCredentials(Credentials):
         if not isinstance(other, SecurityCredentials):
             return NotImplemented
 
-        return (
-            self.username == other.username
-            and self.secret == other.secret
-        )
+        return self.username == other.username and self.secret == other.secret
 
     def __hash__(self) -> int:
         return hash((self.username, self.secret))
 
     def __repr__(self) -> str:
-        return (
-            f"SecurityCredentials("
-            f"username={self.username!r})"
-        )
+        return f"SecurityCredentials(username={self.username!r})"

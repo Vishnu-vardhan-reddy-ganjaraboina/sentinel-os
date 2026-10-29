@@ -64,6 +64,11 @@ def test_authorize():
         {Role.ADMIN},
     )
 
+    manager.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
+    )
+
     manager.grant(
         Role.ADMIN,
         {Permission.READ},
@@ -85,6 +90,11 @@ def test_grant_single_permission():
         "1",
         "Admin",
         {Role.ADMIN},
+    )
+
+    manager.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
     )
 
     manager.grant(
@@ -116,6 +126,11 @@ def test_grant_multiple_permissions():
         "1",
         "Admin",
         {Role.ADMIN},
+    )
+
+    manager.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
     )
 
     manager.grant(
@@ -158,6 +173,11 @@ def test_revoke_single_permission():
         "1",
         "Admin",
         {Role.ADMIN},
+    )
+
+    manager.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
     )
 
     manager.grant(
@@ -878,3 +898,47 @@ def test_authenticate_identity_rejects_credentials_replaced_during_derivation(
     assert not thread.is_alive()
     assert results == [None]
     assert manager.authenticate_identity(new_credentials) == new_identity
+
+
+def test_authorize_rejects_unregistered_identity():
+    manager = SecurityManager()
+    identity = SecurityIdentity("stale-1", "Admin", {Role.ADMIN})
+    manager.grant(Role.ADMIN, Permission.EXECUTE)
+
+    assert manager.authorize(identity, Permission.EXECUTE) is False
+
+
+def test_authorize_rejects_identity_after_unregister():
+    manager = SecurityManager()
+    identity = SecurityIdentity("stale-2", "Admin", {Role.ADMIN})
+    credentials = SecurityCredentials("stale-admin", "password123")
+
+    manager.register_identity(identity, credentials)
+    manager.grant(Role.ADMIN, Permission.EXECUTE)
+
+    assert manager.authorize(identity, Permission.EXECUTE) is True
+
+    manager.unregister_identity(identity.id, credentials.username)
+
+    assert manager.get_identity(identity.id) is None
+    assert manager.authorize(identity, Permission.EXECUTE) is False
+
+
+def test_authorize_rejects_replaced_identity_object():
+    manager = SecurityManager()
+    old_identity = SecurityIdentity("stale-3", "Old Admin", {Role.ADMIN})
+    new_identity = SecurityIdentity("stale-3", "New Admin", {Role.ADMIN})
+
+    manager.register_identity(
+        old_identity,
+        SecurityCredentials("old-admin", "password123"),
+    )
+    manager.grant(Role.ADMIN, Permission.EXECUTE)
+
+    manager.register_identity(
+        new_identity,
+        SecurityCredentials("new-admin", "password456"),
+    )
+
+    assert manager.authorize(old_identity, Permission.EXECUTE) is False
+    assert manager.authorize(new_identity, Permission.EXECUTE) is True

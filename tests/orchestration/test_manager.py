@@ -14,6 +14,7 @@ from sentinel.orchestration.exceptions import (
 from sentinel.orchestration.manager import OrchestrationManager
 from sentinel.orchestration.models import OrchestrationRequest
 from sentinel.security.constants import Permission, Role
+from sentinel.security.credentials import SecurityCredentials
 from sentinel.security.exceptions import AuthorizationError
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
@@ -55,6 +56,10 @@ def create_authorized_security() -> tuple[
         "user.1",
         "Test User",
         {Role.USER},
+    )
+    security.register_identity(
+        identity,
+        SecurityCredentials("user.1", "test-password"),
     )
 
     return security, identity

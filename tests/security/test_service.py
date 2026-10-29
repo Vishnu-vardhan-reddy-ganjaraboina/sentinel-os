@@ -76,6 +76,10 @@ def test_authorize():
         "Admin",
         {Role.ADMIN},
     )
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
+    )
 
     assert service.authorize(
         identity,

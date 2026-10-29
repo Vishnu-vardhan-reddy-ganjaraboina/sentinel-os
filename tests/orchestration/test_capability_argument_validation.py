@@ -14,6 +14,7 @@ from sentinel.capabilities.metadata import CapabilityMetadata
 from sentinel.orchestration.exceptions import OrchestrationExecutionError
 from sentinel.orchestration.manager import OrchestrationManager
 from sentinel.security.constants import Permission, Role
+from sentinel.security.credentials import SecurityCredentials
 from sentinel.security.exceptions import AuthorizationError
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
@@ -70,6 +71,10 @@ def make_security(
         "test.user",
         "Test User",
         {Role.USER},
+    )
+    security.register_identity(
+        identity,
+        SecurityCredentials("test.user", "test-password"),
     )
     return security, identity
 

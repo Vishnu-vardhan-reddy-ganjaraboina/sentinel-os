@@ -160,8 +160,12 @@ class SecurityManager:
         identity: SecurityIdentity,
         permission: Permission,
     ) -> bool:
-        """Authorize an identity."""
-        return self._authorizer.authorize(identity, permission)
+        """Authorize only a currently registered identity."""
+        with self._lock:
+            if self._identities.get(identity.id) is not identity:
+                return False
+
+            return self._authorizer.authorize(identity, permission)
 
     def grant(
         self,

@@ -5,6 +5,7 @@ Base implementation of a Sentinel capability.
 from __future__ import annotations
 
 from abc import abstractmethod
+from threading import RLock
 from typing import Any
 
 from sentinel.capabilities.exceptions import (
@@ -27,6 +28,7 @@ class BaseCapability(Capability):
         metadata: CapabilityMetadata,
     ) -> None:
         self._metadata = metadata
+        self._state_lock = RLock()
 
     @property
     def metadata(self) -> CapabilityMetadata:
@@ -53,25 +55,34 @@ class BaseCapability(Capability):
 
     @property
     def enabled(self) -> bool:
-        return self._metadata.enabled
+        with self._state_lock:
+            return self._metadata.enabled
 
     def enable(self) -> None:
-        self._metadata.enabled = True
+        with self._state_lock:
+            self._metadata.enabled = True
 
     def disable(self) -> None:
-        self._metadata.enabled = False
+        with self._state_lock:
+            self._metadata.enabled = False
 
     def execute(
         self,
         **kwargs: Any,
     ) -> Any:
         """
-        Execute the capability.
+        Admit execution only while the capability is enabled.
+
+        The state lock makes the enabled check atomic with respect
+        to enable() and disable(). Once admitted, execution runs
+        without holding the state lock; an in-flight run may finish
+        after the capability is disabled.
         """
-        if not self.enabled:
-            raise CapabilityDisabledError(
-                f"Capability '{self.id}' is disabled."
-            )
+        with self._state_lock:
+            if not self._metadata.enabled:
+                raise CapabilityDisabledError(
+                    f"Capability '{self.id}' is disabled."
+                )
 
         return self.run(**kwargs)
 

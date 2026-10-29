@@ -66,25 +66,22 @@ class BaseCapability(Capability):
         with self._state_lock:
             self._metadata.enabled = False
 
-    def execute(
-        self,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Admit execution only while the capability is enabled.
-
-        The state lock makes the enabled check atomic with respect
-        to enable() and disable(). Once admitted, execution runs
-        without holding the state lock; an in-flight run may finish
-        after the capability is disabled.
-        """
+    def _admit_execution(self) -> None:
+        """Admit execution only while the capability is enabled."""
         with self._state_lock:
             if not self._metadata.enabled:
                 raise CapabilityDisabledError(
                     f"Capability '{self.id}' is disabled."
                 )
 
+    def _execute_admitted(self, **kwargs: Any) -> Any:
+        """Run a capability whose execution has already been admitted."""
         return self.run(**kwargs)
+
+    def execute(self, **kwargs: Any) -> Any:
+        """Execute the capability if it is enabled."""
+        self._admit_execution()
+        return self._execute_admitted(**kwargs)
 
     @abstractmethod
     def run(

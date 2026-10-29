@@ -5,6 +5,7 @@ Capability registry for the Sentinel Capabilities subsystem.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from threading import RLock
 
 from sentinel.capabilities.capability import BaseCapability
@@ -95,6 +96,20 @@ class CapabilityRegistry:
                 for capability in self._capabilities.values()
                 if capability.metadata.category == category
             ]
+
+    @contextmanager
+    def execution_admission(
+        self,
+        capability: BaseCapability,
+    ) -> Iterator[None]:
+        """Admit execution only for the currently registered instance."""
+        with self._lock:
+            if self._capabilities.get(capability.id) is not capability:
+                raise CapabilityNotFoundError(capability.id)
+            capability._admit_execution()
+
+        # Once admitted, an execution may finish after unregistering.
+        yield
 
     def clear(self) -> None:
         """

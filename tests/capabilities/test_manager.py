@@ -1,3 +1,5 @@
+from threading import Event, Thread
+
 import pytest
 
 from sentinel.capabilities.capability import BaseCapability
@@ -5,6 +7,7 @@ from sentinel.capabilities.constants import CapabilityCategory
 from sentinel.capabilities.exceptions import (
     CapabilityDisabledError,
     CapabilityExecutionError,
+    CapabilityNotFoundError,
 )
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.capabilities.metadata import CapabilityMetadata
@@ -92,6 +95,82 @@ def test_clear():
     manager.clear()
 
     assert len(manager.list()) == 0
+
+
+def test_execute_admitted_run_finishes_after_unregister(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = CapabilityManager()
+    capability = EchoCapability()
+    manager.register(capability)
+
+    admitted = Event()
+    release = Event()
+    result_holder = {}
+    error_holder = {}
+    original_execute_admitted = capability._execute_admitted
+
+    def pause_after_admission(**kwargs):
+        admitted.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("Test did not release admitted execution.")
+        return original_execute_admitted(**kwargs)
+
+    monkeypatch.setattr(
+        capability,
+        "_execute_admitted",
+        pause_after_admission,
+    )
+
+    def execute() -> None:
+        try:
+            result_holder["result"] = manager.execute_instance(
+                capability,
+                value=42,
+            )
+        except Exception as exc:
+            error_holder["error"] = exc
+
+    worker = Thread(target=execute)
+    worker.start()
+
+    try:
+        assert admitted.wait(timeout=5), "Execution was not admitted."
+        manager.unregister("echo")
+        release.set()
+        worker.join(timeout=5)
+
+        assert not worker.is_alive(), "Worker thread did not finish."
+        assert "error" not in error_holder
+        assert result_holder["result"] == {"value": 42}
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+
+def test_execute_instance_rejects_unregistered_reference() -> None:
+    manager = CapabilityManager()
+    capability = EchoCapability()
+    manager.register(capability)
+
+    stale_reference = manager.registry.get("echo")
+    manager.unregister("echo")
+
+    with pytest.raises(CapabilityNotFoundError):
+        manager.execute_instance(stale_reference)
+
+
+def test_execute_instance_rejects_replaced_reference() -> None:
+    manager = CapabilityManager()
+    original = EchoCapability()
+    replacement = EchoCapability()
+    manager.register(original)
+
+    manager.unregister("echo")
+    manager.register(replacement)
+
+    with pytest.raises(CapabilityNotFoundError):
+        manager.execute_instance(original)
 
 def test_disabled_capability_preserves_disabled_error() -> None:
     manager = CapabilityManager()

@@ -214,9 +214,11 @@ def test_replacement_after_validation_never_executes_replacement(
         "execute_instance",
         replace_before_execute,
     )
-    manager.execute_goal(
-        request_id="req.capability.replaced",
-        input="test capability replacement",
-    )
-    assert original.run_called is True
+    with pytest.raises(OrchestrationExecutionError):
+        manager.execute_goal(
+            request_id="req.capability.replaced",
+            input="test capability replacement",
+        )
+
+    assert original.run_called is False
     assert replacement.run_called is False

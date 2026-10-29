@@ -10,6 +10,7 @@ from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.exceptions import (
     CapabilityDisabledError,
     CapabilityExecutionError,
+    CapabilityNotFoundError,
 )
 from sentinel.capabilities.registry import CapabilityRegistry
 
@@ -61,11 +62,15 @@ class CapabilityManager:
         capability: BaseCapability,
         **kwargs: Any,
     ) -> Any:
-        """Execute the exact capability instance supplied by the caller."""
+        """Execute the exact currently registered capability instance."""
         try:
-            return capability.execute(**kwargs)
+            with self._registry.execution_admission(capability):
+                return capability._execute_admitted(**kwargs)
 
-        except CapabilityDisabledError:
+        except (
+            CapabilityDisabledError,
+            CapabilityNotFoundError,
+        ):
             raise
 
         except Exception as exc:

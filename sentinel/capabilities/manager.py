@@ -52,14 +52,16 @@ class CapabilityManager:
         capability_id: str,
         **kwargs: Any,
     ) -> Any:
-        """
-        Execute a registered capability.
-
-        Disabled capabilities preserve their specific exception type.
-        Other runtime failures are wrapped as CapabilityExecutionError.
-        """
+        """Execute a registered capability by ID."""
         capability = self._registry.get(capability_id)
+        return self.execute_instance(capability, **kwargs)
 
+    def execute_instance(
+        self,
+        capability: BaseCapability,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute the exact capability instance supplied by the caller."""
         try:
             return capability.execute(**kwargs)
 
@@ -68,7 +70,7 @@ class CapabilityManager:
 
         except Exception as exc:
             raise CapabilityExecutionError(
-                f"Capability '{capability_id}' failed."
+                f"Capability '{capability.id}' failed."
             ) from exc
 
     def list(self) -> list[BaseCapability]:

@@ -368,8 +368,8 @@ class OrchestrationManager:
                 ) from exc
 
             try:
-                capability_result = self._capabilities.execute(
-                    capability_id,
+                capability_result = self._capabilities.execute_instance(
+                    capability,
                     **arguments,
                 )
             except OrchestrationExecutionError:

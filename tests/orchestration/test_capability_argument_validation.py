@@ -137,3 +137,81 @@ def test_authorization_precedes_schema_validation() -> None:
         )
 
     assert capability.run_called is False
+
+
+def test_capability_disabled_during_authorization() -> None:
+    capability = ValidationTestCapability(
+        {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        }
+    )
+    manager = make_manager(
+        capability,
+        {"message": "hello"},
+        authorized=True,
+    )
+
+    original_authorize = manager._authorize_capability
+
+    def disable_after_authorization_check(
+        capability_id: str,
+    ) -> None:
+        original_authorize(capability_id)
+        capability.disable()
+
+    manager._authorize_capability = disable_after_authorization_check
+
+    with pytest.raises(OrchestrationExecutionError):
+        manager.execute_goal(
+            request_id="req.capability.disabled",
+            input="test capability disabled during authorization",
+        )
+
+    assert capability.run_called is False
+
+
+def test_replacement_after_validation_never_executes_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema = {
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+        "required": ["message"],
+        "additionalProperties": False,
+    }
+
+    original = ValidationTestCapability(schema)
+    replacement = ValidationTestCapability(schema)
+
+    manager = make_manager(
+        original,
+        {"message": "hello"},
+        authorized=True,
+    )
+
+    capabilities = manager._capabilities
+    original_execute = capabilities.execute
+
+    def replace_before_execute(
+        capability_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        capabilities.unregister(capability_id)
+        capabilities.register(replacement)
+        return original_execute(capability_id, **kwargs)
+
+    monkeypatch.setattr(
+        capabilities,
+        "execute",
+        replace_before_execute,
+    )
+
+    manager.execute_goal(
+        request_id="req.capability.replaced",
+        input="test capability replacement",
+    )
+
+    assert replacement.run_called is False

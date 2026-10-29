@@ -193,25 +193,25 @@ def test_replacement_after_validation_never_executes_replacement(
     )
 
     capabilities = manager._capabilities
-    original_execute = capabilities.execute
+
+    original_execute_instance = capabilities.execute_instance
 
     def replace_before_execute(
-        capability_id: str,
+        capability: ValidationTestCapability,
         **kwargs: Any,
     ) -> Any:
-        capabilities.unregister(capability_id)
+        capabilities.unregister(capability.id)
         capabilities.register(replacement)
-        return original_execute(capability_id, **kwargs)
+        return original_execute_instance(capability, **kwargs)
 
     monkeypatch.setattr(
         capabilities,
-        "execute",
+        "execute_instance",
         replace_before_execute,
     )
-
     manager.execute_goal(
         request_id="req.capability.replaced",
         input="test capability replacement",
     )
-
+    assert original.run_called is True
     assert replacement.run_called is False

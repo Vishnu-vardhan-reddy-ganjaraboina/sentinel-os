@@ -25,14 +25,6 @@ class SecurityManager:
         self._generation = 0
         self._registration_token = object()
 
-    @property
-    def authenticator(self) -> SecurityAuthenticator:
-        return self._authenticator
-
-    @property
-    def authorizer(self) -> SecurityAuthorizer:
-        return self._authorizer
-
 
     def register_identity(
         self,

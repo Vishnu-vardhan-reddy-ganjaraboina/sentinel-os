@@ -1166,3 +1166,10 @@ def test_failed_registration_releases_new_identity_protection():
 
     new_identity.add_role(Role.ADMIN)
     assert new_identity.has_role(Role.ADMIN)
+
+
+def test_manager_does_not_expose_mutable_security_components():
+    manager = SecurityManager()
+
+    assert not hasattr(manager, "authenticator")
+    assert not hasattr(manager, "authorizer")

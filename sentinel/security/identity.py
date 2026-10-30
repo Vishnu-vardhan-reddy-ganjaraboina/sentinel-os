@@ -1,3 +1,4 @@
+
 """
 Identity implementation for the Sentinel Security subsystem.
 """
@@ -11,9 +12,7 @@ from sentinel.security.interfaces import Identity
 
 
 class SecurityIdentity(Identity):
-    """
-    Represents a security identity.
-    """
+    """Represents a security identity."""
 
     def __init__(
         self,
@@ -31,6 +30,7 @@ class SecurityIdentity(Identity):
         self._name = name
         self._roles: set[Role] = set(roles or [])
         self._lock = RLock()
+        self._registration_token: object | None = None
 
     @property
     def id(self) -> str:
@@ -45,11 +45,57 @@ class SecurityIdentity(Identity):
         with self._lock:
             return set(self._roles)
 
+    def _protect_registration(self, token: object) -> None:
+        """Protect role mutations for the owning manager."""
+        with self._lock:
+            if (
+                self._registration_token is not None
+                and self._registration_token is not token
+            ):
+                raise RuntimeError(
+                    "Identity is already registered elsewhere."
+                )
+
+            self._registration_token = token
+
+    def _release_registration(self, token: object) -> None:
+        """Release registration protection for the owning manager."""
+        with self._lock:
+            if self._registration_token is token:
+                self._registration_token = None
+
+    def _add_role(
+        self,
+        role: Role,
+        token: object,
+    ) -> None:
+        """Add a role through the owning manager."""
+        with self._lock:
+            if self._registration_token is not token:
+                raise PermissionError("Invalid identity registration token.")
+            self._roles.add(role)
+
+    def _remove_role(
+        self,
+        role: Role,
+        token: object,
+    ) -> None:
+        """Remove a role through the owning manager."""
+        with self._lock:
+            if self._registration_token is not token:
+                raise PermissionError("Invalid identity registration token.")
+            self._roles.discard(role)
+
     def add_role(
         self,
         role: Role,
     ) -> None:
         with self._lock:
+            if self._registration_token is not None:
+                raise PermissionError(
+                    "Roles of a registered identity must be changed "
+                    "through its SecurityManager."
+                )
             self._roles.add(role)
 
     def remove_role(
@@ -57,6 +103,11 @@ class SecurityIdentity(Identity):
         role: Role,
     ) -> None:
         with self._lock:
+            if self._registration_token is not None:
+                raise PermissionError(
+                    "Roles of a registered identity must be changed "
+                    "through its SecurityManager."
+                )
             self._roles.discard(role)
 
     def has_role(
@@ -68,10 +119,7 @@ class SecurityIdentity(Identity):
 
     def to_dict(self) -> dict[str, object]:
         with self._lock:
-            roles = sorted(
-                role.value
-                for role in self._roles
-            )
+            roles = sorted(role.value for role in self._roles)
 
         return {
             "id": self.id,
@@ -89,10 +137,7 @@ class SecurityIdentity(Identity):
 
     def __repr__(self) -> str:
         with self._lock:
-            roles = [
-                role.value
-                for role in self._roles
-            ]
+            roles = [role.value for role in self._roles]
 
         return (
             f"SecurityIdentity("

@@ -5,6 +5,7 @@ Base implementation of a Sentinel capability.
 from __future__ import annotations
 
 from abc import abstractmethod
+from copy import deepcopy
 from threading import RLock
 from typing import Any
 
@@ -27,15 +28,14 @@ class BaseCapability(Capability):
         self,
         metadata: CapabilityMetadata,
     ) -> None:
-        self._metadata = metadata
+        self._metadata = deepcopy(metadata)
         self._state_lock = RLock()
 
     @property
     def metadata(self) -> CapabilityMetadata:
-        """
-        Return the capability metadata.
-        """
-        return self._metadata
+        """Return an isolated snapshot of the capability metadata."""
+        with self._state_lock:
+            return deepcopy(self._metadata)
 
     @property
     def id(self) -> str:

@@ -153,7 +153,7 @@ def test_execute_instance_rejects_unregistered_reference() -> None:
     capability = EchoCapability()
     manager.register(capability)
 
-    stale_reference = manager.registry.get("echo")
+    stale_reference = manager.get("echo")
     manager.unregister("echo")
 
     with pytest.raises(CapabilityNotFoundError):
@@ -182,3 +182,22 @@ def test_disabled_capability_preserves_disabled_error() -> None:
 
     with pytest.raises(CapabilityDisabledError):
         manager.execute("echo")
+
+def test_get_returns_registered_capability() -> None:
+    manager = CapabilityManager()
+    capability = EchoCapability()
+
+    manager.register(capability)
+
+    assert manager.get("echo") is capability
+
+
+def test_constructor_preserves_supplied_empty_registry() -> None:
+    from sentinel.capabilities.registry import CapabilityRegistry
+
+    registry = CapabilityRegistry()
+    manager = CapabilityManager(registry=registry)
+
+    manager.register(EchoCapability())
+
+    assert len(registry) == 1

@@ -27,12 +27,10 @@ class CapabilityManager:
         self,
         registry: CapabilityRegistry | None = None,
     ) -> None:
-        self._registry = registry or CapabilityRegistry()
+        self._registry = (
+            registry if registry is not None else CapabilityRegistry()
+        )
 
-    @property
-    def registry(self) -> CapabilityRegistry:
-        """Return the capability registry."""
-        return self._registry
 
     def register(
         self,
@@ -47,6 +45,10 @@ class CapabilityManager:
     ) -> None:
         """Unregister a capability."""
         self._registry.unregister(capability_id)
+
+    def get(self, capability_id: str) -> BaseCapability:
+        """Return a registered capability by ID."""
+        return self._registry.get(capability_id)
 
     def execute(
         self,

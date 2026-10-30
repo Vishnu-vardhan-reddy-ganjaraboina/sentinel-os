@@ -117,3 +117,35 @@ def test_disable_rejects_new_execution_but_allows_admitted_run() -> None:
     finally:
         release_run.set()
         worker.join(timeout=5)
+
+def test_metadata_property_returns_isolated_snapshot() -> None:
+    capability = DummyCapability()
+
+    metadata = capability.metadata
+    metadata.name = "Modified"
+    metadata.enabled = False
+    metadata.permissions.append("admin")
+    metadata.input_schema["type"] = "string"
+
+    assert capability.name == "Dummy"
+    assert capability.enabled is True
+    assert "admin" not in capability.metadata.permissions
+    assert capability.metadata.input_schema == {}
+
+
+def test_constructor_copies_supplied_metadata() -> None:
+    metadata = CapabilityMetadata(
+        capability_id="dummy.echo",
+        name="Dummy",
+        description="Echo capability",
+        category=CapabilityCategory.CUSTOM,
+    )
+
+    capability = DummyCapability.__new__(DummyCapability)
+    BaseCapability.__init__(capability, metadata)
+
+    metadata.name = "Modified"
+    metadata.enabled = False
+
+    assert capability.name == "Dummy"
+    assert capability.enabled is True

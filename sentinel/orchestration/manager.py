@@ -350,7 +350,7 @@ class OrchestrationManager:
 
             self._authorize_capability(capability_id)
 
-            capability = self._capabilities.registry.get(capability_id)
+            capability = self._capabilities.get(capability_id)
 
             try:
                 validate_capability_arguments(
@@ -403,7 +403,7 @@ class OrchestrationManager:
                 f"Capability '{capability_id}' is not registered."
             )
 
-        capability = self._capabilities.registry.get(
+        capability = self._capabilities.get(
             capability_id,
         )
 

@@ -470,9 +470,7 @@ class ControlPlaneTransportServer:
                     )
                     return
 
-                identity = authorizer.security.authenticate_identity(
-                    credentials
-                )
+                identity = authorizer.authenticate_identity(credentials)
                 if identity is None:
                     self._send_protocol_error(
                         connection,

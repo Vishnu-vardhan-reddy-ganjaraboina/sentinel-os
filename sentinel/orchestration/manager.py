@@ -98,10 +98,6 @@ class OrchestrationManager:
         """Return the capability manager."""
         return self._capabilities
 
-    @property
-    def security(self) -> SecurityManager:
-        """Return the Security manager."""
-        return self._security
 
     @property
     def identity(self) -> SecurityIdentity | None:

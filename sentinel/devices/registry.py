@@ -29,9 +29,7 @@ class DeviceRegistry:
         self,
         device: BaseDevice,
     ) -> None:
-        """
-        Register a device.
-        """
+        """Register a device."""
         with self._lock:
             if device.id in self._devices:
                 raise DeviceAlreadyExistsError(
@@ -44,9 +42,7 @@ class DeviceRegistry:
         self,
         device_id: str,
     ) -> None:
-        """
-        Remove a device.
-        """
+        """Remove a device."""
         with self._lock:
             if device_id not in self._devices:
                 raise DeviceNotFoundError(device_id)
@@ -57,46 +53,40 @@ class DeviceRegistry:
         self,
         device_id: str,
     ) -> BaseDevice:
-        """
-        Return a registered device.
-        """
-        try:
-            return self._devices[device_id]
-        except KeyError as exc:
-            raise DeviceNotFoundError(device_id) from exc
+        """Return a registered device."""
+        with self._lock:
+            try:
+                return self._devices[device_id]
+            except KeyError as exc:
+                raise DeviceNotFoundError(device_id) from exc
 
     def exists(
         self,
         device_id: str,
     ) -> bool:
-        """
-        Check whether a device exists.
-        """
-        return device_id in self._devices
+        """Check whether a device exists."""
+        with self._lock:
+            return device_id in self._devices
 
     def list(self) -> builtins.list[BaseDevice]:
-        """
-        Return all registered devices.
-        """
-        return list(self._devices.values())
+        """Return all registered devices."""
+        with self._lock:
+            return list(self._devices.values())
 
     def list_by_category(
         self,
         category: DeviceCategory,
     ) -> builtins.list[BaseDevice]:
-        """
-        Return devices belonging to a category.
-        """
-        return [
-            device
-            for device in self._devices.values()
-            if device.metadata.category == category
-        ]
+        """Return devices belonging to a category."""
+        with self._lock:
+            return [
+                device
+                for device in self._devices.values()
+                if device.metadata.category == category
+            ]
 
     def clear(self) -> None:
-        """
-        Remove all registered devices.
-        """
+        """Remove all registered devices."""
         with self._lock:
             self._devices.clear()
 
@@ -104,10 +94,15 @@ class DeviceRegistry:
         self,
         device_id: str,
     ) -> bool:
-        return device_id in self._devices
+        with self._lock:
+            return device_id in self._devices
 
     def __len__(self) -> int:
-        return len(self._devices)
+        with self._lock:
+            return len(self._devices)
 
     def __iter__(self) -> Iterator[BaseDevice]:
-        return iter(self._devices.values())
+        with self._lock:
+            snapshot = list(self._devices.values())
+
+        return iter(snapshot)

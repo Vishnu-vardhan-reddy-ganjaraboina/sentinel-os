@@ -58,7 +58,7 @@ def test_connect():
 
     manager.connect("echo")
 
-    assert manager.registry.get("echo").connected is True
+    assert manager.get("echo").connected is True
 
 
 def test_execute():
@@ -93,7 +93,7 @@ def test_disconnect():
     manager.connect("echo")
     manager.disconnect("echo")
 
-    assert manager.registry.get("echo").connected is False
+    assert manager.get("echo").connected is False
 
 
 def test_unregister():
@@ -129,3 +129,19 @@ def test_execute_unknown_device_raises_not_found() -> None:
 
     with pytest.raises(DeviceNotFoundError):
         manager.execute("missing")
+def test_injected_empty_registry_is_preserved() -> None:
+    from sentinel.devices.registry import DeviceRegistry
+
+    registry = DeviceRegistry()
+    manager = DeviceManager(registry)
+
+    device = EchoDevice()
+    manager.register(device)
+
+    assert registry.get("echo") is device
+
+
+def test_manager_does_not_expose_public_registry() -> None:
+    manager = DeviceManager()
+
+    assert not hasattr(manager, "registry")

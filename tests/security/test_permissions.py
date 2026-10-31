@@ -1,4 +1,6 @@
-﻿from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 from sentinel.security.constants import Permission, Role
 from sentinel.security.permissions import RolePermissionStore
@@ -126,3 +128,47 @@ def test_concurrent_permission_operations_are_safe() -> None:
 
     assert store.has_permission(Role.ADMIN, Permission.READ)
     assert store.has_permission(Role.ADMIN, Permission.WRITE)
+
+
+def test_grant_iterator_failure_does_not_partially_mutate_store() -> None:
+    store = RolePermissionStore()
+    store.grant(Role.USER, [Permission.READ])
+
+    def failing_permissions():
+        yield Permission.WRITE
+        raise RuntimeError("iterator failed")
+
+    with pytest.raises(RuntimeError, match="iterator failed"):
+        store.grant(Role.USER, failing_permissions())
+
+    assert store.permissions_for(Role.USER) == {Permission.READ}
+
+
+def test_revoke_iterator_failure_does_not_partially_mutate_store() -> None:
+    store = RolePermissionStore()
+    store.grant(Role.USER, [Permission.READ, Permission.WRITE])
+
+    def failing_permissions():
+        yield Permission.READ
+        raise RuntimeError("iterator failed")
+
+    with pytest.raises(RuntimeError, match="iterator failed"):
+        store.revoke(Role.USER, failing_permissions())
+
+    assert store.permissions_for(Role.USER) == {
+        Permission.READ,
+        Permission.WRITE,
+    }
+
+
+@pytest.mark.parametrize("operation", ["grant", "revoke"])
+def test_invalid_permission_value_does_not_mutate_store(
+    operation: str,
+) -> None:
+    store = RolePermissionStore()
+    store.grant(Role.USER, [Permission.READ])
+
+    with pytest.raises(TypeError, match="Permission values"):
+        getattr(store, operation)(Role.USER, [Permission.WRITE, "DELETE"])
+
+    assert store.permissions_for(Role.USER) == {Permission.READ}

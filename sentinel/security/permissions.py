@@ -16,33 +16,29 @@ class RolePermissionStore(PermissionStore):
         self._permissions: dict[Role, set[Permission]] = {}
         self._lock = RLock()
 
-    def grant(
-        self,
-        role: Role,
-        permissions: Iterable[Permission],
-    ) -> None:
-        """
-        Grant permissions to a role.
-        """
+    def grant(self, role: Role, permissions: Iterable[Permission]) -> None:
+        permission_set = set(permissions)
+        if not all(
+            isinstance(permission, Permission)
+            for permission in permission_set
+        ):
+            raise TypeError("All permissions must be Permission values.")
+
         with self._lock:
-            if role not in self._permissions:
-                self._permissions[role] = set()
+            self._permissions.setdefault(role, set()).update(permission_set)
 
-            self._permissions[role].update(permissions)
+    def revoke(self, role: Role, permissions: Iterable[Permission]) -> None:
+        permission_set = set(permissions)
+        if not all(
+            isinstance(permission, Permission)
+            for permission in permission_set
+        ):
+            raise TypeError("All permissions must be Permission values.")
 
-    def revoke(
-        self,
-        role: Role,
-        permissions: Iterable[Permission],
-    ) -> None:
-        """
-        Revoke permissions from a role.
-        """
         with self._lock:
             if role not in self._permissions:
                 return
-
-            self._permissions[role].difference_update(permissions)
+            self._permissions[role].difference_update(permission_set)
 
     def permissions_for(
         self,

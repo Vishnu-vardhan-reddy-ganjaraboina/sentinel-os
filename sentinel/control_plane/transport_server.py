@@ -526,6 +526,14 @@ class ControlPlaneTransportServer:
             chunk = connection.recv(4096)
 
             if not chunk:
+                if not chunks:
+                    raise ControlProtocolError(
+                        "Control message cannot be empty."
+                    )
+                if not any(b"\n" in part for part in chunks):
+                    raise ControlProtocolError(
+                        "Control message must be newline-terminated."
+                    )
                 break
 
             total_size += len(chunk)

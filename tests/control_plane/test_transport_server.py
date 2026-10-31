@@ -260,6 +260,36 @@ def test_server_can_handle_multiple_connections() -> None:
         server.stop()
 
 
+def test_server_rejects_eof_without_newline() -> None:
+    server = create_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(b'{"version":1,"type":"request"}')
+            connection.shutdown(socket.SHUT_WR)
+
+            data = b""
+            while b"\n" not in data:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert "newline-terminated" in result.error.lower()
+    finally:
+        server.stop()
+
+
 def test_server_recovers_after_client_disconnects_mid_request() -> None:
     server = create_server(read_timeout=0.5)
     server.start()

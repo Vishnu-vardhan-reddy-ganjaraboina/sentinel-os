@@ -1193,3 +1193,48 @@ def test_invalid_tls_handshake_does_not_prevent_healthy_client() -> None:
         assert result.data["healthy"] is True
     finally:
         server.stop()
+def test_server_cleans_up_when_client_worker_fails_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    server = create_server(max_active_workers=1)
+    original_start = threading.Thread.start
+    worker_start_attempted = threading.Event()
+
+    def fail_client_worker_start(thread: threading.Thread) -> None:
+        if thread.name == "sentinel-control-plane-client":
+            worker_start_attempted.set()
+            raise RuntimeError("Simulated client worker start failure.")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", fail_client_worker_start)
+
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        connection.settimeout(2.0)
+
+        assert worker_start_attempted.wait(timeout=2.0), (
+            "The client worker start failure was not triggered."
+        )
+
+        deadline = time.monotonic() + 2.0
+        while server._active_connections and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        assert not server._worker_threads
+        assert not server._active_connections
+        assert server._active_connection is None
+        assert server.running is True
+    finally:
+        if connection is not None:
+            connection.close()
+        server.stop()

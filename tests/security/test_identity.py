@@ -254,3 +254,24 @@ def test_concurrent_reads_are_safe() -> None:
         thread.join()
 
     assert errors == []
+
+
+def test_invalid_initial_role_is_rejected() -> None:
+    with pytest.raises(TypeError, match="Role values"):
+        SecurityIdentity(
+            "user-1",
+            "Sentinel",
+            {"admin"},
+        )
+
+
+def test_invalid_role_mutation_is_rejected() -> None:
+    identity = SecurityIdentity(
+        "user-1",
+        "Sentinel",
+    )
+
+    with pytest.raises(TypeError, match="Role"):
+        identity.add_role("admin")
+
+    assert identity.roles == set()

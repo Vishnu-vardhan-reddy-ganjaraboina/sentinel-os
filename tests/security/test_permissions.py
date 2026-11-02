@@ -172,3 +172,27 @@ def test_invalid_permission_value_does_not_mutate_store(
         getattr(store, operation)(Role.USER, [Permission.WRITE, "DELETE"])
 
     assert store.permissions_for(Role.USER) == {Permission.READ}
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["grant", "revoke", "permissions_for", "has_permission", "__contains__"],
+)
+def test_invalid_role_is_rejected(operation: str) -> None:
+    store = RolePermissionStore()
+    store.grant(Role.USER, [Permission.READ])
+
+    with pytest.raises(TypeError, match="Role"):
+        if operation == "grant":
+            store.grant("admin", [Permission.WRITE])
+        elif operation == "revoke":
+            store.revoke("admin", [Permission.WRITE])
+        elif operation == "permissions_for":
+            store.permissions_for("admin")
+        elif operation == "has_permission":
+            store.has_permission("admin", Permission.READ)
+        else:
+            store.__contains__("admin")
+
+    assert store.permissions_for(Role.USER) == {Permission.READ}
+    assert "admin" not in store.to_dict()

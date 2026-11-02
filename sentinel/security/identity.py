@@ -28,7 +28,11 @@ class SecurityIdentity(Identity):
 
         self._id = identity_id
         self._name = name
-        self._roles: set[Role] = set(roles or [])
+        initial_roles = set(roles or [])
+        if not all(isinstance(role, Role) for role in initial_roles):
+            raise TypeError("All roles must be Role values.")
+
+        self._roles: set[Role] = initial_roles
         self._lock = RLock()
         self._registration_token: object | None = None
 
@@ -70,6 +74,8 @@ class SecurityIdentity(Identity):
         token: object,
     ) -> None:
         """Add a role through the owning manager."""
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             if self._registration_token is not token:
                 raise PermissionError("Invalid identity registration token.")
@@ -81,6 +87,8 @@ class SecurityIdentity(Identity):
         token: object,
     ) -> None:
         """Remove a role through the owning manager."""
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             if self._registration_token is not token:
                 raise PermissionError("Invalid identity registration token.")
@@ -90,6 +98,8 @@ class SecurityIdentity(Identity):
         self,
         role: Role,
     ) -> None:
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             if self._registration_token is not None:
                 raise PermissionError(
@@ -102,6 +112,8 @@ class SecurityIdentity(Identity):
         self,
         role: Role,
     ) -> None:
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             if self._registration_token is not None:
                 raise PermissionError(
@@ -114,6 +126,8 @@ class SecurityIdentity(Identity):
         self,
         role: Role,
     ) -> bool:
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             return role in self._roles
 

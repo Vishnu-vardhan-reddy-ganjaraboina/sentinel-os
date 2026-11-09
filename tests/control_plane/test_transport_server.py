@@ -260,6 +260,36 @@ def test_server_can_handle_multiple_connections() -> None:
         server.stop()
 
 
+def test_server_rejects_eof_without_newline() -> None:
+    server = create_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(b'{"version":1,"type":"request"}')
+            connection.shutdown(socket.SHUT_WR)
+
+            data = b""
+            while b"\n" not in data:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert "newline-terminated" in result.error.lower()
+    finally:
+        server.stop()
+
+
 def test_server_recovers_after_client_disconnects_mid_request() -> None:
     server = create_server(read_timeout=0.5)
     server.start()
@@ -1162,4 +1192,49 @@ def test_invalid_tls_handshake_does_not_prevent_healthy_client() -> None:
         assert result.success is True
         assert result.data["healthy"] is True
     finally:
+        server.stop()
+def test_server_cleans_up_when_client_worker_fails_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    server = create_server(max_active_workers=1)
+    original_start = threading.Thread.start
+    worker_start_attempted = threading.Event()
+
+    def fail_client_worker_start(thread: threading.Thread) -> None:
+        if thread.name == "sentinel-control-plane-client":
+            worker_start_attempted.set()
+            raise RuntimeError("Simulated client worker start failure.")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", fail_client_worker_start)
+
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        connection.settimeout(2.0)
+
+        assert worker_start_attempted.wait(timeout=2.0), (
+            "The client worker start failure was not triggered."
+        )
+
+        deadline = time.monotonic() + 2.0
+        while server._active_connections and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        assert not server._worker_threads
+        assert not server._active_connections
+        assert server._active_connection is None
+        assert server.running is True
+    finally:
+        if connection is not None:
+            connection.close()
         server.stop()

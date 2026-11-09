@@ -426,3 +426,26 @@ def test_concurrent_clear_and_authorize_are_safe():
         thread.join()
 
     assert errors == []
+
+def test_authorize_uses_current_roles_after_role_removal() -> None:
+    authorizer = SecurityAuthorizer()
+
+    authorizer.grant(Role.ADMIN, [Permission.EXECUTE])
+
+    identity = SecurityIdentity(
+        "role-snapshot-test",
+        "Admin",
+        {Role.ADMIN},
+    )
+
+    original_roles = identity.roles
+    identity.remove_role(Role.ADMIN)
+
+    # The previously retrieved roles value is an isolated snapshot.
+    assert Role.ADMIN in original_roles
+
+    # Authorization uses the identity's current roles, not that old snapshot.
+    assert not authorizer.authorize(
+        identity,
+        Permission.EXECUTE,
+    )

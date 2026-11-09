@@ -16,33 +16,33 @@ class RolePermissionStore(PermissionStore):
         self._permissions: dict[Role, set[Permission]] = {}
         self._lock = RLock()
 
-    def grant(
-        self,
-        role: Role,
-        permissions: Iterable[Permission],
-    ) -> None:
-        """
-        Grant permissions to a role.
-        """
+    def grant(self, role: Role, permissions: Iterable[Permission]) -> None:
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
+        permission_set = set(permissions)
+        if not all(
+            isinstance(permission, Permission)
+            for permission in permission_set
+        ):
+            raise TypeError("All permissions must be Permission values.")
+
         with self._lock:
-            if role not in self._permissions:
-                self._permissions[role] = set()
+            self._permissions.setdefault(role, set()).update(permission_set)
 
-            self._permissions[role].update(permissions)
+    def revoke(self, role: Role, permissions: Iterable[Permission]) -> None:
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
+        permission_set = set(permissions)
+        if not all(
+            isinstance(permission, Permission)
+            for permission in permission_set
+        ):
+            raise TypeError("All permissions must be Permission values.")
 
-    def revoke(
-        self,
-        role: Role,
-        permissions: Iterable[Permission],
-    ) -> None:
-        """
-        Revoke permissions from a role.
-        """
         with self._lock:
             if role not in self._permissions:
                 return
-
-            self._permissions[role].difference_update(permissions)
+            self._permissions[role].difference_update(permission_set)
 
     def permissions_for(
         self,
@@ -51,6 +51,8 @@ class RolePermissionStore(PermissionStore):
         """
         Return an isolated copy of permissions assigned to a role.
         """
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             return set(self._permissions.get(role, set()))
 
@@ -62,6 +64,8 @@ class RolePermissionStore(PermissionStore):
         """
         Check whether a role has a permission.
         """
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             return permission in self._permissions.get(role, set())
 
@@ -86,6 +90,8 @@ class RolePermissionStore(PermissionStore):
             }
 
     def __contains__(self, role: Role) -> bool:
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role value.")
         with self._lock:
             return role in self._permissions
 

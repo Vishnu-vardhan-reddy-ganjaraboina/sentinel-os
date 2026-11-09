@@ -5,6 +5,7 @@ Capability registry for the Sentinel Capabilities subsystem.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from threading import RLock
 
 from sentinel.capabilities.capability import BaseCapability
@@ -60,45 +61,55 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> BaseCapability:
-        """
-        Return a capability.
-        """
-        try:
-            return self._capabilities[capability_id]
-        except KeyError as exc:
-            raise CapabilityNotFoundError(
-                capability_id
-            ) from exc
+        """Return a capability."""
+        with self._lock:
+            try:
+                return self._capabilities[capability_id]
+            except KeyError as exc:
+                raise CapabilityNotFoundError(
+                    capability_id
+                ) from exc
 
     def exists(
         self,
         capability_id: str,
     ) -> bool:
-        """
-        Check whether a capability exists.
-        """
-        return capability_id in self._capabilities
+        """Check whether a capability exists."""
+        with self._lock:
+            return capability_id in self._capabilities
 
     def list(
         self,
     ) -> CapabilityList:
-        """
-        Return all registered capabilities.
-        """
-        return list(self._capabilities.values())
+        """Return all registered capabilities."""
+        with self._lock:
+            return list(self._capabilities.values())
 
     def list_by_category(
         self,
         category: CapabilityCategory,
     ) -> CapabilityList:
-        """
-        Return capabilities belonging to a category.
-        """
-        return [
-            capability
-            for capability in self._capabilities.values()
-            if capability.metadata.category == category
-        ]
+        """Return capabilities belonging to a category."""
+        with self._lock:
+            return [
+                capability
+                for capability in self._capabilities.values()
+                if capability.metadata.category == category
+            ]
+
+    @contextmanager
+    def execution_admission(
+        self,
+        capability: BaseCapability,
+    ) -> Iterator[None]:
+        """Admit execution only for the currently registered instance."""
+        with self._lock:
+            if self._capabilities.get(capability.id) is not capability:
+                raise CapabilityNotFoundError(capability.id)
+            capability._admit_execution()
+
+        # Once admitted, an execution may finish after unregistering.
+        yield
 
     def clear(self) -> None:
         """
@@ -111,10 +122,12 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> bool:
-        return capability_id in self._capabilities
+        with self._lock:
+            return capability_id in self._capabilities
 
     def __len__(self) -> int:
-        return len(self._capabilities)
+        with self._lock:
+            return len(self._capabilities)
 
     def __iter__(self) -> Iterator[BaseCapability]:
-        return iter(self._capabilities.values())
+        return iter(self.list())

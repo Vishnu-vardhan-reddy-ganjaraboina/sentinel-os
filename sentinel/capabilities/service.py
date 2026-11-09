@@ -8,7 +8,6 @@ from typing import Any
 
 from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.manager import CapabilityManager
-from sentinel.capabilities.registry import CapabilityRegistry
 
 
 class CapabilityService:
@@ -26,19 +25,6 @@ class CapabilityService:
     ) -> None:
         self._manager = manager or CapabilityManager()
 
-    @property
-    def manager(self) -> CapabilityManager:
-        """
-        Return the underlying capability manager.
-        """
-        return self._manager
-
-    @property
-    def registry(self) -> CapabilityRegistry:
-        """
-        Return the underlying capability registry.
-        """
-        return self._manager.registry
 
     def register(
         self,

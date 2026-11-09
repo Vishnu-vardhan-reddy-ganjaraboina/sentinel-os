@@ -357,7 +357,7 @@ def test_from_configuration_passes_security_service_to_factory() -> None:
     assert manager.system.control_plane is not None
     authorizer = manager.system.control_plane.controller.authorizer
     assert isinstance(authorizer, SecurityControlAuthorizer)
-    assert authorizer.security is security
+    assert not hasattr(authorizer, "security")
 
 
 def test_from_configuration_accepts_profile() -> None:

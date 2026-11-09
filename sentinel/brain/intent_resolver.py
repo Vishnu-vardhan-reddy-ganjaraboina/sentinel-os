@@ -112,7 +112,7 @@ class DefaultIntentResolver(IntentResolver):
                 >= self.EXECUTION_SELECTION_THRESHOLD
             ):
                 candidate = result.candidate
-                capability = self._capabilities.registry.get(
+                capability = self._capabilities.get(
                     candidate.capability_id
                 )
 

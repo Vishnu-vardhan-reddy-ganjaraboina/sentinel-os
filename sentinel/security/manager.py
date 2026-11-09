@@ -23,14 +23,8 @@ class SecurityManager:
         self._identity_ids_by_username: dict[str, str] = {}
         self._lock = RLock()
         self._generation = 0
+        self._registration_token = object()
 
-    @property
-    def authenticator(self) -> SecurityAuthenticator:
-        return self._authenticator
-
-    @property
-    def authorizer(self) -> SecurityAuthorizer:
-        return self._authorizer
 
     def register_identity(
         self,
@@ -41,7 +35,6 @@ class SecurityManager:
         with self._lock:
             generation = self._generation
 
-        # Password hashing is expensive, so don't hold the manager lock.
         record = self._authenticator._prepare(credentials)
 
         with self._lock:
@@ -50,10 +43,9 @@ class SecurityManager:
                     "Security state changed during identity registration."
                 )
 
-            # Snapshot identity mappings and only the credential records
-            # that this registration may modify.
             previous_identities = self._identities.copy()
             previous_username_map = self._identity_ids_by_username.copy()
+
             affected_usernames = {
                 credentials.username,
                 *(
@@ -64,19 +56,34 @@ class SecurityManager:
                     if registered_id == identity.id
                 ),
             }
+
             previous_credentials: dict[str, _CredentialRecord | None] = {
                 username: self._authenticator._snapshot(username)
                 for username in affected_usernames
             }
 
-            try:
-                previous_id = self._identity_ids_by_username.get(credentials.username)
+            was_registered = self._identities.get(identity.id) is identity
+            displaced_identities: set[SecurityIdentity] = set()
 
+            previous_id = self._identity_ids_by_username.get(
+                credentials.username
+            )
+
+            if previous_id is not None and previous_id != identity.id:
+                previous_identity = self._identities.get(previous_id)
+                if previous_identity is not None:
+                    displaced_identities.add(previous_identity)
+
+            previous_same_id = self._identities.get(identity.id)
+            if previous_same_id is not None and previous_same_id is not identity:
+                displaced_identities.add(previous_same_id)
+
+            identity._protect_registration(self._registration_token)
+
+            try:
                 if previous_id is not None and previous_id != identity.id:
                     self._identities.pop(previous_id, None)
 
-                # Re-registering an identity with a new username invalidates
-                # the old username and its credentials.
                 for username, registered_id in list(
                     self._identity_ids_by_username.items()
                 ):
@@ -91,12 +98,24 @@ class SecurityManager:
                     credentials.username,
                     record,
                 )
+
             except Exception:
                 self._identities = previous_identities
                 self._identity_ids_by_username = previous_username_map
+
                 for username, previous_record in previous_credentials.items():
                     self._authenticator._restore(username, previous_record)
+
+                if not was_registered:
+                    identity._release_registration(self._registration_token)
+
                 raise
+
+            for previous_identity in displaced_identities:
+                previous_identity._release_registration(
+                    self._registration_token
+                )
+
 
     def unregister_identity(
         self,
@@ -111,7 +130,10 @@ class SecurityManager:
 
             self._identity_ids_by_username.pop(username, None)
             self._authenticator.unregister(username)
-            self._identities.pop(identity_id, None)
+
+            identity = self._identities.pop(identity_id, None)
+            if identity is not None:
+                identity._release_registration(self._registration_token)
 
     def get_identity(
         self,
@@ -160,8 +182,41 @@ class SecurityManager:
         identity: SecurityIdentity,
         permission: Permission,
     ) -> bool:
-        """Authorize an identity."""
-        return self._authorizer.authorize(identity, permission)
+        """Authorize only a currently registered identity."""
+        with self._lock:
+            if self._identities.get(identity.id) is not identity:
+                return False
+
+            return self._authorizer.authorize(identity, permission)
+
+
+    def add_role(
+        self,
+        identity: SecurityIdentity,
+        role: Role,
+    ) -> None:
+        """Add a role to an identity registered with this manager."""
+        with self._lock:
+            if self._identities.get(identity.id) is not identity:
+                raise PermissionError(
+                    "Identity is not registered with this manager."
+                )
+
+            identity._add_role(role, self._registration_token)
+
+    def remove_role(
+        self,
+        identity: SecurityIdentity,
+        role: Role,
+    ) -> None:
+        """Remove a role from an identity registered with this manager."""
+        with self._lock:
+            if self._identities.get(identity.id) is not identity:
+                raise PermissionError(
+                    "Identity is not registered with this manager."
+                )
+
+            identity._remove_role(role, self._registration_token)
 
     def grant(
         self,
@@ -185,10 +240,15 @@ class SecurityManager:
         )
         self._authorizer.revoke(role, permission_set)
 
+
     def clear(self) -> None:
         """Clear all registered identities and permissions."""
         with self._lock:
             self._generation += 1
+
+            for identity in self._identities.values():
+                identity._release_registration(self._registration_token)
+
             self._identities.clear()
             self._identity_ids_by_username.clear()
             self._authenticator.clear()

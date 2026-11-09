@@ -4,11 +4,10 @@ from sentinel.security.identity import SecurityIdentity
 from sentinel.security.service import SecurityService
 
 
-def test_manager_property():
+def test_service_does_not_expose_manager():
     service = SecurityService()
 
-    assert service.manager is not None
-
+    assert not hasattr(service, "manager")
 
 def test_register_identity():
     service = SecurityService()
@@ -75,6 +74,10 @@ def test_authorize():
         "1",
         "Admin",
         {Role.ADMIN},
+    )
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
     )
 
     assert service.authorize(

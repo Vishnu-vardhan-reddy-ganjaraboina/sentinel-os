@@ -384,6 +384,12 @@ def test_audit_redacts_sensitive_nested_request_data() -> None:
                 "apiToken": "camel-case-secret",
                 "api.token": "dotted-secret",
                 "owner": "test-user",
+                "api_key": "api-key-secret",
+                "apiKey": "camel-api-key-secret",
+                "encryption_key": "encryption-secret",
+                "encryptionKey": "camel-encryption-secret",
+                "signing_key": "signing-secret",
+                "signingKey": "camel-signing-secret",
             },
             "credentials": {
                 "password": "another-secret",
@@ -398,11 +404,23 @@ def test_audit_redacts_sensitive_nested_request_data() -> None:
     assert event.data["metadata"]["apiToken"] == "[REDACTED]"
     assert event.data["metadata"]["api.token"] == "[REDACTED]"
     assert event.data["metadata"]["owner"] == "test-user"
+    assert event.data["metadata"]["api_key"] == "[REDACTED]"
+    assert event.data["metadata"]["apiKey"] == "[REDACTED]"
+    assert event.data["metadata"]["encryption_key"] == "[REDACTED]"
+    assert event.data["metadata"]["encryptionKey"] == "[REDACTED]"
+    assert event.data["metadata"]["signing_key"] == "[REDACTED]"
+    assert event.data["metadata"]["signingKey"] == "[REDACTED]"
     assert event.data["credentials"] == "[REDACTED]"
     assert "do-not-log-this" not in repr(event.data)
     assert "camel-case-secret" not in repr(event.data)
     assert "dotted-secret" not in repr(event.data)
     assert "another-secret" not in repr(event.data)
+    assert "api-key-secret" not in repr(event.data)
+    assert "camel-api-key-secret" not in repr(event.data)
+    assert "encryption-secret" not in repr(event.data)
+    assert "camel-encryption-secret" not in repr(event.data)
+    assert "signing-secret" not in repr(event.data)
+    assert "camel-signing-secret" not in repr(event.data)
 
 def test_audit_error_does_not_expose_unexpected_exception_text() -> None:
     recorder = InMemoryControlAuditRecorder()
@@ -444,8 +462,10 @@ def test_audit_error_does_not_expose_unexpected_exception_text() -> None:
     )
 
     assert result.success is False
-    assert result.error is not None
-    assert "secret-value-do-not-log" in result.error
+    assert result.error == (
+        "Command 'service.status' failed."
+    )
+    assert "secret-value-do-not-log" not in result.error
 
     event = recorder.events[0]
     assert event.error is not None

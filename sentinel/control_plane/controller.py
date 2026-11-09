@@ -21,6 +21,7 @@ from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.validator import ControlRequestValidator
+from sentinel.kernel.exceptions import ServiceNotFoundError
 
 _SENSITIVE_AUDIT_KEYS = {
     "password",
@@ -34,6 +35,9 @@ _SENSITIVE_AUDIT_KEYS = {
     "credentials",
     "private_key",
     "client_secret",
+    "api_key",
+    "encryption_key",
+    "signing_key",
 }
 
 
@@ -211,11 +215,11 @@ class KernelController:
 
             return self._audit_result(request, result)
 
-        except Exception as exc:
+        except Exception:
             result = ControlResult(
                 success=False,
                 command=request.command.value,
-                error=str(exc),
+                error=f"Command '{request.command.value}' failed.",
             )
 
             return self._audit_result(request, result)
@@ -291,11 +295,18 @@ class KernelController:
                 error=str(exc),
             )
 
-        except Exception as exc:
+        except ServiceNotFoundError as exc:
             result = ControlResult(
                 success=False,
                 command=request.command.value,
                 error=str(exc),
+            )
+
+        except Exception:
+            result = ControlResult(
+                success=False,
+                command=request.command.value,
+                error=f"Command '{request.command.value}' failed.",
             )
 
         return self._audit_result(request, result)

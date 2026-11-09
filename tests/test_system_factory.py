@@ -364,7 +364,7 @@ def test_factory_uses_injected_security_service_with_tls() -> None:
     assert system.control_plane is not None
     authorizer = system.control_plane.controller.authorizer
     assert isinstance(authorizer, SecurityControlAuthorizer)
-    assert authorizer.security is security
+    assert not hasattr(authorizer, "security")
 
 
 def test_factory_rejects_security_service_without_tls() -> None:

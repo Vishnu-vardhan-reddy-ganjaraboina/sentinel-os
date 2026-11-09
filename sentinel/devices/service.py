@@ -8,7 +8,6 @@ from typing import Any
 
 from sentinel.devices.device import BaseDevice
 from sentinel.devices.manager import DeviceManager
-from sentinel.devices.registry import DeviceRegistry
 
 
 class DeviceService:
@@ -24,56 +23,43 @@ class DeviceService:
         self,
         manager: DeviceManager | None = None,
     ) -> None:
-        self._manager = manager or DeviceManager()
-
-    @property
-    def manager(self) -> DeviceManager:
-        """
-        Return the underlying device manager.
-        """
-        return self._manager
-
-    @property
-    def registry(self) -> DeviceRegistry:
-        """
-        Return the underlying device registry.
-        """
-        return self._manager.registry
+        self._manager = (
+            manager if manager is not None else DeviceManager()
+        )
 
     def register(
         self,
         device: BaseDevice,
     ) -> None:
-        """
-        Register a device.
-        """
+        """Register a device."""
         self._manager.register(device)
 
     def unregister(
         self,
         device_id: str,
     ) -> None:
-        """
-        Unregister a device.
-        """
+        """Unregister a device."""
         self._manager.unregister(device_id)
+
+    def get(
+        self,
+        device_id: str,
+    ) -> BaseDevice:
+        """Return a registered device."""
+        return self._manager.get(device_id)
 
     def connect(
         self,
         device_id: str,
     ) -> None:
-        """
-        Connect a registered device.
-        """
+        """Connect a registered device."""
         self._manager.connect(device_id)
 
     def disconnect(
         self,
         device_id: str,
     ) -> None:
-        """
-        Disconnect a registered device.
-        """
+        """Disconnect a registered device."""
         self._manager.disconnect(device_id)
 
     def execute(
@@ -81,9 +67,7 @@ class DeviceService:
         device_id: str,
         **kwargs: Any,
     ) -> Any:
-        """
-        Execute a device operation.
-        """
+        """Execute a device operation."""
         return self._manager.execute(
             device_id,
             **kwargs,
@@ -93,19 +77,13 @@ class DeviceService:
         self,
         device_id: str,
     ) -> bool:
-        """
-        Return True if the device exists.
-        """
+        """Return True if the device exists."""
         return self._manager.exists(device_id)
 
     def list(self) -> list[BaseDevice]:
-        """
-        Return all registered devices.
-        """
+        """Return all registered devices."""
         return self._manager.list()
 
     def clear(self) -> None:
-        """
-        Remove all registered devices.
-        """
+        """Remove all registered devices."""
         self._manager.clear()

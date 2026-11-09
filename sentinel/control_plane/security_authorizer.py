@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from sentinel.security.constants import Permission
+from sentinel.security.credentials import SecurityCredentials
+from sentinel.security.identity import SecurityIdentity
 from sentinel.security.service import SecurityService
 
 from .context import ControlContext
@@ -20,6 +22,7 @@ class SecurityControlAuthorizer:
 
         ControlPermission.CONTROL
             -> Permission.EXECUTE
+
     """
 
     __slots__ = ("_security",)
@@ -31,25 +34,16 @@ class SecurityControlAuthorizer:
 
     def __init__(self, security: SecurityService) -> None:
         if not isinstance(security, SecurityService):
-            raise TypeError(
-                "security must be a SecurityService."
-            )
+            raise TypeError("security must be a SecurityService.")
 
         self._security = security
-
-    @property
-    def security(self) -> SecurityService:
-        """Return the backing SecurityService."""
-        return self._security
 
     @classmethod
     def map_permission(
         cls,
         permission: ControlPermission,
     ) -> Permission:
-        """
-        Translate a Control Plane permission into a Security permission.
-        """
+        """Translate a Control Plane permission into a Security permission."""
         try:
             return cls._PERMISSION_MAP[permission]
         except KeyError as exc:
@@ -57,20 +51,22 @@ class SecurityControlAuthorizer:
                 f"Unsupported control permission: '{permission}'."
             ) from exc
 
+    def authenticate_identity(
+        self,
+        credentials: SecurityCredentials,
+    ) -> SecurityIdentity | None:
+        """Authenticate credentials and return the registered identity."""
+        return self._security.authenticate_identity(credentials)
+
     def is_allowed(
         self,
         context: ControlContext,
         permission: ControlPermission,
     ) -> bool:
-        """
-        Resolve the caller identity and ask SecurityService whether
-        the caller has the required permission.
-        """
+        """Resolve the caller identity and check the required permission."""
         security_permission = self.map_permission(permission)
 
-        identity = self._security.get_identity(
-            context.caller_id
-        )
+        identity = self._security.get_identity(context.caller_id)
 
         if identity is None:
             return False
@@ -85,9 +81,7 @@ class SecurityControlAuthorizer:
         context: ControlContext,
         permission: ControlPermission,
     ) -> None:
-        """
-        Require the caller to have the requested permission.
-        """
+        """Require the caller to have the requested permission."""
         if not self.is_allowed(context, permission):
             raise PermissionError(
                 f"Permission denied: "

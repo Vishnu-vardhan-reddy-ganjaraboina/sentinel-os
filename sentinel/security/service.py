@@ -20,13 +20,6 @@ class SecurityService:
     def __init__(self) -> None:
         self._manager = SecurityManager()
 
-    @property
-    def manager(self) -> SecurityManager:
-        """
-        Return the underlying manager.
-        """
-        return self._manager
-
     def register_identity(
         self,
         identity: SecurityIdentity,

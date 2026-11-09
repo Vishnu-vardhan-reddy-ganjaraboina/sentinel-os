@@ -5,6 +5,8 @@ Base implementation of a Sentinel device.
 from __future__ import annotations
 
 from abc import abstractmethod
+from copy import deepcopy
+from threading import RLock
 from typing import Any
 
 from sentinel.devices.exceptions import (
@@ -26,14 +28,21 @@ class BaseDevice(Device):
         self,
         metadata: DeviceMetadata,
     ) -> None:
-        self._metadata = metadata
+        self._metadata = deepcopy(metadata)
+        self._state_lock = RLock()
+        self._connected = self._metadata.connected
 
     @property
     def metadata(self) -> DeviceMetadata:
         """
-        Return the device metadata.
+        Return an isolated metadata snapshot.
+
+        Connection state reflects the current runtime state.
         """
-        return self._metadata
+        with self._state_lock:
+            metadata = deepcopy(self._metadata)
+            metadata.connected = self._connected
+            return metadata
 
     @property
     def id(self) -> str:
@@ -53,45 +62,39 @@ class BaseDevice(Device):
 
     @property
     def connected(self) -> bool:
-        return self._metadata.connected
+        with self._state_lock:
+            return self._connected
 
     def connect(self) -> None:
-        """
-        Connect the device.
-        """
-        self._metadata.connected = True
+        """Connect the device."""
+        with self._state_lock:
+            self._connected = True
 
     def disconnect(self) -> None:
-        """
-        Disconnect the device.
-        """
-        self._metadata.connected = False
+        """Disconnect the device."""
+        with self._state_lock:
+            self._connected = False
 
     def health_check(self) -> bool:
-        """
-        Default health check implementation.
-        """
+        """Default health check implementation."""
         return self.connected
 
     def execute(
         self,
         **kwargs: Any,
     ) -> Any:
-        """
-        Execute a device operation.
-        """
-        if not self.connected:
-            raise DeviceDisconnectedError(
-                f"Device '{self.id}' is disconnected."
-            )
+        """Execute a device operation."""
+        with self._state_lock:
+            if not self._connected:
+                raise DeviceDisconnectedError(
+                    f"Device '{self.id}' is disconnected."
+                )
 
-        return self.run(**kwargs)
+            return self.run(**kwargs)
 
     @abstractmethod
     def run(
         self,
         **kwargs: Any,
     ) -> Any:
-        """
-        Execute the concrete device implementation.
-        """
+        """Execute the concrete device implementation."""

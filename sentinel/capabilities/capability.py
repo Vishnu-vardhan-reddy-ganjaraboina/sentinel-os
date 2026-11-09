@@ -5,6 +5,8 @@ Base implementation of a Sentinel capability.
 from __future__ import annotations
 
 from abc import abstractmethod
+from copy import deepcopy
+from threading import RLock
 from typing import Any
 
 from sentinel.capabilities.exceptions import (
@@ -26,14 +28,14 @@ class BaseCapability(Capability):
         self,
         metadata: CapabilityMetadata,
     ) -> None:
-        self._metadata = metadata
+        self._metadata = deepcopy(metadata)
+        self._state_lock = RLock()
 
     @property
     def metadata(self) -> CapabilityMetadata:
-        """
-        Return the capability metadata.
-        """
-        return self._metadata
+        """Return an isolated snapshot of the capability metadata."""
+        with self._state_lock:
+            return deepcopy(self._metadata)
 
     @property
     def id(self) -> str:
@@ -53,27 +55,33 @@ class BaseCapability(Capability):
 
     @property
     def enabled(self) -> bool:
-        return self._metadata.enabled
+        with self._state_lock:
+            return self._metadata.enabled
 
     def enable(self) -> None:
-        self._metadata.enabled = True
+        with self._state_lock:
+            self._metadata.enabled = True
 
     def disable(self) -> None:
-        self._metadata.enabled = False
+        with self._state_lock:
+            self._metadata.enabled = False
 
-    def execute(
-        self,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Execute the capability.
-        """
-        if not self.enabled:
-            raise CapabilityDisabledError(
-                f"Capability '{self.id}' is disabled."
-            )
+    def _admit_execution(self) -> None:
+        """Admit execution only while the capability is enabled."""
+        with self._state_lock:
+            if not self._metadata.enabled:
+                raise CapabilityDisabledError(
+                    f"Capability '{self.id}' is disabled."
+                )
 
+    def _execute_admitted(self, **kwargs: Any) -> Any:
+        """Run a capability whose execution has already been admitted."""
         return self.run(**kwargs)
+
+    def execute(self, **kwargs: Any) -> Any:
+        """Execute the capability if it is enabled."""
+        self._admit_execution()
+        return self._execute_admitted(**kwargs)
 
     @abstractmethod
     def run(

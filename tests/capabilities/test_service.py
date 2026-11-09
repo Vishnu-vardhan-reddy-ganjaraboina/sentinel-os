@@ -67,3 +67,9 @@ def test_clear():
     service.clear()
 
     assert len(service.list()) == 0
+
+def test_service_does_not_expose_internal_manager_or_registry() -> None:
+    service = CapabilityService()
+
+    assert not hasattr(service, "manager")
+    assert not hasattr(service, "registry")

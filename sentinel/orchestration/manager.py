@@ -98,10 +98,6 @@ class OrchestrationManager:
         """Return the capability manager."""
         return self._capabilities
 
-    @property
-    def security(self) -> SecurityManager:
-        """Return the Security manager."""
-        return self._security
 
     @property
     def identity(self) -> SecurityIdentity | None:
@@ -354,7 +350,7 @@ class OrchestrationManager:
 
             self._authorize_capability(capability_id)
 
-            capability = self._capabilities.registry.get(capability_id)
+            capability = self._capabilities.get(capability_id)
 
             try:
                 validate_capability_arguments(
@@ -368,8 +364,8 @@ class OrchestrationManager:
                 ) from exc
 
             try:
-                capability_result = self._capabilities.execute(
-                    capability_id,
+                capability_result = self._capabilities.execute_instance(
+                    capability,
                     **arguments,
                 )
             except OrchestrationExecutionError:
@@ -407,7 +403,7 @@ class OrchestrationManager:
                 f"Capability '{capability_id}' is not registered."
             )
 
-        capability = self._capabilities.registry.get(
+        capability = self._capabilities.get(
             capability_id,
         )
 

@@ -26,12 +26,9 @@ class DeviceManager:
         self,
         registry: DeviceRegistry | None = None,
     ) -> None:
-        self._registry = registry or DeviceRegistry()
-
-    @property
-    def registry(self) -> DeviceRegistry:
-        """Return the device registry."""
-        return self._registry
+        self._registry = (
+            registry if registry is not None else DeviceRegistry()
+        )
 
     def register(
         self,
@@ -46,6 +43,13 @@ class DeviceManager:
     ) -> None:
         """Unregister a device."""
         self._registry.unregister(device_id)
+
+    def get(
+        self,
+        device_id: str,
+    ) -> BaseDevice:
+        """Return a registered device."""
+        return self._registry.get(device_id)
 
     def connect(
         self,

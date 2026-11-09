@@ -310,6 +310,52 @@ def test_read_only_remote_client_can_read_health() -> None:
     finally:
         server.stop()
 
+def test_read_only_remote_client_does_not_receive_internal_health_exception(
+    monkeypatch,
+) -> None:
+    target, server, _security = create_server()
+
+    def fail_health():
+        raise RuntimeError(
+            "internal-secret-database-detail"
+        )
+
+    monkeypatch.setattr(target, "health", fail_health)
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        client = ControlPlaneTransportClient(
+            host=server.host,
+            port=server.port,
+            ssl_context=create_client_ssl_context(),
+            credentials=SecurityCredentials(
+                "read-client",
+                "read-secret",
+            ),
+        )
+
+        request = ControlRequest(
+            command=KernelCommand.SYSTEM_HEALTH,
+            context=ControlContext(
+                caller_id="read-client",
+                caller_type="api",
+            ),
+        )
+
+        result = client.execute(request)
+
+        assert result.success is False
+        assert result.error == (
+            "Command 'system.health' failed."
+        )
+        assert "internal-secret-database-detail" not in result.error
+
+    finally:
+        server.stop()
+
 def test_server_rejects_admin_identity_claim_without_authentication() -> None:
     target, server, _security = create_server()
     server.start()

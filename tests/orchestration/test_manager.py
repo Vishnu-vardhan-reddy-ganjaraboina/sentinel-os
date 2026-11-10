@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event, Lock
+
 import pytest
 
 from sentinel.brain.constants import PlanStatus
@@ -897,3 +900,224 @@ def test_default_brain_discovers_registered_capability() -> None:
     assert intent.capability_id == "system.echo"
     assert intent.context["capability_discovery"]["selected"] is True
     assert capability.enabled is True
+
+
+def test_execute_rejects_non_string_input() -> None:
+    manager = OrchestrationManager()
+    request = OrchestrationRequest(
+        request_id="req.invalid.input",
+        input=123,
+    )
+
+    with pytest.raises(
+        OrchestrationValidationError,
+        match="input must be a string",
+    ):
+        manager.execute(request)
+
+
+def test_execute_rejects_empty_input() -> None:
+    manager = OrchestrationManager()
+    request = OrchestrationRequest(
+        request_id="req.empty.input",
+        input="   ",
+    )
+
+    with pytest.raises(
+        OrchestrationValidationError,
+        match="input cannot be empty",
+    ):
+        manager.execute(request)
+
+
+def test_execute_rejects_invalid_context() -> None:
+    manager = OrchestrationManager()
+    request = OrchestrationRequest(
+        request_id="req.invalid.context",
+        input="hello",
+        context=[],  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(
+        OrchestrationValidationError,
+        match="context must be a dictionary",
+    ):
+        manager.execute(request)
+
+
+def test_can_execute_rejects_invalid_input() -> None:
+    manager = OrchestrationManager()
+    request = OrchestrationRequest(
+        request_id="req.invalid.input",
+        input=123,
+    )
+
+    assert manager.can_execute(request) is False
+
+
+def test_can_execute_rejects_invalid_context() -> None:
+    manager = OrchestrationManager()
+    request = OrchestrationRequest(
+        request_id="req.invalid.context",
+        input="hello",
+        context=[],  # type: ignore[arg-type]
+    )
+
+    assert manager.can_execute(request) is False
+
+def test_same_request_id_executes_serially(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Requests with the same ID must never execute simultaneously."""
+    first_entered = Event()
+    second_entered = Event()
+    second_attempting = Event()
+    release_first = Event()
+
+    state_lock = Lock()
+    active = 0
+    maximum_active = 0
+    calls = 0
+
+    def handler(request: OrchestrationRequest) -> int:
+        nonlocal active, maximum_active, calls
+
+        with state_lock:
+            calls += 1
+            call_number = calls
+            active += 1
+            maximum_active = max(maximum_active, active)
+
+        try:
+            if call_number == 1:
+                first_entered.set()
+                if not release_first.wait(timeout=5):
+                    raise RuntimeError("Timed out waiting to release first call.")
+            else:
+                second_entered.set()
+
+            return call_number
+        finally:
+            with state_lock:
+                active -= 1
+
+    manager = OrchestrationManager(handler=handler)
+
+    original_acquire = manager._acquire_request_lock
+    acquire_count = 0
+    acquire_state_lock = Lock()
+
+    def tracked_acquire(request_id: str) -> Lock:
+        nonlocal acquire_count
+
+        with acquire_state_lock:
+            acquire_count += 1
+            if acquire_count == 2:
+                second_attempting.set()
+
+        return original_acquire(request_id)
+
+    monkeypatch.setattr(
+        manager,
+        "_acquire_request_lock",
+        tracked_acquire,
+    )
+
+    first_request = OrchestrationRequest(
+        request_id="req.concurrent.same",
+        input="first",
+    )
+    second_request = OrchestrationRequest(
+        request_id="req.concurrent.same",
+        input="second",
+    )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first_future = executor.submit(manager.execute, first_request)
+
+            assert first_entered.wait(timeout=3)
+
+            second_future = executor.submit(manager.execute, second_request)
+
+            assert second_attempting.wait(timeout=3)
+            assert second_entered.wait(timeout=0.2) is False
+
+            release_first.set()
+
+            first_result = first_future.result(timeout=5)
+            second_result = second_future.result(timeout=5)
+
+        assert first_result.success is True
+        assert second_result.success is True
+        assert maximum_active == 1
+        assert calls == 2
+        assert manager._request_locks == {}
+    finally:
+        release_first.set()
+
+
+def test_different_request_ids_can_execute_concurrently() -> None:
+    """Requests with different IDs must be allowed to run in parallel."""
+    execution_barrier = Barrier(2)
+
+    def handler(request: OrchestrationRequest) -> str:
+        execution_barrier.wait(timeout=3)
+        return request.id
+
+    manager = OrchestrationManager(handler=handler)
+
+    first_request = OrchestrationRequest(
+        request_id="req.concurrent.first",
+        input="first",
+    )
+    second_request = OrchestrationRequest(
+        request_id="req.concurrent.second",
+        input="second",
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(manager.execute, first_request)
+        second_future = executor.submit(manager.execute, second_request)
+
+        first_result = first_future.result(timeout=5)
+        second_result = second_future.result(timeout=5)
+
+    assert first_result.success is True
+    assert second_result.success is True
+    assert first_result.data == "req.concurrent.first"
+    assert second_result.data == "req.concurrent.second"
+    assert manager._request_locks == {}
+
+
+def test_failed_handler_releases_request_lock() -> None:
+    """A failed execution must release and clean up its request lock."""
+    calls = 0
+
+    def handler(request: OrchestrationRequest) -> str:
+        nonlocal calls
+        calls += 1
+
+        if calls == 1:
+            raise ValueError("Simulated handler failure.")
+
+        return "recovered"
+
+    manager = OrchestrationManager(handler=handler)
+
+    request = OrchestrationRequest(
+        request_id="req.concurrent.failure",
+        input="retry",
+    )
+
+    with pytest.raises(OrchestrationExecutionError):
+        manager.execute(request)
+
+    assert manager._request_locks == {}
+
+    result = manager.execute(request)
+
+    assert result.success is True
+    assert result.data == "recovered"
+    assert calls == 2
+    assert manager._request_locks == {}

@@ -5,6 +5,7 @@ Manager for the Sentinel Orchestration subsystem.
 from __future__ import annotations
 
 from collections.abc import Callable
+from threading import Lock, RLock
 from typing import Any
 
 from sentinel.brain.intent_resolver import DefaultIntentResolver
@@ -19,6 +20,9 @@ from sentinel.memory.service import MemoryService
 from sentinel.orchestration.exceptions import (
     OrchestrationExecutionError,
     OrchestrationValidationError,
+)
+from sentinel.orchestration.interfaces import (
+    OrchestrationRequest as OrchestrationRequestInterface,
 )
 from sentinel.orchestration.models import (
     OrchestrationRequest,
@@ -51,6 +55,10 @@ class OrchestrationManager:
         knowledge: KnowledgeService | None = None,
     ) -> None:
         self._handler = handler
+
+        self._state_lock = RLock()
+        self._request_locks: dict[str, tuple[Lock, int]] = {}
+
         self._capabilities = (
             capabilities
             if capabilities is not None
@@ -121,41 +129,44 @@ class OrchestrationManager:
         """
         Execute an orchestration request.
 
-        A custom handler takes precedence when configured.
-        Otherwise the request is passed through the Brain and any
-        capability identified by the resulting plan is authorized
-        and executed.
-
-        Successful orchestration results are persisted in Memory.
+        Requests sharing an ID are serialized. Different request IDs
+        may execute concurrently.
         """
         self._validate(request)
+        request_id = request.id
+
+        request_lock = self._acquire_request_lock(request_id)
 
         try:
-            if self._handler is not None:
-                result = self._handler(request)
-            else:
-                result = self._execute_with_brain(request)
+            try:
+                if self._handler is not None:
+                    result = self._handler(request)
+                else:
+                    result = self._execute_with_brain(request)
 
-        except AuthorizationError:
-            raise
+            except AuthorizationError:
+                raise
 
-        except OrchestrationExecutionError:
-            raise
+            except OrchestrationExecutionError:
+                raise
 
-        except Exception as exc:
-            raise OrchestrationExecutionError(
-                f"Orchestration request '{request.id}' failed."
-            ) from exc
+            except Exception as exc:
+                raise OrchestrationExecutionError(
+                    f"Orchestration request '{request_id}' failed."
+                ) from exc
 
-        orchestration_result = OrchestrationResult(
-            request_id=request.id,
-            success=True,
-            data=result,
-        )
+            orchestration_result = OrchestrationResult(
+                request_id=request_id,
+                success=True,
+                data=result,
+            )
 
-        self._persist_result(orchestration_result)
+            self._persist_result(orchestration_result)
 
-        return orchestration_result
+            return orchestration_result
+
+        finally:
+            self._release_request_lock(request_id, request_lock)
 
     def execute_goal(
         self,
@@ -204,7 +215,82 @@ class OrchestrationManager:
         """
         Return whether the request can be executed.
         """
-        return bool(request.id.strip())
+        try:
+            self._validate(request)
+        except (TypeError, OrchestrationValidationError):
+            return False
+
+        return True
+
+    def _acquire_request_lock(self, request_id: str) -> Lock:
+        """
+        Acquire the lock associated with a request ID.
+
+        Reference counting keeps the lock registered while callers
+        are waiting for or holding it.
+        """
+        with self._state_lock:
+            entry = self._request_locks.get(request_id)
+
+            if entry is None:
+                request_lock = Lock()
+                self._request_locks[request_id] = (request_lock, 1)
+            else:
+                request_lock, users = entry
+                self._request_locks[request_id] = (
+                    request_lock,
+                    users + 1,
+                )
+
+        try:
+            request_lock.acquire()
+        except BaseException:
+            self._remove_request_lock_reference(
+                request_id,
+                request_lock,
+            )
+            raise
+
+        return request_lock
+
+    def _release_request_lock(
+        self,
+        request_id: str,
+        request_lock: Lock,
+    ) -> None:
+        """
+        Release a request lock and remove its reference.
+        """
+        request_lock.release()
+
+        self._remove_request_lock_reference(
+            request_id,
+            request_lock,
+        )
+
+    def _remove_request_lock_reference(
+        self,
+        request_id: str,
+        request_lock: Lock,
+    ) -> None:
+        """
+        Remove one reference and delete unused request locks.
+        """
+        with self._state_lock:
+            entry = self._request_locks.get(request_id)
+
+            if entry is None or entry[0] is not request_lock:
+                return
+
+            users = entry[1] - 1
+
+            if users == 0:
+                del self._request_locks[request_id]
+            else:
+                self._request_locks[request_id] = (
+                    request_lock,
+                    users,
+                )
 
     def _execute_with_brain(
         self,
@@ -457,9 +543,36 @@ class OrchestrationManager:
         """
         Validate an orchestration request.
         """
-        if not request.id.strip():
+        if not isinstance(request, OrchestrationRequestInterface):
+            raise TypeError(
+                "request must implement OrchestrationRequest."
+            )
+
+        request_id = request.id
+
+        if not isinstance(request_id, str):
+            raise OrchestrationValidationError(
+                "Orchestration request ID must be a string."
+            )
+
+        if not request_id.strip():
             raise OrchestrationValidationError(
                 "Orchestration request ID cannot be empty."
+            )
+
+        if not isinstance(request.input, str):
+            raise OrchestrationValidationError(
+                "Orchestration request input must be a string."
+            )
+
+        if not request.input.strip():
+            raise OrchestrationValidationError(
+                "Orchestration request input cannot be empty."
+            )
+
+        if not isinstance(request.context, dict):
+            raise OrchestrationValidationError(
+                "Orchestration request context must be a dictionary."
             )
 
     def _get_capability_context(

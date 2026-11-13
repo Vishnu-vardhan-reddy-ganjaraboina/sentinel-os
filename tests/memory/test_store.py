@@ -195,3 +195,178 @@ def test_concurrent_upserts_keep_one_entry_per_id() -> None:
     assert len(store) == 1
     assert store.exists("memory.shared")
     assert store.get("memory.shared").id == "memory.shared"
+
+
+def test_iteration_returns_entries() -> None:
+    store = InMemoryStore()
+
+    first = create_entry("memory.1")
+    second = create_entry("memory.2")
+
+    store.add(first)
+    store.add(second)
+
+    assert list(store) == [first, second]
+
+
+def test_concurrent_adds_are_atomic() -> None:
+    store = InMemoryStore()
+    entry = create_entry("memory.concurrent")
+
+    def add_entry(_: int) -> str:
+        try:
+            store.add(entry)
+            return "added"
+        except MemoryAlreadyExistsError:
+            return "duplicate"
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(add_entry, range(32)))
+
+    assert results.count("added") == 1
+    assert results.count("duplicate") == 31
+    assert len(store) == 1
+    assert store.get("memory.concurrent") is entry
+
+
+def test_concurrent_unique_adds_are_safe() -> None:
+    store = InMemoryStore()
+
+    entries = [
+        create_entry(
+            memory_id=f"memory.{index}",
+            content=f"content {index}",
+        )
+        for index in range(100)
+    ]
+
+    def add_entry(entry: BaseMemoryEntry) -> None:
+        store.add(entry)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(add_entry, entries))
+
+    assert len(store) == 100
+
+    for entry in entries:
+        assert store.get(entry.id) is entry
+
+
+def test_concurrent_reads_are_safe() -> None:
+    store = InMemoryStore()
+
+    entries = [
+        create_entry(
+            memory_id=f"memory.{index}",
+            content=f"content {index}",
+        )
+        for index in range(100)
+    ]
+
+    for entry in entries:
+        store.add(entry)
+
+    def read_entry(index: int) -> BaseMemoryEntry:
+        return store.get(f"memory.{index}")
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(read_entry, range(100)))
+
+    assert results == entries
+
+
+def test_concurrent_contains_and_len_are_safe() -> None:
+    store = InMemoryStore()
+
+    for index in range(100):
+        store.add(create_entry(f"memory.{index}"))
+
+    def inspect(_: int) -> tuple[bool, int]:
+        return "memory.50" in store, len(store)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(inspect, range(100)))
+
+    assert all(found for found, _ in results)
+    assert all(length == 100 for _, length in results)
+
+
+def test_iteration_uses_stable_snapshot() -> None:
+    store = InMemoryStore()
+
+    for index in range(100):
+        store.add(create_entry(f"memory.{index}"))
+
+    iterator = iter(store)
+
+    store.clear()
+
+    entries = list(iterator)
+
+    assert len(entries) == 100
+    assert len(store) == 0
+
+
+def test_concurrent_search_is_safe() -> None:
+    store = InMemoryStore()
+
+    for index in range(100):
+        store.add(
+            create_entry(
+                memory_id=f"memory.{index}",
+                content=f"Sentinel memory {index}",
+            )
+        )
+
+    def search(_: int) -> list[BaseMemoryEntry]:
+        return store.search("sentinel")
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(search, range(32)))
+
+    assert all(len(result) == 100 for result in results)
+
+
+def test_concurrent_clear_and_reads_are_safe() -> None:
+    store = InMemoryStore()
+
+    for index in range(100):
+        store.add(create_entry(f"memory.{index}"))
+
+    def inspect(_: int) -> tuple[int, bool]:
+        return len(store), "memory.50" in store
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(inspect, index)
+            for index in range(32)
+        ]
+
+        store.clear()
+
+        results = [future.result() for future in futures]
+
+    assert len(store) == 0
+    assert all(length in {0, 100} for length, _ in results)
+    assert all(found in {True, False} for _, found in results)
+
+
+def test_concurrent_remove_is_safe() -> None:
+    store = InMemoryStore()
+
+    entry = create_entry("memory.concurrent")
+    store.add(entry)
+
+    def remove_entry(_: int) -> str:
+        try:
+            store.remove("memory.concurrent")
+            return "removed"
+        except MemoryNotFoundError:
+            return "missing"
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(remove_entry, range(32)))
+
+    assert results.count("removed") == 1
+    assert results.count("missing") == 31
+    assert not store.exists("memory.concurrent")

@@ -300,3 +300,32 @@ def test_connection_remains_usable_after_write_failure(
     assert backend.exists("recovered")
 
     backend.disconnect()
+
+def test_delete_missing_key_raises(
+    tmp_path: Path,
+) -> None:
+    backend = SQLiteBackend(tmp_path / "missing_delete.db")
+
+    with pytest.raises(StorageKeyNotFoundError):
+        backend.delete("missing")
+
+    backend.disconnect()
+
+
+def test_len_returns_number_of_stored_values(
+    tmp_path: Path,
+) -> None:
+    backend = SQLiteBackend(tmp_path / "length.db")
+
+    assert len(backend) == 0
+
+    backend.set("first", 1)
+    backend.set("second", 2)
+
+    assert len(backend) == 2
+
+    backend.delete("first")
+
+    assert len(backend) == 1
+
+    backend.disconnect()

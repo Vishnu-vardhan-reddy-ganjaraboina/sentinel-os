@@ -48,6 +48,7 @@ class SupervisorMonitor:
         self._stop_event = Event()
         self._thread: Thread | None = None
         self._failure_detected = False
+        self._callback_error: BaseException | None = None
         self._lock = RLock()
 
     @property
@@ -75,6 +76,12 @@ class SupervisorMonitor:
         with self._lock:
             return self._failure_detected
 
+    @property
+    def callback_error(self) -> BaseException | None:
+        """Return the most recent failure from the failure callback."""
+        with self._lock:
+            return self._callback_error
+
     def start(self) -> None:
         """Start monitoring the process."""
         with self._lock:
@@ -83,6 +90,7 @@ class SupervisorMonitor:
 
             self._stop_event.clear()
             self._failure_detected = False
+            self._callback_error = None
 
             thread = Thread(
                 target=self._run,
@@ -131,6 +139,10 @@ class SupervisorMonitor:
                 self._failure_detected = True
 
             if self._on_failure is not None:
-                self._on_failure()
+                try:
+                    self._on_failure()
+                except BaseException as exc:
+                    with self._lock:
+                        self._callback_error = exc
 
             return

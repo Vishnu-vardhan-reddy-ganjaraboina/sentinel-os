@@ -4,6 +4,7 @@ Planner implementation for the Sentinel Brain subsystem.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from sentinel.brain.constants import PlanStatus
@@ -12,13 +13,10 @@ from sentinel.brain.interfaces import Context, Planner
 
 class BrainPlanner(Planner):
     """
-    Default planner implementation.
+    Default deterministic Brain planner.
 
-    The planner is deterministic and does not execute capabilities.
-
-    Explicit capability selections supplied through the context take
-    precedence. Available capability metadata may also be inspected
-    to produce a safe recommendation for the current request.
+    The planner produces plans and recommendations only. It never executes
+    capabilities.
     """
 
     def create_plan(
@@ -29,15 +27,17 @@ class BrainPlanner(Planner):
         """
         Create an execution plan.
 
-        An explicit ``capability_id`` supplied through the context
-        takes precedence over automatic recommendation.
-
-        Automatic recommendation is informational only and does not
-        cause capability execution.
+        Explicit capability selection supplied through the context takes
+        precedence over automatic recommendation.
         """
-        capability_id = context.data.get("capability_id")
+        if not isinstance(context, Context):
+            raise TypeError("context must be a Context instance.")
 
-        capability_arguments = context.data.get(
+        context_data = context.data
+
+        capability_id = context_data.get("capability_id")
+
+        capability_arguments = context_data.get(
             "capability_arguments",
             {},
         )
@@ -49,24 +49,26 @@ class BrainPlanner(Planner):
         }
 
         if capability_id is not None:
-            step["capability_id"] = capability_id
+            step["capability_id"] = deepcopy(capability_id)
             step["arguments"] = (
-                capability_arguments.copy()
+                deepcopy(capability_arguments)
                 if isinstance(capability_arguments, dict)
                 else {}
             )
 
         recommendation = self._recommend_capability(
             request=request,
-            context=context,
+            context_data=context_data,
         )
 
         return {
-            "request": request,
+            "request": deepcopy(request),
             "context_id": context.id,
-            "context": context.data.copy(),
-            "context_sources": self._get_context_sources(context),
-            "recommendation": recommendation,
+            "context": deepcopy(context_data),
+            "context_sources": self._get_context_sources(
+                context_data,
+            ),
+            "recommendation": deepcopy(recommendation),
             "status": PlanStatus.CREATED,
             "steps": [step],
         }
@@ -74,20 +76,17 @@ class BrainPlanner(Planner):
     def _recommend_capability(
         self,
         request: Any,
-        context: Context,
+        context_data: dict[str, Any],
     ) -> dict[str, Any] | None:
         """
-        Recommend a capability using simple deterministic matching.
+        Recommend a capability using deterministic lexical matching.
 
-        Explicit capability selection is never overridden.
-
-        The recommendation is informational and is not executed
-        automatically.
+        Recommendation is informational only.
         """
-        if context.data.get("capability_id") is not None:
+        if context_data.get("capability_id") is not None:
             return None
 
-        capabilities = context.data.get(
+        capabilities = context_data.get(
             "capabilities",
             [],
         )
@@ -173,14 +172,14 @@ class BrainPlanner(Planner):
 
     def _get_context_sources(
         self,
-        context: Context,
+        context_data: dict[str, Any],
     ) -> dict[str, int]:
         """
         Identify available contextual information.
         """
-        memories = context.data.get("memories", [])
-        knowledge = context.data.get("knowledge", [])
-        capabilities = context.data.get("capabilities", [])
+        memories = context_data.get("memories", [])
+        knowledge = context_data.get("knowledge", [])
+        capabilities = context_data.get("capabilities", [])
 
         return {
             "memories": (
@@ -204,7 +203,11 @@ class BrainPlanner(Planner):
         self,
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        """Mark a plan as ready."""
+        """
+        Mark a valid plan as ready.
+        """
+        self._validate_plan(plan)
+
         plan["status"] = PlanStatus.READY
         return plan
 
@@ -212,10 +215,36 @@ class BrainPlanner(Planner):
         self,
         plan: dict[str, Any],
     ) -> dict[str, Any]:
-        """Mark a plan as completed."""
+        """
+        Mark a valid plan as completed.
+        """
+        self._validate_plan(plan)
+
         plan["status"] = PlanStatus.COMPLETED
 
         for step in plan["steps"]:
+            if not isinstance(step, dict):
+                raise TypeError("plan steps must be dictionaries.")
+
             step["completed"] = True
 
         return plan
+
+    @staticmethod
+    def _validate_plan(
+        plan: dict[str, Any],
+    ) -> None:
+        """
+        Validate the minimum structure required by planner transitions.
+        """
+        if not isinstance(plan, dict):
+            raise TypeError("plan must be a dictionary.")
+
+        if "status" not in plan:
+            raise ValueError("plan must contain status.")
+
+        if "steps" not in plan:
+            raise ValueError("plan must contain steps.")
+
+        if not isinstance(plan["steps"], list):
+            raise TypeError("plan steps must be a list.")

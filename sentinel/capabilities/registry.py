@@ -34,13 +34,20 @@ class CapabilityRegistry:
         """
         Register a capability.
         """
+        if not isinstance(capability, BaseCapability):
+            raise TypeError(
+                "capability must be an instance of BaseCapability."
+            )
+
+        capability_id = capability.id
+
         with self._lock:
-            if capability.id in self._capabilities:
+            if capability_id in self._capabilities:
                 raise CapabilityAlreadyExistsError(
-                    f"Capability '{capability.id}' already exists."
+                    f"Capability '{capability_id}' already exists."
                 )
 
-            self._capabilities[capability.id] = capability
+            self._capabilities[capability_id] = capability
 
     def unregister(
         self,
@@ -49,6 +56,8 @@ class CapabilityRegistry:
         """
         Remove a capability.
         """
+        self._validate_capability_id(capability_id)
+
         with self._lock:
             if capability_id not in self._capabilities:
                 raise CapabilityNotFoundError(
@@ -62,6 +71,8 @@ class CapabilityRegistry:
         capability_id: str,
     ) -> BaseCapability:
         """Return a capability."""
+        self._validate_capability_id(capability_id)
+
         with self._lock:
             try:
                 return self._capabilities[capability_id]
@@ -75,6 +86,8 @@ class CapabilityRegistry:
         capability_id: str,
     ) -> bool:
         """Check whether a capability exists."""
+        self._validate_capability_id(capability_id)
+
         with self._lock:
             return capability_id in self._capabilities
 
@@ -90,6 +103,11 @@ class CapabilityRegistry:
         category: CapabilityCategory,
     ) -> CapabilityList:
         """Return capabilities belonging to a category."""
+        if not isinstance(category, CapabilityCategory):
+            raise TypeError(
+                "category must be a CapabilityCategory."
+            )
+
         with self._lock:
             return [
                 capability
@@ -122,12 +140,29 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> bool:
+        self._validate_capability_id(capability_id)
+
         with self._lock:
             return capability_id in self._capabilities
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._capabilities)
+
+    @staticmethod
+    def _validate_capability_id(
+        capability_id: str,
+    ) -> None:
+        """Validate a capability identifier."""
+        if not isinstance(capability_id, str):
+            raise TypeError(
+                "capability_id must be a string."
+            )
+
+        if not capability_id.strip():
+            raise ValueError(
+                "capability_id cannot be empty."
+            )
 
     def __iter__(self) -> Iterator[BaseCapability]:
         return iter(self.list())

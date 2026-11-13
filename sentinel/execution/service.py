@@ -92,18 +92,21 @@ class ExecutionService:
 
     def shutdown(self) -> None:
         """Shut down the executor and process manager."""
-        errors: list[Exception] = []
+        failures: list[BaseException] = []
 
         for component in (self._executor, self._process_manager):
             try:
                 component.shutdown()
-            except Exception as exc:
-                errors.append(exc)
+            except BaseException as exc:
+                failures.append(exc)
 
-        if len(errors) == 1:
-            raise errors[0]
-        if errors:
-            raise ExceptionGroup("Execution service shutdown failed.", errors)
+        if len(failures) == 1:
+            raise failures[0]
+        if failures:
+            raise BaseExceptionGroup(
+                "Execution service shutdown failed.",
+                failures,
+            )
 
     # ------------------------------------------------------------------
     # Command execution

@@ -89,3 +89,42 @@ def test_similarity_metrics_reject_non_finite_values(
 ) -> None:
     with pytest.raises(ValueError, match="finite"):
         metric.similarity([nan], [1.0])
+
+
+def test_cosine_zero_vector() -> None:
+    assert CosineSimilarity().similarity(
+        [0.0, 0.0],
+        [1.0, 2.0],
+    ) == pytest.approx(0.0)
+
+
+def test_empty_left_vector() -> None:
+    with pytest.raises(ValueError):
+        CosineSimilarity().similarity([], [1.0, 2.0])
+
+
+def test_empty_right_vector() -> None:
+    with pytest.raises(ValueError):
+        CosineSimilarity().similarity([1.0, 2.0], [])
+
+
+def test_euclidean_different_vectors() -> None:
+    assert EuclideanSimilarity().similarity(
+        [0.0, 0.0],
+        [3.0, 4.0],
+    ) == pytest.approx(1.0 / 6.0)
+
+
+def test_valid_similarity_results_are_finite() -> None:
+    import math
+
+    vectors = ([1.0, 2.0, 3.0], [3.0, 2.0, 1.0])
+    metrics = (
+        CosineSimilarity(),
+        DotProductSimilarity(),
+        EuclideanSimilarity(),
+    )
+
+    for metric in metrics:
+        result = metric.similarity(*vectors)
+        assert math.isfinite(result)

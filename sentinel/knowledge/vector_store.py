@@ -120,7 +120,9 @@ class InMemoryVectorStore(VectorStore):
     ) -> None:
         self._chunks: dict[str, Chunk] = {}
         self._embeddings: dict[str, list[float]] = {}
-        self._similarity = similarity or CosineSimilarity()
+        self._similarity = (
+            similarity if similarity is not None else CosineSimilarity()
+        )
         self._lock = RLock()
 
     def add(self, chunk: Chunk, embedding: list[float]) -> None:

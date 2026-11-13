@@ -4,6 +4,8 @@ Kernel runtime service for the Orchestration subsystem.
 
 from __future__ import annotations
 
+from threading import RLock
+
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.kernel.service import Service
 from sentinel.knowledge.knowledge_service import KnowledgeService
@@ -53,6 +55,7 @@ class OrchestrationRuntimeService(Service):
         )
 
         self._initialized = False
+        self._lifecycle_lock = RLock()
 
     @property
     def orchestration(self) -> OrchestrationService:
@@ -109,10 +112,11 @@ class OrchestrationRuntimeService(Service):
         The current orchestration service owns no external resources,
         so initialization only updates lifecycle state.
         """
-        if self._initialized:
-            return
+        with self._lifecycle_lock:
+            if self._initialized:
+                return
 
-        self._initialized = True
+            self._initialized = True
 
     def shutdown(self) -> None:
         """
@@ -121,13 +125,15 @@ class OrchestrationRuntimeService(Service):
         Shutdown is idempotent because the current service owns
         no external resources.
         """
-        if not self._initialized:
-            return
+        with self._lifecycle_lock:
+            if not self._initialized:
+                return
 
-        self._initialized = False
+            self._initialized = False
 
     def health(self) -> dict[str, bool]:
         """Return orchestration service health information."""
-        return {
-            "healthy": self._initialized,
-        }
+        with self._lifecycle_lock:
+            return {
+                "healthy": self._initialized,
+            }

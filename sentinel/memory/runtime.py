@@ -5,6 +5,7 @@ Kernel runtime service for the Sentinel Memory subsystem.
 from __future__ import annotations
 
 from datetime import timedelta
+from threading import RLock
 from typing import Any
 
 from sentinel.kernel.service import Service
@@ -37,6 +38,7 @@ class MemoryRuntimeService(Service):
         )
 
         self._initialized = False
+        self._lock = RLock()
 
     @property
     def memory(self) -> MemoryService:
@@ -140,10 +142,11 @@ class MemoryRuntimeService(Service):
         MemoryService currently owns no resources that require
         initialization, so initialization only updates lifecycle state.
         """
-        if self._initialized:
-            return
+        with self._lock:
+            if self._initialized:
+                return
 
-        self._initialized = True
+            self._initialized = True
 
     def shutdown(self) -> None:
         """
@@ -151,13 +154,17 @@ class MemoryRuntimeService(Service):
 
         Shutdown is idempotent.
         """
-        if not self._initialized:
-            return
+        with self._lock:
+            if not self._initialized:
+                return
 
-        self._initialized = False
+            self._initialized = False
 
     def health(self) -> dict[str, bool]:
         """Return memory service health information."""
+        with self._lock:
+            initialized = self._initialized
+
         return {
-            "healthy": self._initialized,
+            "healthy": initialized,
         }

@@ -111,31 +111,37 @@ class SQLiteControlAuditStore(ControlAuditStore):
         with self._lock:
             connection = self._ensure_connected()
 
-            connection.execute(
-                """
-                INSERT INTO control_audit_events (
-                    timestamp,
-                    caller_id,
-                    caller_type,
-                    command,
-                    success,
-                    data,
-                    error
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO control_audit_events (
+                        timestamp,
+                        caller_id,
+                        caller_type,
+                        command,
+                        success,
+                        data,
+                        error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.timestamp.isoformat(),
+                        event.caller_id,
+                        event.caller_type,
+                        event.command,
+                        int(event.success),
+                        json.dumps(_to_json_compatible(event.data)),
+                        event.error,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event.timestamp.isoformat(),
-                    event.caller_id,
-                    event.caller_type,
-                    event.command,
-                    int(event.success),
-                    json.dumps(_to_json_compatible(event.data)),
-                    event.error,
-                ),
-            )
-
-            connection.commit()
+                connection.commit()
+            except BaseException:
+                try:
+                    connection.rollback()
+                except BaseException:
+                    pass
+                raise
 
     def events(self) -> tuple[ControlAuditEvent, ...]:
         """

@@ -213,7 +213,9 @@ class SQLiteBackend(StorageBackend):
 
     def delete(self, key: str) -> None:
         """
-        Delete a key if it exists.
+        Delete a key.
+
+        Raises StorageKeyNotFoundError if the key does not exist.
         """
         self._validate_key(key)
 
@@ -221,13 +223,23 @@ class SQLiteBackend(StorageBackend):
             connection = self._ensure_connected()
 
             try:
-                connection.execute(
+                cursor = connection.execute(
                     "DELETE FROM storage WHERE key = ?",
                     (key,),
                 )
 
+                if cursor.rowcount == 0:
+                    raise StorageKeyNotFoundError(
+                        f"Key '{key}' does not exist."
+                    )
+
                 if self._transaction_depth == 0:
                     connection.commit()
+
+            except StorageKeyNotFoundError:
+                if self._transaction_depth == 0:
+                    connection.rollback()
+                raise
 
             except sqlite3.Error as exc:
                 if self._transaction_depth == 0:
@@ -304,12 +316,11 @@ class SQLiteBackend(StorageBackend):
 
             try:
                 yield
-            except BaseException:
+            except BaseException as exc:
                 self._transaction_depth -= 1
 
                 if outermost:
-                    # Preserve a rollback failure rather than masking it.
-                    connection.rollback()
+                    self._rollback_safely(connection, exc)
 
                 raise
             else:
@@ -319,7 +330,7 @@ class SQLiteBackend(StorageBackend):
                     try:
                         connection.commit()
                     except sqlite3.Error as exc:
-                        # If rollback also fails, expose that failure.
+                        # A rollback failure must remain visible to the caller.
                         connection.rollback()
                         raise StorageWriteError(
                             f"Failed to commit transaction: {exc}"
@@ -344,10 +355,26 @@ class SQLiteBackend(StorageBackend):
         """
         return self.get(key)
 
+    def __len__(self) -> int:
+        """Return the number of stored values."""
+        with self._lock:
+            connection = self._ensure_connected()
+
+            try:
+                cursor = connection.execute(
+                    "SELECT COUNT(*) FROM storage"
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row is not None else 0
+            except sqlite3.Error as exc:
+                raise StorageReadError(
+                    f"Failed to count storage values: {exc}"
+                ) from exc
+
     @staticmethod
     def _rollback_safely(
         connection: sqlite3.Connection,
-        original_error: sqlite3.Error,
+        original_error: BaseException,
     ) -> None:
         """Attempt rollback without masking the original SQLite error."""
         try:

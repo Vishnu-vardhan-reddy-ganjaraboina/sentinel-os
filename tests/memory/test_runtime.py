@@ -4,6 +4,7 @@ Tests for the Sentinel Memory runtime service.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from sentinel.kernel.service import Service
@@ -238,3 +239,73 @@ def test_runtime_exposes_underlying_memory_service() -> None:
 
     assert runtime.memory is not None
     assert isinstance(runtime.memory, MemoryService)
+
+
+def test_concurrent_initialize_is_safe() -> None:
+    runtime = MemoryRuntimeService()
+
+    def initialize(_: int) -> None:
+        runtime.initialize()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(initialize, range(32)))
+
+    assert runtime.health() == {
+        "healthy": True,
+    }
+
+
+def test_concurrent_shutdown_is_safe() -> None:
+    runtime = MemoryRuntimeService()
+    runtime.initialize()
+
+    def shutdown(_: int) -> None:
+        runtime.shutdown()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(shutdown, range(32)))
+
+    assert runtime.health() == {
+        "healthy": False,
+    }
+
+
+def test_concurrent_health_reads_are_safe() -> None:
+    runtime = MemoryRuntimeService()
+    runtime.initialize()
+
+    def read_health(_: int) -> dict[str, bool]:
+        return runtime.health()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(
+            executor.map(read_health, range(100))
+        )
+
+    assert all(
+        result == {"healthy": True}
+        for result in results
+    )
+
+
+def test_concurrent_initialize_and_shutdown_are_safe() -> None:
+    runtime = MemoryRuntimeService()
+
+    def transition(index: int) -> None:
+        if index % 2 == 0:
+            runtime.initialize()
+        else:
+            runtime.shutdown()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(
+            executor.map(
+                transition,
+                range(100),
+            )
+        )
+
+    assert runtime.health() in (
+        {"healthy": True},
+        {"healthy": False},
+    )

@@ -25,7 +25,7 @@ class MemoryManager:
         self,
         store: InMemoryStore | None = None,
     ) -> None:
-        self._store = store or InMemoryStore()
+        self._store = store if store is not None else InMemoryStore()
 
     @property
     def store(self) -> InMemoryStore:

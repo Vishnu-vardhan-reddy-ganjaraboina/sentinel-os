@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 
 from sentinel.plugins.constants import (
@@ -162,3 +164,156 @@ def test_invalid_version_type() -> None:
             "sample",
             version=123,  # type: ignore[arg-type]
         )
+
+
+def test_concurrent_load_only_one_transition_succeeds() -> None:
+    plugin = SentinelPlugin("sample")
+
+    barrier = threading.Barrier(20)
+    successes = 0
+    failures = 0
+    lock = threading.Lock()
+
+    def load_plugin() -> None:
+        nonlocal successes, failures
+
+        barrier.wait()
+
+        try:
+            plugin.load()
+        except PluginLoadError:
+            with lock:
+                failures += 1
+        else:
+            with lock:
+                successes += 1
+
+    threads = [
+        threading.Thread(target=load_plugin)
+        for _ in range(20)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert successes == 1
+    assert failures == 19
+    assert plugin.state == PluginState.LOADED
+
+def test_concurrent_enable_only_one_transition_succeeds() -> None:
+    plugin = SentinelPlugin("sample")
+    plugin.load()
+
+    barrier = threading.Barrier(20)
+    successes = 0
+    failures = 0
+    lock = threading.Lock()
+
+    def enable_plugin() -> None:
+        nonlocal successes, failures
+
+        barrier.wait()
+
+        try:
+            plugin.enable()
+        except PluginEnableError:
+            with lock:
+                failures += 1
+        else:
+            with lock:
+                successes += 1
+
+    threads = [
+        threading.Thread(target=enable_plugin)
+        for _ in range(20)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert successes == 1
+    assert failures == 19
+    assert plugin.state == PluginState.ENABLED
+
+def test_concurrent_disable_only_one_transition_succeeds() -> None:
+    plugin = SentinelPlugin("sample")
+    plugin.load()
+    plugin.enable()
+
+    barrier = threading.Barrier(20)
+    successes = 0
+    failures = 0
+    lock = threading.Lock()
+
+    def disable_plugin() -> None:
+        nonlocal successes, failures
+
+        barrier.wait()
+
+        try:
+            plugin.disable()
+        except PluginDisableError:
+            with lock:
+                failures += 1
+        else:
+            with lock:
+                successes += 1
+
+    threads = [
+        threading.Thread(target=disable_plugin)
+        for _ in range(20)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert successes == 1
+    assert failures == 19
+    assert plugin.state == PluginState.DISABLED
+
+def test_concurrent_unload_only_one_transition_succeeds() -> None:
+    plugin = SentinelPlugin("sample")
+    plugin.load()
+
+    barrier = threading.Barrier(20)
+    successes = 0
+    failures = 0
+    lock = threading.Lock()
+
+    def unload_plugin() -> None:
+        nonlocal successes, failures
+
+        barrier.wait()
+
+        try:
+            plugin.unload()
+        except PluginUnloadError:
+            with lock:
+                failures += 1
+        else:
+            with lock:
+                successes += 1
+
+    threads = [
+        threading.Thread(target=unload_plugin)
+        for _ in range(20)
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    assert successes == 1
+    assert failures == 19
+    assert plugin.state == PluginState.UNLOADED

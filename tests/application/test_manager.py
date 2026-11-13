@@ -633,3 +633,189 @@ def test_manager_manifests_snapshot() -> None:
         ("first", first),
         ("second", second),
     )
+
+
+def test_health_all_returns_snapshot_for_all_applications() -> None:
+    manager = ApplicationManager()
+    manager.register("first", create_application())
+    manager.register("second", create_application())
+
+    health = manager.health_all()
+
+    assert health["first"]["healthy"] is False
+    assert health["first"]["state"] == "registered"
+    assert health["second"]["healthy"] is False
+    assert health["second"]["state"] == "registered"
+
+
+def test_health_all_uses_a_stable_application_snapshot() -> None:
+    health_started = threading.Event()
+    release_health = threading.Event()
+
+    class BlockingHealthApplication(Application):
+        @property
+        def health(self):  # type: ignore[override]
+            health_started.set()
+            assert release_health.wait(2.0) is True
+            return {"healthy": True}
+
+    manager = ApplicationManager()
+    manager.register("blocking", BlockingHealthApplication())
+    manager.start("blocking")
+
+    health_result: list[dict[str, object]] = []
+    health_thread = threading.Thread(
+        target=lambda: health_result.append(
+            dict(manager.health_all()["blocking"]),
+        ),
+    )
+
+    stopped = False
+    unregistered = False
+
+    try:
+        health_thread.start()
+        assert health_started.wait(1.0) is True
+
+        manager.stop("blocking")
+        stopped = True
+
+        manager.unregister("blocking")
+        unregistered = True
+
+        release_health.set()
+        health_thread.join(timeout=2.0)
+
+        assert not health_thread.is_alive()
+        assert health_result == [
+            {"healthy": True, "state": "running"}
+        ]
+    finally:
+        release_health.set()
+        if health_thread.ident is not None:
+            health_thread.join(timeout=2.0)
+
+        if not stopped and manager.contains("blocking"):
+            manager.stop("blocking")
+
+        if not unregistered and manager.contains("blocking"):
+            manager.unregister("blocking")
+
+
+def test_health_all_does_not_hold_manager_lock_during_application_health() -> None:
+    health_started = threading.Event()
+    release_health = threading.Event()
+    registration_finished = threading.Event()
+
+    class BlockingHealthApplication(Application):
+        @property
+        def health(self):  # type: ignore[override]
+            health_started.set()
+            assert release_health.wait(2.0) is True
+            return {"healthy": True}
+
+    manager = ApplicationManager()
+    manager.register("blocking", BlockingHealthApplication())
+    manager.start("blocking")
+
+    health_result: list[dict[str, object]] = []
+    health_thread = threading.Thread(
+        target=lambda: health_result.append(
+            dict(manager.health_all()["blocking"]),
+        ),
+    )
+    registration_thread: threading.Thread | None = None
+
+    try:
+        health_thread.start()
+        assert health_started.wait(1.0) is True
+
+        def register_application() -> None:
+            manager.register("new-app", create_application())
+            registration_finished.set()
+
+        registration_thread = threading.Thread(
+            target=register_application,
+        )
+        registration_thread.start()
+
+        assert registration_finished.wait(1.0) is True
+
+        release_health.set()
+        health_thread.join(timeout=2.0)
+        registration_thread.join(timeout=2.0)
+
+        assert not health_thread.is_alive()
+        assert not registration_thread.is_alive()
+        assert health_result == [
+            {"healthy": True, "state": "running"}
+        ]
+        assert manager.contains("new-app")
+    finally:
+        release_health.set()
+        if health_thread.ident is not None:
+            health_thread.join(timeout=2.0)
+        if registration_thread is not None:
+            registration_thread.join(timeout=2.0)
+
+        if manager.running("blocking"):
+            manager.stop("blocking")
+
+        if manager.contains("new-app"):
+            manager.unregister("new-app")
+
+
+def test_health_all_handles_application_health_failure() -> None:
+    class FailingHealthApplication(Application):
+        @property
+        def health(self):  # type: ignore[override]
+            raise RuntimeError("health failed")
+
+    manager = ApplicationManager()
+    manager.register("failing", FailingHealthApplication())
+    manager.start("failing")
+
+    try:
+        assert manager.health_all()["failing"] == {
+            "healthy": False,
+            "state": "running",
+            "error": "health failed",
+        }
+    finally:
+        manager.stop("failing")
+
+
+def test_health_all_handles_invalid_application_health_result() -> None:
+    class InvalidHealthApplication(Application):
+        @property
+        def health(self):  # type: ignore[override]
+            return "invalid"
+
+    manager = ApplicationManager()
+    manager.register("invalid", InvalidHealthApplication())
+    manager.start("invalid")
+
+    try:
+        assert manager.health_all()["invalid"] == {
+            "healthy": False,
+            "state": "running",
+            "error": "Application health result is invalid.",
+        }
+    finally:
+        manager.stop("invalid")
+
+
+def test_registry_items_returns_stable_snapshot() -> None:
+    registry = ApplicationRegistry()
+    first = create_application()
+    second = create_application()
+
+    registry.register("first", first)
+    snapshot = registry.items()
+    registry.register("second", second)
+
+    assert snapshot == (("first", first),)
+    assert registry.items() == (
+        ("first", first),
+        ("second", second),
+    )

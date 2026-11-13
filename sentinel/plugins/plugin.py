@@ -4,6 +4,7 @@ Plugin implementation for the Sentinel Plugin subsystem.
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any
 
 from sentinel.plugins.constants import (
@@ -54,6 +55,7 @@ class SentinelPlugin(Plugin):
         self._plugin_type = plugin_type
         self._version = version
         self._state = PluginState.REGISTERED
+        self._lock = RLock()
 
     @property
     def name(self) -> str:
@@ -69,74 +71,81 @@ class SentinelPlugin(Plugin):
 
     @property
     def state(self) -> PluginState:
-        return self._state
+        with self._lock:
+            return self._state
 
     def load(self) -> None:
         """
         Transition the plugin from REGISTERED to LOADED.
         """
-        if self._state != PluginState.REGISTERED:
-            raise PluginLoadError(
-                f"Cannot load plugin in state "
-                f"'{self._state.value}'."
-            )
+        with self._lock:
+            if self._state != PluginState.REGISTERED:
+                raise PluginLoadError(
+                    f"Cannot load plugin in state "
+                    f"'{self._state.value}'."
+                )
 
-        self._state = PluginState.LOADED
+            self._state = PluginState.LOADED
 
     def enable(self) -> None:
         """
         Transition the plugin from LOADED to ENABLED.
         """
-        if self._state != PluginState.LOADED:
-            raise PluginEnableError(
-                f"Cannot enable plugin in state "
-                f"'{self._state.value}'."
-            )
+        with self._lock:
+            if self._state != PluginState.LOADED:
+                raise PluginEnableError(
+                    f"Cannot enable plugin in state "
+                    f"'{self._state.value}'."
+                )
 
-        self._state = PluginState.ENABLED
+            self._state = PluginState.ENABLED
 
     def disable(self) -> None:
         """
         Transition the plugin from ENABLED to DISABLED.
         """
-        if self._state != PluginState.ENABLED:
-            raise PluginDisableError(
-                f"Cannot disable plugin in state "
-                f"'{self._state.value}'."
-            )
+        with self._lock:
+            if self._state != PluginState.ENABLED:
+                raise PluginDisableError(
+                    f"Cannot disable plugin in state "
+                    f"'{self._state.value}'."
+                )
 
-        self._state = PluginState.DISABLED
+            self._state = PluginState.DISABLED
 
     def unload(self) -> None:
         """
         Transition the plugin from LOADED or DISABLED to UNLOADED.
         """
-        if self._state not in (
-            PluginState.LOADED,
-            PluginState.DISABLED,
-        ):
-            raise PluginUnloadError(
-                f"Cannot unload plugin in state "
-                f"'{self._state.value}'."
-            )
+        with self._lock:
+            if self._state not in (
+                PluginState.LOADED,
+                PluginState.DISABLED,
+            ):
+                raise PluginUnloadError(
+                    f"Cannot unload plugin in state "
+                    f"'{self._state.value}'."
+                )
 
-        self._state = PluginState.UNLOADED
+            self._state = PluginState.UNLOADED
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "version": self.version,
-            "plugin_type": self.plugin_type.value,
-            "state": self.state.value,
-        }
+        with self._lock:
+            return {
+                "name": self._name,
+                "version": self._version,
+                "plugin_type": self._plugin_type.value,
+                "state": self._state.value,
+            }
 
     def __repr__(self) -> str:
-        return (
-            f"SentinelPlugin("
-            f"name={self.name!r}, "
-            f"version={self.version!r}, "
-            f"state={self.state.value!r})"
-        )
+        with self._lock:
+            return (
+                f"SentinelPlugin("
+                f"name={self._name!r}, "
+                f"version={self._version!r}, "
+                f"state={self._state.value!r})"
+            )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SentinelPlugin):

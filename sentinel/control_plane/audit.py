@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from threading import RLock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +54,15 @@ class ControlAuditEvent:
     error: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.caller_id, str):
+            raise TypeError("caller_id must be a string.")
+        if not isinstance(self.caller_type, str):
+            raise TypeError("caller_type must be a string.")
+        if not isinstance(self.command, str):
+            raise TypeError("command must be a string.")
+        if not isinstance(self.timestamp, datetime):
+            raise TypeError("timestamp must be a datetime.")
+
         if not self.caller_id.strip():
             raise ValueError("caller_id must not be empty.")
 
@@ -114,13 +124,15 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
 
     def __init__(self) -> None:
         self._events: list[ControlAuditEvent] = []
+        self._lock = RLock()
 
     @property
     def events(self) -> tuple[ControlAuditEvent, ...]:
         """
         Return all recorded events.
         """
-        return tuple(self._events)
+        with self._lock:
+            return tuple(self._events)
 
     def record(
         self,
@@ -134,13 +146,15 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
                 "event must be a ControlAuditEvent."
             )
 
-        self._events.append(event)
+        with self._lock:
+            self._events.append(event)
 
     def clear(self) -> None:
         """
         Remove all recorded events.
         """
-        self._events.clear()
+        with self._lock:
+            self._events.clear()
 
 class PersistentControlAuditRecorder(ControlAuditRecorder):
     """

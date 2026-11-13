@@ -135,6 +135,37 @@ def test_execute_with_brain() -> None:
     assert plan["status"] == PlanStatus.COMPLETED
 
 
+
+def test_execute_rejects_invalid_brain_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = OrchestrationManager()
+
+    def invalid_execute(
+        *,
+        request: str,
+        context: object,
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(
+        manager.brain,
+        "execute",
+        invalid_execute,
+    )
+
+    request = OrchestrationRequest(
+        request_id="req.invalid-brain-result",
+        input="hello",
+    )
+
+    with pytest.raises(
+        OrchestrationExecutionError,
+        match="Brain returned an invalid execution result.",
+    ):
+        manager.execute(request)
+
+
 def test_brain_receives_request_context() -> None:
     manager = OrchestrationManager()
 

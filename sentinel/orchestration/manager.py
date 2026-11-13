@@ -347,6 +347,11 @@ class OrchestrationManager:
             context=context,
         )
 
+        if not isinstance(result, dict):
+            raise OrchestrationExecutionError(
+                "Brain returned an invalid execution result."
+            )
+
         result_context = result.get("context")
 
         if isinstance(result_context, dict):

@@ -139,3 +139,44 @@ def test_concurrent_wait_and_terminate():
     finally:
         manager.terminate()
         waiter.join(timeout=2)
+
+
+
+def test_concurrent_terminate_calls_are_safe():
+    from threading import Barrier, Thread
+
+    manager = ProcessManager()
+    manager.start(
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+
+    barrier = Barrier(3)
+    errors = []
+
+    def terminate():
+        try:
+            barrier.wait(timeout=3)
+            manager.terminate()
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=terminate) for _ in range(2)]
+
+    try:
+        for thread in threads:
+            thread.start()
+
+        barrier.wait(timeout=3)
+
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == []
+        assert manager.process is None
+        assert manager.pid is None
+        assert manager.is_running is False
+    finally:
+        manager.terminate()
+        for thread in threads:
+            thread.join(timeout=2)

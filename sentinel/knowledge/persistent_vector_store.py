@@ -16,6 +16,7 @@ from sentinel.knowledge.similarity import (
     SimilarityMetric,
 )
 from sentinel.knowledge.vector_store import VectorStore
+from sentinel.storage.exceptions import StorageKeyNotFoundError
 from sentinel.storage.interfaces import StorageBackend
 
 
@@ -38,7 +39,7 @@ class PersistentVectorStore(VectorStore):
         similarity: SimilarityMetric | None = None,
     ) -> None:
         self._backend = backend
-        self._similarity = similarity or CosineSimilarity()
+        self._similarity = similarity if similarity is not None else CosineSimilarity()
 
     @property
     def backend(self) -> StorageBackend:
@@ -98,7 +99,11 @@ class PersistentVectorStore(VectorStore):
         key = self._key(chunk_id)
 
         if self._backend.exists(key):
-            self._backend.delete(key)
+            try:
+                self._backend.delete(key)
+            except StorageKeyNotFoundError:
+                # Another concurrent delete may already have removed it.
+                pass
 
     def delete_document(
         self,
@@ -258,7 +263,11 @@ class PersistentVectorStore(VectorStore):
     def clear(self) -> None:
         """Remove all persisted knowledge chunks."""
         for chunk_id in self._chunk_ids():
-            self.delete(chunk_id)
+            try:
+                self.delete(chunk_id)
+            except StorageKeyNotFoundError:
+                # Another concurrent clear may already have deleted it.
+                continue
 
     def __len__(self) -> int:
         """Return the number of persisted chunks."""
@@ -288,10 +297,10 @@ class PersistentVectorStore(VectorStore):
         """
         key = self._key(chunk_id)
 
-        if not self._backend.exists(key):
+        try:
+            raw = self._backend.get(key)
+        except StorageKeyNotFoundError:
             return None
-
-        raw = self._backend.get(key)
 
         if not isinstance(raw, str):
             raise TypeError(
@@ -326,27 +335,55 @@ class PersistentVectorStore(VectorStore):
                 f"Stored embedding for '{chunk_id}' is invalid."
             )
 
-        metadata = chunk_data.get("metadata", {})
+        required_fields = ("id", "document_id", "text", "index")
+        if any(field not in chunk_data for field in required_fields):
+            raise ValueError(
+                f"Stored chunk '{chunk_id}' is missing required fields."
+            )
 
+        if (
+            not isinstance(chunk_data["id"], str)
+            or not isinstance(chunk_data["document_id"], str)
+            or not isinstance(chunk_data["text"], str)
+            or not isinstance(chunk_data["index"], int)
+            or isinstance(chunk_data["index"], bool)
+        ):
+            raise ValueError(
+                f"Stored chunk '{chunk_id}' contains invalid field types."
+            )
+
+        metadata = chunk_data.get("metadata", {})
         if not isinstance(metadata, dict):
             raise ValueError(
                 f"Stored metadata for '{chunk_id}' is invalid."
             )
 
-        chunk = Chunk(
-            id=str(chunk_data["id"]),
-            document_id=str(chunk_data["document_id"]),
-            text=str(chunk_data["text"]),
-            index=int(chunk_data["index"]),
-            metadata={
-                str(key): str(value)
-                for key, value in metadata.items()
-            },
-        )
+        try:
+            chunk = Chunk(
+                id=chunk_data["id"],
+                document_id=chunk_data["document_id"],
+                text=chunk_data["text"],
+                index=chunk_data["index"],
+                metadata={
+                    str(key): str(value)
+                    for key, value in metadata.items()
+                },
+            )
+        except (TypeError, ValueError, KeyError) as exc:
+            raise ValueError(
+                f"Stored chunk '{chunk_id}' is invalid."
+            ) from exc
 
-        embedding = [
-            float(value)
-            for value in embedding_data
-        ]
+        try:
+            embedding = [float(value) for value in embedding_data]
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"Stored embedding for '{chunk_id}' is invalid."
+            ) from exc
+
+        if not all(isfinite(value) for value in embedding):
+            raise ValueError(
+                f"Stored embedding for '{chunk_id}' must contain only finite values."
+            )
 
         return chunk, embedding

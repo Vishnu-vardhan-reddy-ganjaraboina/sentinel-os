@@ -4,6 +4,7 @@ In-memory storage implementation for the Sentinel Memory subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from threading import RLock
 
 from sentinel.memory.exceptions import (
@@ -88,12 +89,17 @@ class InMemoryStore(Memory):
         if not normalized:
             return []
 
+        # Take a stable snapshot while holding the store lock.
+        # Entry content access happens outside the store lock because
+        # accessing content may update the entry's last-accessed time.
         with self._lock:
-            return [
-                entry
-                for entry in self._entries.values()
-                if normalized in str(entry.content).lower()
-            ]
+            entries = tuple(self._entries.values())
+
+        return [
+            entry
+            for entry in entries
+            if normalized in str(entry.content).lower()
+        ]
 
     def clear(self) -> None:
         """Remove all stored memory entries."""
@@ -104,6 +110,13 @@ class InMemoryStore(Memory):
         """Return all stored memory entries."""
         with self._lock:
             return list(self._entries.values())
+
+    def __iter__(self) -> Iterator[MemoryEntry]:
+        """Iterate over a stable snapshot of stored memory entries."""
+        with self._lock:
+            entries = tuple(self._entries.values())
+
+        return iter(entries)
 
     def __contains__(self, memory_id: object) -> bool:
         """Support ``memory_id in store``."""

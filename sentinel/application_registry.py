@@ -153,6 +153,11 @@ class ApplicationRegistry:
         with self._lock:
             return tuple(self._applications.keys())
 
+    def items(self) -> tuple[tuple[str, Application], ...]:
+        """Return a snapshot of registered applications with their names."""
+        with self._lock:
+            return tuple(self._applications.items())
+
     def manifests(
         self,
     ) -> tuple[tuple[str, ApplicationManifest], ...]:

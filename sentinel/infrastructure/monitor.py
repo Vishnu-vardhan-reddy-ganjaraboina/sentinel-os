@@ -192,6 +192,15 @@ class Monitor(Service):
         services = kernel.services()
         kernel_health = kernel.health()
 
+        updates: list[
+            tuple[
+                str,
+                ServiceState,
+                bool,
+                datetime,
+            ]
+        ] = []
+
         for service in services:
             service_health = kernel_health["services"].get(
                 service.name,
@@ -211,16 +220,24 @@ class Monitor(Service):
                 and service_health.get("healthy") is True
             )
 
-            with self._lock:
-                self._ensure_active()
+            updates.append(
+                (
+                    service.name,
+                    state,
+                    healthy,
+                    datetime.now(UTC),
+                )
+            )
 
-                now = datetime.now(UTC)
+        with self._lock:
+            self._ensure_active()
 
-                existing = self._services.get(service.name)
+            for service_name, state, healthy, now in updates:
+                existing = self._services.get(service_name)
 
                 if existing is None:
-                    self._services[service.name] = ServiceHealth(
-                        service_name=service.name,
+                    self._services[service_name] = ServiceHealth(
+                        service_name=service_name,
                         state=state,
                         healthy=healthy,
                         started_at=now,

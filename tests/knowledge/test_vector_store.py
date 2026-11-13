@@ -9,6 +9,18 @@ from sentinel.knowledge.vector_store import (
 )
 
 
+class FalseyDotProductSimilarity(DotProductSimilarity):
+    def __bool__(self) -> bool:
+        return False
+
+
+def test_falsey_similarity_is_preserved():
+    metric = FalseyDotProductSimilarity()
+    store = InMemoryVectorStore(similarity=metric)
+
+    assert store._similarity is metric
+
+
 def test_add_chunk():
     store = InMemoryVectorStore()
 

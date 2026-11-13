@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any
 
 from sentinel.brain.interfaces import Context
@@ -13,9 +14,9 @@ from sentinel.brain.interfaces import Context
 
 class BrainContext(Context):
     """
-    Represents the execution context for the Brain.
+    Thread-safe execution context for the Brain subsystem.
 
-    Context data is protected from accidental external mutation.
+    Context data is isolated from callers through defensive deep copies.
     """
 
     def __init__(
@@ -32,6 +33,7 @@ class BrainContext(Context):
         if data is not None and not isinstance(data, dict):
             raise TypeError("data must be a dictionary.")
 
+        self._lock = RLock()
         self._id = context_id
         self._data: dict[str, Any] = (
             deepcopy(data) if data is not None else {}
@@ -47,54 +49,60 @@ class BrainContext(Context):
     @property
     def data(self) -> dict[str, Any]:
         """
-        Return an isolated copy of the context data.
+        Return a completely isolated snapshot of the context.
         """
-        return deepcopy(self._data)
+        with self._lock:
+            return deepcopy(self._data)
 
     @property
     def created_at(self) -> datetime:
-        return self._created_at
+        with self._lock:
+            return self._created_at
 
     @property
     def updated_at(self) -> datetime:
-        return self._updated_at
+        with self._lock:
+            return self._updated_at
 
     def update(self, **kwargs: Any) -> None:
         """
-        Update context values using isolated copies.
+        Atomically update context values.
+
+        Values are deep-copied before entering the context so callers cannot
+        mutate stored state through shared references.
         """
-        self._data.update(deepcopy(kwargs))
-        self._updated_at = datetime.now(UTC)
+        copied_values = deepcopy(kwargs)
+
+        with self._lock:
+            self._data.update(copied_values)
+            self._updated_at = datetime.now(UTC)
 
     def get(
         self,
         key: str,
         default: Any = None,
     ) -> Any:
-        """
-        Retrieve an isolated copy of a context value.
-        """
-        return deepcopy(
-            self._data.get(
-                key,
-                default,
-            )
-        )
+        """Retrieve an isolated copy of a context value."""
+        with self._lock:
+            value = self._data.get(key, default)
+            return deepcopy(value)
 
     def clear(self) -> None:
         """
-        Remove all context values.
+        Atomically remove all context values.
         """
-        self._data.clear()
-        self._updated_at = datetime.now(UTC)
+        with self._lock:
+            self._data.clear()
+            self._updated_at = datetime.now(UTC)
 
     def to_dict(self) -> dict[str, Any]:
         """
-        Serialize the context.
+        Serialize an isolated context snapshot.
         """
-        return {
-            "id": self.id,
-            "data": deepcopy(self._data),
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-        }
+        with self._lock:
+            return {
+                "id": self._id,
+                "data": deepcopy(self._data),
+                "created_at": self._created_at.isoformat(),
+                "updated_at": self._updated_at.isoformat(),
+            }

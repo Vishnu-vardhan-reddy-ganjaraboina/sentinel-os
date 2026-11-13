@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import pytest
@@ -261,3 +262,59 @@ def test_audit_event_nested_data_cannot_be_mutated() -> None:
 
     with pytest.raises(AttributeError):
         event.data["tags"].append("modified")
+
+
+def _concurrent_audit_event(index: int) -> ControlAuditEvent:
+    return ControlAuditEvent(
+        caller_id=f"caller-{index}",
+        caller_type="test",
+        command="system.status",
+        success=True,
+        data={"index": index},
+    )
+
+
+def test_in_memory_recorder_supports_concurrent_recording() -> None:
+    recorder = InMemoryControlAuditRecorder()
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(
+            executor.map(
+                recorder.record,
+                (_concurrent_audit_event(index) for index in range(200)),
+            )
+        )
+
+    events = recorder.events
+    assert len(events) == 200
+    assert {event.caller_id for event in events} == {
+        f"caller-{index}" for index in range(200)
+    }
+
+
+def test_in_memory_recorder_supports_concurrent_reading() -> None:
+    recorder = InMemoryControlAuditRecorder()
+
+    for index in range(100):
+        recorder.record(_concurrent_audit_event(index))
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        snapshots = list(
+            executor.map(lambda _: recorder.events, range(100))
+        )
+
+    assert all(len(snapshot) == 100 for snapshot in snapshots)
+
+
+def test_in_memory_recorder_supports_concurrent_record_and_clear() -> None:
+    recorder = InMemoryControlAuditRecorder()
+
+    def worker(index: int) -> None:
+        recorder.record(_concurrent_audit_event(index))
+        if index % 10 == 0:
+            recorder.clear()
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(executor.map(worker, range(200)))
+
+    assert isinstance(recorder.events, tuple)

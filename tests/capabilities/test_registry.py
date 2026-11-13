@@ -120,3 +120,218 @@ def test_registry_concurrent_registration() -> None:
         list(executor.map(register, range(100)))
 
     assert len(registry) == 100
+
+
+def test_list_returns_snapshot() -> None:
+    registry = CapabilityRegistry()
+
+    first = DummyCapability("first")
+    registry.register(first)
+
+    snapshot = registry.list()
+
+    registry.register(DummyCapability("second"))
+
+    assert len(snapshot) == 1
+    assert snapshot[0] is first
+
+
+def test_list_by_category_returns_snapshot() -> None:
+    registry = CapabilityRegistry()
+
+    first = DummyCapability("first")
+    registry.register(first)
+
+    snapshot = registry.list_by_category(
+        CapabilityCategory.CUSTOM
+    )
+
+    registry.register(DummyCapability("second"))
+
+    assert len(snapshot) == 1
+    assert snapshot[0] is first
+
+
+def test_iteration_uses_snapshot() -> None:
+    registry = CapabilityRegistry()
+
+    first = DummyCapability("first")
+    registry.register(first)
+
+    iterator = iter(registry)
+
+    registry.register(DummyCapability("second"))
+
+    assert list(iterator) == [first]
+
+
+def test_iteration_survives_clear() -> None:
+    registry = CapabilityRegistry()
+
+    first = DummyCapability("first")
+    second = DummyCapability("second")
+
+    registry.register(first)
+    registry.register(second)
+
+    iterator = iter(registry)
+
+    registry.clear()
+
+    assert list(iterator) == [first, second]
+
+
+def test_contains() -> None:
+    registry = CapabilityRegistry()
+
+    capability = DummyCapability()
+    registry.register(capability)
+
+    assert capability.id in registry
+    assert "missing" not in registry
+
+
+def test_len() -> None:
+    registry = CapabilityRegistry()
+
+    assert len(registry) == 0
+
+    registry.register(DummyCapability())
+
+    assert len(registry) == 1
+
+
+def test_get_rejects_invalid_id_type() -> None:
+    registry = CapabilityRegistry()
+
+    with pytest.raises(TypeError):
+        registry.get(123)  # type: ignore[arg-type]
+
+
+def test_get_rejects_empty_id() -> None:
+    registry = CapabilityRegistry()
+
+    with pytest.raises(ValueError):
+        registry.get("")
+
+
+def test_exists_rejects_invalid_id_type() -> None:
+    registry = CapabilityRegistry()
+
+    with pytest.raises(TypeError):
+        registry.exists(123)  # type: ignore[arg-type]
+
+
+def test_unregister_rejects_empty_id() -> None:
+    registry = CapabilityRegistry()
+
+    with pytest.raises(ValueError):
+        registry.unregister("")
+
+
+def test_category_rejects_invalid_category() -> None:
+    registry = CapabilityRegistry()
+
+    with pytest.raises(TypeError):
+        registry.list_by_category("custom")  # type: ignore[arg-type]
+
+def test_concurrent_register_and_read() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    registry = CapabilityRegistry()
+
+    def register(index: int) -> None:
+        registry.register(
+            DummyCapability(f"concurrent.{index}")
+        )
+
+    def read(index: int) -> None:
+        registry.exists(f"concurrent.{index}")
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = []
+
+        for index in range(100):
+            futures.append(
+                executor.submit(register, index)
+            )
+            futures.append(
+                executor.submit(read, index)
+            )
+
+        for future in futures:
+            future.result()
+
+    assert len(registry) == 100
+
+
+def test_concurrent_register_and_iteration() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    registry = CapabilityRegistry()
+
+    for index in range(50):
+        registry.register(
+            DummyCapability(f"initial.{index}")
+        )
+
+    def register(index: int) -> None:
+        registry.register(
+            DummyCapability(f"dynamic.{index}")
+        )
+
+    def iterate() -> int:
+        return len(list(registry))
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        register_futures = [
+            executor.submit(register, index)
+            for index in range(100)
+        ]
+
+        iteration_futures = [
+            executor.submit(iterate)
+            for _ in range(100)
+        ]
+
+        for future in register_futures:
+            future.result()
+
+        observed_sizes = [
+            future.result()
+            for future in iteration_futures
+        ]
+
+    assert all(size >= 50 for size in observed_sizes)
+    assert len(registry) == 150
+
+
+def test_concurrent_clear_and_read() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    registry = CapabilityRegistry()
+
+    for index in range(100):
+        registry.register(
+            DummyCapability(f"clear.{index}")
+        )
+
+    def clear() -> None:
+        registry.clear()
+
+    def read() -> int:
+        return len(registry.list())
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = []
+
+        for _ in range(20):
+            futures.append(executor.submit(clear))
+
+        for _ in range(100):
+            futures.append(executor.submit(read))
+
+        for future in futures:
+            future.result()
+
+    assert len(registry) == 0

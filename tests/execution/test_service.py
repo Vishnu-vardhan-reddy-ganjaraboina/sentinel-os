@@ -123,3 +123,26 @@ def test_shutdown_cleans_up_executor_when_process_manager_fails():
         service.shutdown()
 
     assert executor_shutdown_called
+
+
+
+def test_shutdown_cleans_up_process_manager_when_executor_is_interrupted():
+    service = ExecutionService()
+    process_shutdown_called = False
+
+    def interrupt_executor_shutdown():
+        raise KeyboardInterrupt()
+
+    def track_process_shutdown():
+        nonlocal process_shutdown_called
+        process_shutdown_called = True
+
+    service.executor.shutdown = interrupt_executor_shutdown
+    service.process_manager.shutdown = track_process_shutdown
+
+    import pytest
+
+    with pytest.raises(KeyboardInterrupt):
+        service.shutdown()
+
+    assert process_shutdown_called

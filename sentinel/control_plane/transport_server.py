@@ -174,6 +174,10 @@ class ControlPlaneTransportServer:
             return int(self._socket.getsockname()[1])
 
     @property
+    def max_active_workers(self) -> int:
+        return self._max_active_workers
+
+    @property
     def running(self) -> bool:
         thread = self._thread
         return thread is not None and thread.is_alive()

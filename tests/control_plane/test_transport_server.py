@@ -524,6 +524,12 @@ def test_server_rejects_invalid_max_active_workers(limit: object) -> None:
         )
 
 
+def test_server_exposes_max_active_workers() -> None:
+    server = create_server(max_active_workers=8)
+
+    assert server.max_active_workers == 8
+
+
 def test_server_enforces_worker_limit_and_recovers_capacity() -> None:
     import threading
 

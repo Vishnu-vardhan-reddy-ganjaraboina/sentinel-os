@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from threading import RLock
+from typing import TypeVar
 
 from sentinel.security.authenticator import (
     SecurityAuthenticator,
@@ -11,6 +12,8 @@ from sentinel.security.authorizer import SecurityAuthorizer
 from sentinel.security.constants import Permission, Role
 from sentinel.security.credentials import SecurityCredentials
 from sentinel.security.identity import SecurityIdentity
+
+_T = TypeVar("_T")
 
 
 class SecurityManager:
@@ -189,6 +192,30 @@ class SecurityManager:
 
             return self._authorizer.authorize(identity, permission)
 
+    def authorize_and_admit(
+        self,
+        identity: SecurityIdentity,
+        permission: Permission,
+        admission: Callable[[], _T],
+    ) -> _T:
+        """Authorize an identity and admit work under one security lock.
+
+        The callback must perform admission only. It must not execute
+        capability code or perform long-running work.
+        """
+        with self._lock:
+            if self._identities.get(identity.id) is not identity:
+                raise PermissionError(
+                    "Identity is not authorized to perform this operation."
+                )
+
+            if not self._authorizer.authorize(identity, permission):
+                raise PermissionError(
+                    "Identity is not authorized to perform this operation."
+                )
+
+            return admission()
+
 
     def add_role(
         self,
@@ -227,7 +254,8 @@ class SecurityManager:
         permission_set = (
             {permissions} if isinstance(permissions, Permission) else permissions
         )
-        self._authorizer.grant(role, permission_set)
+        with self._lock:
+            self._authorizer.grant(role, permission_set)
 
     def revoke(
         self,
@@ -238,7 +266,8 @@ class SecurityManager:
         permission_set = (
             {permissions} if isinstance(permissions, Permission) else permissions
         )
-        self._authorizer.revoke(role, permission_set)
+        with self._lock:
+            self._authorizer.revoke(role, permission_set)
 
 
     def clear(self) -> None:

@@ -59,15 +59,23 @@ class CapabilityManager:
         capability = self._registry.get(capability_id)
         return self.execute_instance(capability, **kwargs)
 
-    def execute_instance(
+    def _admit_instance(
+        self,
+        capability: BaseCapability,
+    ) -> BaseCapability:
+        """Admit the exact registered capability without running it."""
+        with self._registry.execution_admission(capability):
+            pass
+        return capability
+
+    def _execute_admitted_instance(
         self,
         capability: BaseCapability,
         **kwargs: Any,
     ) -> Any:
-        """Execute the exact currently registered capability instance."""
+        """Execute a capability whose admission has already succeeded."""
         try:
-            with self._registry.execution_admission(capability):
-                return capability._execute_admitted(**kwargs)
+            return capability._execute_admitted(**kwargs)
 
         except (
             CapabilityDisabledError,
@@ -79,6 +87,15 @@ class CapabilityManager:
             raise CapabilityExecutionError(
                 f"Capability '{capability.id}' failed."
             ) from exc
+
+    def execute_instance(
+        self,
+        capability: BaseCapability,
+        **kwargs: Any,
+    ) -> Any:
+        """Admit and execute the exact currently registered instance."""
+        self._admit_instance(capability)
+        return self._execute_admitted_instance(capability, **kwargs)
 
     def list(self) -> list[BaseCapability]:
         """Return all registered capabilities."""

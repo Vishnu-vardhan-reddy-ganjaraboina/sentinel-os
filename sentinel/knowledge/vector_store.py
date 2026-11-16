@@ -89,6 +89,9 @@ class VectorStore(ABC):
 
         In-memory stores do not require an explicit connection.
         Persistent implementations can override this method.
+
+        If connection fails after acquiring resources, the implementation
+        must release those resources and remain safe to retry.
         """
         return None
 
@@ -98,6 +101,8 @@ class VectorStore(ABC):
 
         In-memory stores do not require explicit cleanup.
         Persistent implementations can override this method.
+
+        Repeated calls after successful cleanup must be safe.
         """
         return None
 

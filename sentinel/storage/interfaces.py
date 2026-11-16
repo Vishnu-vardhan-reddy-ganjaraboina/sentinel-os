@@ -30,6 +30,9 @@ class StorageBackend(ABC):
 
         Backends that do not require an explicit connection may use
         this default no-op implementation.
+
+        If initialization fails after acquiring resources, the implementation
+        must release those resources and leave the backend safe to retry.
         """
         return None
 
@@ -39,6 +42,8 @@ class StorageBackend(ABC):
 
         Backends that do not own external resources may use this
         default no-op implementation.
+
+        Repeated calls after successful cleanup must be safe.
         """
         return None
 

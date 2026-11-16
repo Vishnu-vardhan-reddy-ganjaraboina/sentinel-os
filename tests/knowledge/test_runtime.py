@@ -4,6 +4,8 @@ Tests for the Sentinel Knowledge runtime service.
 
 from collections.abc import Iterable
 
+import pytest
+
 from sentinel.kernel.service import Service
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.document import Document
@@ -45,6 +47,38 @@ def test_runtime_initialize() -> None:
     assert runtime.health() == {
         "healthy": True,
     }
+
+
+def test_runtime_initialize_can_retry_after_connection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = KnowledgeRuntimeService()
+    vector_store = runtime.knowledge.retriever.vector_store
+    attempts = 0
+
+    def connect_once_then_succeed() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary connection failure")
+
+    monkeypatch.setattr(
+        vector_store,
+        "connect",
+        connect_once_then_succeed,
+    )
+
+    with pytest.raises(RuntimeError, match="temporary connection failure"):
+        runtime.initialize()
+
+    assert runtime.health() == {"healthy": False}
+
+    runtime.initialize()
+
+    assert attempts == 2
+    assert runtime.health() == {"healthy": True}
+
+    runtime.shutdown()
 
 
 def test_runtime_shutdown() -> None:

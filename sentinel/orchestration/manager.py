@@ -4,12 +4,14 @@ Manager for the Sentinel Orchestration subsystem.
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Callable
 from threading import Lock, RLock
 from typing import Any
 
 from sentinel.brain.intent_resolver import DefaultIntentResolver
 from sentinel.brain.manager import BrainManager
+from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.manager import CapabilityManager
 from sentinel.capabilities.validation import (
     CapabilityArgumentValidationError,
@@ -30,6 +32,7 @@ from sentinel.orchestration.models import (
 )
 from sentinel.security.constants import Permission
 from sentinel.security.exceptions import AuthorizationError
+from sentinel.security.exceptions import PermissionError as SecurityPermissionError
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
 
@@ -439,7 +442,7 @@ class OrchestrationManager:
                 capability_id,
             )
 
-            self._authorize_capability(capability_id)
+            identity = self._authorize_capability(capability_id)
 
             capability = self._capabilities.get(capability_id)
 
@@ -455,8 +458,31 @@ class OrchestrationManager:
                 ) from exc
 
             try:
-                capability_result = self._capabilities.execute_instance(
-                    capability,
+                def admit_capability(
+                    capability_to_admit: BaseCapability = capability,
+                ) -> BaseCapability:
+                    return self._capabilities._admit_instance(
+                        capability_to_admit
+                    )
+
+                admitted = self._security.authorize_and_admit(
+                    identity,
+                    Permission.EXECUTE,
+                    admit_capability,
+                )
+            except (SecurityPermissionError, builtins.PermissionError) as exc:
+                raise AuthorizationError(
+                    f"Identity is not authorized to execute capability "
+                    f"{capability_id!r}."
+                ) from exc
+            except Exception as exc:
+                raise OrchestrationExecutionError(
+                    f"Could not admit capability {capability_id!r}."
+                ) from exc
+
+            try:
+                capability_result = self._capabilities._execute_admitted_instance(
+                    admitted,
                     **arguments,
                 )
             except OrchestrationExecutionError:
@@ -506,26 +532,29 @@ class OrchestrationManager:
     def _authorize_capability(
         self,
         capability_id: str,
-    ) -> None:
+    ) -> SecurityIdentity:
         """
         Authorize execution of a capability.
 
         Every capability execution requires Permission.EXECUTE.
         """
-        if self._identity is None:
+        identity = self._identity
+        if identity is None:
             raise AuthorizationError(
                 f"Identity is required to execute capability "
                 f"'{capability_id}'."
             )
 
         if not self._security.authorize(
-            self._identity,
+            identity,
             Permission.EXECUTE,
         ):
             raise AuthorizationError(
-                f"Identity '{self._identity.id}' is not authorized "
+                f"Identity '{identity.id}' is not authorized "
                 f"to execute capability '{capability_id}'."
             )
+
+        return identity
 
     def _persist_result(
         self,

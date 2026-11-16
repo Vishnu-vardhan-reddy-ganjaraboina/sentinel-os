@@ -87,13 +87,20 @@ class Scheduler(Service):
 
             self._stop_event.clear()
 
-            self._thread = Thread(
+            thread = Thread(
                 target=self._run,
                 daemon=True,
                 name="Scheduler",
             )
+            self._thread = thread
 
-            self._thread.start()
+            try:
+                thread.start()
+            except BaseException:
+                self._stop_event.set()
+                if thread.ident is None and self._thread is thread:
+                    self._thread = None
+                raise
 
     def shutdown(self) -> None:
         """Stop the scheduler."""
@@ -107,7 +114,7 @@ class Scheduler(Service):
 
             self._stop_event.set()
 
-        if thread is not current_thread():
+        if thread.ident is not None and thread is not current_thread():
             thread.join()
 
         with self._lock:

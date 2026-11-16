@@ -178,6 +178,78 @@ def test_capability_disabled_during_authorization() -> None:
     assert capability.run_called is False
 
 
+
+def test_permission_revoked_before_atomic_admission_prevents_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capability = ValidationTestCapability({"type": "object"})
+    manager = make_manager(capability, {}, authorized=True)
+
+    security = manager._security
+    original_authorize_and_admit = security.authorize_and_admit
+
+    def revoke_before_admission(
+        identity: SecurityIdentity,
+        permission: Permission,
+        admission: Any,
+    ) -> Any:
+        security.revoke(Role.USER, Permission.EXECUTE)
+        return original_authorize_and_admit(
+            identity,
+            permission,
+            admission,
+        )
+
+    monkeypatch.setattr(
+        security,
+        "authorize_and_admit",
+        revoke_before_admission,
+    )
+
+    with pytest.raises(AuthorizationError):
+        manager.execute_goal(
+            request_id="req.permission.revoked",
+            input="test permission revoked before admission",
+        )
+
+    assert capability.run_called is False
+
+
+def test_identity_unregistered_before_atomic_admission_prevents_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capability = ValidationTestCapability({"type": "object"})
+    manager = make_manager(capability, {}, authorized=True)
+
+    security = manager._security
+    original_authorize_and_admit = security.authorize_and_admit
+
+    def unregister_before_admission(
+        identity: SecurityIdentity,
+        permission: Permission,
+        admission: Any,
+    ) -> Any:
+        security.unregister_identity(identity.id, "test.user")
+        return original_authorize_and_admit(
+            identity,
+            permission,
+            admission,
+        )
+
+    monkeypatch.setattr(
+        security,
+        "authorize_and_admit",
+        unregister_before_admission,
+    )
+
+    with pytest.raises(AuthorizationError):
+        manager.execute_goal(
+            request_id="req.identity.unregistered",
+            input="test identity unregistered before admission",
+        )
+
+    assert capability.run_called is False
+
 def test_replacement_after_validation_never_executes_replacement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -199,20 +271,19 @@ def test_replacement_after_validation_never_executes_replacement(
 
     capabilities = manager._capabilities
 
-    original_execute_instance = capabilities.execute_instance
+    original_admit_instance = capabilities._admit_instance
 
-    def replace_before_execute(
+    def replace_before_admission(
         capability: ValidationTestCapability,
-        **kwargs: Any,
     ) -> Any:
         capabilities.unregister(capability.id)
         capabilities.register(replacement)
-        return original_execute_instance(capability, **kwargs)
+        return original_admit_instance(capability)
 
     monkeypatch.setattr(
         capabilities,
-        "execute_instance",
-        replace_before_execute,
+        "_admit_instance",
+        replace_before_admission,
     )
     with pytest.raises(OrchestrationExecutionError):
         manager.execute_goal(

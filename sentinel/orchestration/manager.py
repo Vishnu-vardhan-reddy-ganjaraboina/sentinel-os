@@ -4,6 +4,7 @@ Manager for the Sentinel Orchestration subsystem.
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Callable
 from threading import Lock, RLock
 from typing import Any
@@ -30,6 +31,7 @@ from sentinel.orchestration.models import (
 )
 from sentinel.security.constants import Permission
 from sentinel.security.exceptions import AuthorizationError
+from sentinel.security.exceptions import PermissionError as SecurityPermissionError
 from sentinel.security.identity import SecurityIdentity
 from sentinel.security.manager import SecurityManager
 
@@ -455,8 +457,26 @@ class OrchestrationManager:
                 ) from exc
 
             try:
-                capability_result = self._capabilities.execute_instance(
-                    capability,
+                admitted = self._security.authorize_and_admit(
+                    self._identity,
+                    Permission.EXECUTE,
+                    lambda capability=capability: self._capabilities._admit_instance(
+                        capability
+                    ),
+                )
+            except (SecurityPermissionError, builtins.PermissionError) as exc:
+                raise AuthorizationError(
+                    f"Identity is not authorized to execute capability "
+                    f"{capability_id!r}."
+                ) from exc
+            except Exception as exc:
+                raise OrchestrationExecutionError(
+                    f"Could not admit capability {capability_id!r}."
+                ) from exc
+
+            try:
+                capability_result = self._capabilities._execute_admitted_instance(
+                    admitted,
                     **arguments,
                 )
             except OrchestrationExecutionError:

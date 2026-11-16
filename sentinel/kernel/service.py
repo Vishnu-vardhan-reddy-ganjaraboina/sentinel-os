@@ -80,6 +80,10 @@ class Service(ABC):
     def shutdown(self) -> None:
         """
         Shut down the service gracefully.
+
+        This method must be safe after partial initialization and
+        tolerate resources that were never successfully acquired.
+        Implementations should be idempotent.
         """
         raise NotImplementedError
 

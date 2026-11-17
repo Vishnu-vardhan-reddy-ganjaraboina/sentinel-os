@@ -4,12 +4,12 @@ import pytest
 
 from sentinel.boot import BootConfiguration
 from sentinel.boot.system_factory import SystemFactory
+from sentinel.control_plane.commands import KernelCommand
+from sentinel.control_plane.service import ControlPlane
 from sentinel.kernel.bootstrap import Bootstrap
 from sentinel.kernel.kernel import Kernel
 from sentinel.platform import Platform
 from sentinel.system import System
-from sentinel.control_plane.commands import KernelCommand
-from sentinel.control_plane.service import ControlPlane
 
 
 def test_default_factory() -> None:
@@ -21,13 +21,13 @@ def test_default_factory() -> None:
         RuntimeError,
         match="not been composed",
     ):
-        factory.system
+        _ = factory.system
 
     with pytest.raises(
         RuntimeError,
         match="not been composed",
     ):
-        factory.bootstrap
+        _ = factory.bootstrap
 
 
 def test_invalid_configuration_is_rejected() -> None:

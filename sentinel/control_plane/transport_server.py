@@ -9,6 +9,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from sentinel.control.exceptions import ControlProtocolError
+from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
 
@@ -291,7 +292,7 @@ class ControlPlaneTransportServer:
             pass
 
 
-def _protocol_error_result(message: str):
+def _protocol_error_result(message: str) -> ControlResult:
     from sentinel.control_plane.result import ControlResult
 
     return ControlResult(

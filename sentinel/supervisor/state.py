@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SupervisorState(str, Enum):
+class SupervisorState(StrEnum):
     """Lifecycle states for the Sentinel Supervisor."""
 
     STOPPED = "stopped"

@@ -2,10 +2,10 @@
 Sentinel process lifecycle states.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ProcessState(str, Enum):
+class ProcessState(StrEnum):
     """Lifecycle states for the Sentinel process host."""
 
     STOPPED = "stopped"

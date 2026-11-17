@@ -235,7 +235,7 @@ def test_concurrent_reads_are_safe() -> None:
     def read_identity() -> None:
         try:
             for _ in range(1000):
-                identity.roles
+                _ = identity.roles
                 identity.has_role(Role.ADMIN)
                 identity.to_dict()
                 repr(identity)

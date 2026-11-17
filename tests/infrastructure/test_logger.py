@@ -4,9 +4,10 @@ Unit tests for Sentinel logging.
 
 from __future__ import annotations
 
-import pytest
 import logging
 from pathlib import Path
+
+import pytest
 
 from sentinel.infrastructure.logger import (
     configure_logging,

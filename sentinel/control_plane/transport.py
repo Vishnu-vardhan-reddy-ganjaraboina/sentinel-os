@@ -79,6 +79,10 @@ class ControlPlaneProtocol:
             )
 
         command_value = payload.get("command")
+        if not isinstance(command_value, str):
+            raise ControlProtocolError(
+                "Control command must be a string."
+            )
 
         try:
             command = KernelCommand(command_value)

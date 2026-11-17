@@ -47,6 +47,15 @@ class MemoryEntry(ABC):
         """Return the creation timestamp."""
 
     @property
+    def status_changed_at(self) -> datetime:
+        """Return the last status-change timestamp.
+
+        The default preserves compatibility with implementations that do
+        not track lifecycle timestamps separately.
+        """
+        return self.created_at
+
+    @property
     @abstractmethod
     def last_accessed(self) -> datetime:
         """Return the last-access timestamp."""

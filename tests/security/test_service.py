@@ -447,3 +447,89 @@ def test_concurrent_clear_and_registration_are_safe():
         thread.join()
 
     assert errors == []
+
+def test_authenticate_identity_uses_username_not_display_name():
+    service = SecurityService()
+
+    identity = SecurityIdentity(
+        "admin-1",
+        "Administrator",
+        {Role.ADMIN},
+    )
+    credentials = SecurityCredentials("admin", "secret")
+
+    service.register_identity(identity, credentials)
+
+    assert service.authenticate_identity(
+        SecurityCredentials("admin", "secret")
+    ) is identity
+
+
+def test_authenticate_identity_rejects_wrong_password():
+    service = SecurityService()
+
+    service.register_identity(
+        SecurityIdentity("user-1", "User One", {Role.USER}),
+        SecurityCredentials("user", "correct-secret"),
+    )
+
+    assert service.authenticate_identity(
+        SecurityCredentials("user", "wrong-secret")
+    ) is None
+
+
+def test_authenticate_identity_rejects_unknown_username():
+    service = SecurityService()
+
+    assert service.authenticate_identity(
+        SecurityCredentials("unknown", "secret")
+    ) is None
+
+
+def test_duplicate_username_for_different_identity_is_rejected():
+    service = SecurityService()
+
+    service.register_identity(
+        SecurityIdentity("user-1", "First User", {Role.USER}),
+        SecurityCredentials("shared", "secret-one"),
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="already registered"):
+        service.register_identity(
+            SecurityIdentity("user-2", "Second User", {Role.USER}),
+            SecurityCredentials("shared", "secret-two"),
+        )
+
+    assert service.authenticate_identity(
+        SecurityCredentials("shared", "secret-one")
+    ).id == "user-1"
+
+
+def test_replacing_identity_updates_username_association():
+    service = SecurityService()
+
+    service.register_identity(
+        SecurityIdentity("user-1", "Original", {Role.USER}),
+        SecurityCredentials("old-user", "old-secret"),
+    )
+
+    replacement = SecurityIdentity(
+        "user-1",
+        "Replacement",
+        {Role.ADMIN},
+    )
+
+    service.register_identity(
+        replacement,
+        SecurityCredentials("new-user", "new-secret"),
+    )
+
+    assert service.authenticate_identity(
+        SecurityCredentials("old-user", "old-secret")
+    ) is None
+
+    assert service.authenticate_identity(
+        SecurityCredentials("new-user", "new-secret")
+    ) is replacement

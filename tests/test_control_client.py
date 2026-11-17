@@ -11,9 +11,9 @@ from sentinel.control import (
     ControlConnectionError,
     ControlServer,
 )
-from sentinel.process import ProcessHost
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
+from sentinel.process import ProcessHost
 from sentinel.system import System
 
 

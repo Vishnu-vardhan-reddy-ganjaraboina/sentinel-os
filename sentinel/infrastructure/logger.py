@@ -23,7 +23,6 @@ from sentinel.infrastructure.constants import (
     DEFAULT_LOG_MAX_BYTES,
 )
 
-
 _CONFIG_LOCK = RLock()
 
 

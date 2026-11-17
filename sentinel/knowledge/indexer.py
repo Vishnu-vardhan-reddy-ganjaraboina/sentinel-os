@@ -56,6 +56,14 @@ class Indexer:
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,
     ) -> None:
+        if (
+            type(vector_store).replace_document
+            is VectorStore.replace_document
+        ):
+            raise TypeError(
+                "Vector store must implement atomic document replacement."
+            )
+
         self._chunker = chunker
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store

@@ -9,9 +9,9 @@ from threading import RLock
 
 from .authenticator import SecurityAuthenticator
 from .authorizer import SecurityAuthorizer
+from .constants import Permission, Role
 from .credentials import SecurityCredentials
 from .identity import SecurityIdentity
-from .permissions import Permission, Role
 
 
 class SecurityManager:
@@ -23,18 +23,18 @@ class SecurityManager:
         self._identities: dict[str, SecurityIdentity] = {}
         self._lock = RLock()
         self._generation = 0
+        self._identity_ids_by_username: dict[str, str] = {}
+        self._usernames_by_identity_id: dict[str, str] = {}
+
 
     def register_identity(
         self,
         identity: SecurityIdentity,
         credentials: SecurityCredentials,
     ) -> None:
-        """
-        Register an identity and its credentials atomically.
-        """
+        """Register an identity and its credentials atomically."""
         with self._lock:
             generation = self._generation
-            previous_identity = self._identities.get(identity.id)
 
         record = self._authenticator._prepare(credentials)
 
@@ -44,36 +44,87 @@ class SecurityManager:
                     "security state changed during identity registration."
                 )
 
-            self._identities[identity.id] = identity
+            username = credentials.username
+            identity_id = identity.id
+
+            username_owner = self._identity_ids_by_username.get(username)
+            if username_owner is not None and username_owner != identity_id:
+                raise ValueError(
+                    f"username {username!r} is already registered."
+                )
+
+            previous_identity = self._identities.get(identity_id)
+            previous_username = self._usernames_by_identity_id.get(identity_id)
+
+            self._identities[identity_id] = identity
+            self._identity_ids_by_username[username] = identity_id
+            self._usernames_by_identity_id[identity_id] = username
 
             try:
-                self._authenticator._commit(
-                    credentials.username,
-                    record,
-                )
+                self._authenticator._commit(username, record)
             except Exception:
                 if previous_identity is None:
-                    self._identities.pop(
-                        identity.id,
-                        None,
-                    )
+                    self._identities.pop(identity_id, None)
                 else:
-                    self._identities[identity.id] = previous_identity
+                    self._identities[identity_id] = previous_identity
+
+                self._identity_ids_by_username.pop(username, None)
+                self._usernames_by_identity_id.pop(identity_id, None)
+
+                if previous_username is not None:
+                    self._identity_ids_by_username[
+                        previous_username
+                    ] = identity_id
+                    self._usernames_by_identity_id[
+                        identity_id
+                    ] = previous_username
 
                 raise
 
+            if previous_username is not None and previous_username != username:
+                self._identity_ids_by_username.pop(previous_username, None)
+                self._authenticator.unregister(previous_username)
+
+    def authenticate_identity(
+        self,
+        credentials: SecurityCredentials,
+    ) -> SecurityIdentity | None:
+        """Authenticate credentials and resolve their registered identity."""
+        with self._lock:
+            if not self._authenticator.authenticate(credentials):
+                return None
+
+            identity_id = self._identity_ids_by_username.get(
+                credentials.username
+            )
+
+            if identity_id is None:
+                return None
+
+            return self._identities.get(identity_id)
     def unregister_identity(
         self,
         identity_id: str,
         username: str,
     ) -> None:
-        """Remove an identity and its credentials."""
+        """Remove an identity and its registered credentials."""
         with self._lock:
-            self._identities.pop(
+            self._identities.pop(identity_id, None)
+
+            registered_username = self._usernames_by_identity_id.pop(
                 identity_id,
                 None,
             )
-            self._authenticator.unregister(username)
+
+            if registered_username is not None:
+                self._identity_ids_by_username.pop(
+                    registered_username,
+                    None,
+                )
+                self._authenticator.unregister(registered_username)
+            elif self._identity_ids_by_username.get(username) == identity_id:
+                self._identity_ids_by_username.pop(username, None)
+                self._authenticator.unregister(username)
 
     def get_identity(
         self,
@@ -140,6 +191,8 @@ class SecurityManager:
         with self._lock:
             self._generation += 1
             self._identities.clear()
+            self._identity_ids_by_username.clear()
+            self._usernames_by_identity_id.clear()
             self._authenticator.clear()
             self._authorizer.clear()
 

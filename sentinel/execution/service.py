@@ -116,7 +116,7 @@ class ExecutionService:
         if len(failures) == 1:
             raise failures[0]
 
-        raise ExceptionGroup(
+        raise BaseExceptionGroup(
             "Execution service shutdown failed.",
             failures,
         )

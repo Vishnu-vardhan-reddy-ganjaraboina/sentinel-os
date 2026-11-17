@@ -5,11 +5,15 @@ High-level service for the Sentinel Memory subsystem.
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from sentinel.memory.constants import MemoryType
+from sentinel.memory.encrypted_store import EncryptedStorageBackend
 from sentinel.memory.interfaces import MemoryEntry
 from sentinel.memory.manager import MemoryManager
+from sentinel.memory.persistent_store import PersistentMemoryStore
+from sentinel.storage.backends.sqlite import SQLiteBackend
 
 
 class MemoryService:
@@ -30,6 +34,23 @@ class MemoryService:
             else MemoryManager()
         )
 
+    @classmethod
+    def with_sqlite(cls, database: str | Path) -> MemoryService:
+        """Create a memory service backed by durable SQLite storage."""
+        backend = SQLiteBackend(database)
+        manager = MemoryManager(store=PersistentMemoryStore(backend))
+        return cls(manager)
+
+    @classmethod
+    def with_encrypted_sqlite(
+        cls, database: str | Path, key: bytes | str
+    ) -> MemoryService:
+        """Create encrypted SQLite memory using an externally managed key."""
+        backend = SQLiteBackend(database)
+        encrypted = EncryptedStorageBackend(backend, key)
+        store = PersistentMemoryStore(encrypted)
+        return cls(MemoryManager(store=store))
+
     @property
     def manager(self) -> MemoryManager:
         """Return the underlying memory manager."""
@@ -46,6 +67,24 @@ class MemoryService:
     ) -> MemoryEntry:
         """Create and store a memory entry."""
         return self._manager.create(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            memory_type=memory_type,
+            ttl=ttl,
+        )
+
+    def upsert(
+        self,
+        memory_id: str,
+        content: Any,
+        *,
+        importance: int = 1,
+        memory_type: MemoryType = MemoryType.WORKING,
+        ttl: timedelta | None = None,
+    ) -> MemoryEntry:
+        """Insert a memory entry or atomically replace an existing entry."""
+        return self._manager.upsert(
             memory_id=memory_id,
             content=content,
             importance=importance,
@@ -98,6 +137,14 @@ class MemoryService:
     def clear(self) -> None:
         """Remove all stored memories."""
         self._manager.clear()
+
+    def initialize(self) -> None:
+        """Initialize optional persistent storage resources."""
+        self._manager.connect()
+
+    def close(self) -> None:
+        """Close optional persistent storage resources."""
+        self._manager.close()
 
     def list(self) -> list[MemoryEntry]:
         """Return all stored memory entries."""

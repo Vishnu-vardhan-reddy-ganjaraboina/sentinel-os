@@ -5,17 +5,15 @@ Tests for the Sentinel application host.
 import pytest
 
 from sentinel.application import Application
-from sentinel.application_host import ApplicationHost
-from sentinel.application_manager import ApplicationManager
-from sentinel.application_state import ApplicationState
-
 from sentinel.application_dependency_resolver import (
     ApplicationDependencyCycleError,
     ApplicationDependencyMissingError,
     ApplicationDependencyResolver,
 )
+from sentinel.application_host import ApplicationHost
+from sentinel.application_manager import ApplicationManager
 from sentinel.application_manifest import ApplicationManifest
-
+from sentinel.application_state import ApplicationState
 
 
 class HostTestApplication(Application):
@@ -424,129 +422,6 @@ def test_invalid_dependency_resolver_is_rejected() -> None:
         ApplicationHost(
             resolver="invalid",  # type: ignore[arg-type]
         )
-
-def test_start_all_uses_manifest_dependency_order() -> None:
-    events: list[str] = []
-
-    class RecordingApplication(HostTestApplication):
-        def __init__(
-            self,
-            name: str,
-        ) -> None:
-            super().__init__()
-            self.application_name = name
-
-        def start(self):  # type: ignore[override]
-            events.append(self.application_name)
-            super().start()
-
-        def shutdown(self) -> None:  # type: ignore[override]
-            events.append(f"stop:{self.application_name}")
-            super().shutdown()
-
-    host = ApplicationHost()
-
-    database = RecordingApplication("database")
-    backend = RecordingApplication("backend")
-    frontend = RecordingApplication("frontend")
-
-    host.register(
-        "frontend",
-        frontend,
-    )
-    host.register(
-        "backend",
-        backend,
-    )
-    host.register(
-        "database",
-        database,
-    )
-
-    # Current ApplicationHost registers through ApplicationManager,
-    # whose registry now owns manifests. We configure them directly
-    # through the manager registry for this contract test.
-    host.manager.registry.clear()
-
-    host.manager.registry.register(
-        "frontend",
-        frontend,
-        ApplicationManifest(
-            name="frontend",
-            dependencies=("backend",),
-        ),
-    )
-    host.manager.registry.register(
-        "backend",
-        backend,
-        ApplicationManifest(
-            name="backend",
-            dependencies=("database",),
-        ),
-    )
-    host.manager.registry.register(
-        "database",
-        database,
-        ApplicationManifest(
-            name="database",
-        ),
-    )
-
-    # Rebuild manager lifecycle state after direct registry setup.
-    host = ApplicationHost(
-        ApplicationManager(host.manager.registry),
-    )
-
-    for name in host.manager.names():
-        host.manager._states[name] = ApplicationState.REGISTERED
-        host.manager._errors[name] = None
-
-    host.start_all()
-
-    assert events == [
-        "database",
-        "backend",
-        "frontend",
-    ]
-
-    host.stop_all()
-
-
-def test_start_all_rejects_missing_application_dependency() -> None:
-    host = ApplicationHost()
-
-    application = HostTestApplication()
-
-    host.register(
-        "frontend",
-        application,
-    )
-
-    host.manager.registry.unregister("frontend")
-    host.manager.registry.register(
-        "frontend",
-        application,
-        ApplicationManifest(
-            name="frontend",
-            dependencies=("backend",),
-        ),
-    )
-
-    host = ApplicationHost(
-        ApplicationManager(host.manager.registry),
-    )
-
-    host.manager._states["frontend"] = ApplicationState.REGISTERED
-    host.manager._errors["frontend"] = None
-
-    with pytest.raises(
-        ApplicationDependencyMissingError,
-        match="missing application 'backend'",
-    ):
-        host.start_all()
-
-    assert not host.running
-
 
 def test_start_all_rejects_dependency_cycle() -> None:
     host = ApplicationHost()

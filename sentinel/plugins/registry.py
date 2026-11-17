@@ -36,7 +36,7 @@ class SentinelPluginRegistry(PluginRegistry):
         self._lock = RLock()
         self._lifecycle_lock = RLock()
 
-    def _lifecycle_context(self) -> AbstractContextManager[None]:
+    def _lifecycle_context(self) -> AbstractContextManager[object]:
         """
         Return the registry lifecycle lock as a context manager.
 

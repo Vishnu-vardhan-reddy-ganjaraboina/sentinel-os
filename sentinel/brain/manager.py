@@ -30,6 +30,7 @@ class BrainManager:
     ) -> None:
         self._lock = RLock()
         self._engine = BrainEngine()
+        self._intent_resolver: IntentResolver
 
         if intent_resolver is None:
             self._intent_resolver = DefaultIntentResolver()

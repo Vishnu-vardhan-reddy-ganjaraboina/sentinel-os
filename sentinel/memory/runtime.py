@@ -11,6 +11,8 @@ from typing import Any
 from sentinel.kernel.service import Service
 from sentinel.memory.constants import MemoryType
 from sentinel.memory.interfaces import MemoryEntry
+from sentinel.memory.lifecycle import MemoryLifecycle, RetentionPolicy
+from sentinel.memory.persistent_store import PersistentMemoryStore
 from sentinel.memory.service import MemoryService
 
 
@@ -25,6 +27,8 @@ class MemoryRuntimeService(Service):
     def __init__(
         self,
         memory: MemoryService | None = None,
+        *,
+        retention_policy: RetentionPolicy | None = None,
     ) -> None:
         super().__init__(
             "memory",
@@ -39,6 +43,8 @@ class MemoryRuntimeService(Service):
 
         self._initialized = False
         self._lock = RLock()
+        self._retention_policy = retention_policy or RetentionPolicy()
+        self._last_retention_removed = 0
 
     @property
     def memory(self) -> MemoryService:
@@ -128,6 +134,15 @@ class MemoryRuntimeService(Service):
             if self._initialized:
                 return
 
+            self._memory.initialize()
+            store = self._memory.manager.store
+            if isinstance(store, PersistentMemoryStore):
+                lifecycle = MemoryLifecycle(store)
+                lifecycle.migrate()
+                self._last_retention_removed = lifecycle.apply_retention(
+                    self._retention_policy
+                )
+
             self._initialized = True
 
     def shutdown(self) -> None:
@@ -140,7 +155,14 @@ class MemoryRuntimeService(Service):
             if not self._initialized:
                 return
 
+            self._memory.close()
             self._initialized = False
+
+    @property
+    def retention_removed_on_last_start(self) -> int:
+        """Number of records removed by retention during the last startup."""
+        with self._lock:
+            return self._last_retention_removed
 
     def health(self) -> dict[str, bool]:
         """Return memory service health information."""

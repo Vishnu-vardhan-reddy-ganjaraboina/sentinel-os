@@ -5,13 +5,13 @@ Protocol definitions for Sentinel local control.
 from __future__ import annotations
 
 import json
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sentinel.control.exceptions import ControlProtocolError
 
 
-class ControlCommand(str, Enum):
+class ControlCommand(StrEnum):
     """Commands supported by the Sentinel local control plane."""
 
     STATUS = "status"
@@ -79,6 +79,10 @@ class ControlProtocol:
             )
 
         command_value = payload.get("command")
+        if not isinstance(command_value, str):
+            raise ControlProtocolError(
+                "Control command must be a string."
+            )
 
         try:
             command = ControlCommand(command_value)

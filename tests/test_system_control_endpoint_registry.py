@@ -8,9 +8,6 @@ from sentinel.boot.system_factory import SystemFactory
 from sentinel.control_plane.endpoint_registry import (
     ControlPlaneEndpointRegistry,
 )
-from sentinel.control_plane.transport_server import (
-    ControlPlaneTransportServer,
-)
 from sentinel.system import System
 
 

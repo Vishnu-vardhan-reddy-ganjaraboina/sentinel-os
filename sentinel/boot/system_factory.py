@@ -10,17 +10,16 @@ from sentinel.control_plane.adapter import KernelAdapter
 from sentinel.control_plane.authorizer import ControlAuthorizer
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.controller import KernelController
+from sentinel.control_plane.endpoint_registry import (
+    ControlPlaneEndpointRegistry,
+)
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport_server import (
     ControlPlaneTransportServer,
 )
 from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.bootstrap import Bootstrap
-from sentinel.platform import Platform
 from sentinel.system import System
-from sentinel.control_plane.endpoint_registry import (
-    ControlPlaneEndpointRegistry,
-)
 
 
 class SystemFactory:

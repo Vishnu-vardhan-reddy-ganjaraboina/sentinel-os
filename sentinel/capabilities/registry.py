@@ -22,7 +22,6 @@ from sentinel.capabilities.exceptions import (
     CapabilityNotFoundError,
 )
 
-
 CapabilityList = list[BaseCapability]
 
 

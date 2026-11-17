@@ -1,14 +1,12 @@
 import pytest
 
-
-from sentinel.kernel.kernel import Kernel
-from sentinel.kernel.service import Service
-from sentinel.kernel.service_state import ServiceState
 from sentinel.kernel.exceptions import (
     ServiceAlreadyRunningError,
     ServiceNotFoundError,
-    ServiceNotRunningError,
 )
+from sentinel.kernel.kernel import Kernel
+from sentinel.kernel.service import Service
+from sentinel.kernel.service_state import ServiceState
 
 
 class DummyService(Service):

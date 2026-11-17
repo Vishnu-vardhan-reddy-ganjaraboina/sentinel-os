@@ -205,7 +205,6 @@ def test_failed_start_can_be_retried() -> None:
     with pytest.raises(RuntimeError):
         application.start()
 
-from sentinel.runtime import Runtime
 
 
 def test_application_exposes_runtime() -> None:
@@ -248,7 +247,7 @@ def test_external_bootstrap_has_no_runtime() -> None:
         RuntimeError,
         match="Runtime is not available",
     ):
-        application.runtime
+        _ = application.runtime
 
 def test_application_runtime_services_match_kernel_services() -> None:
     application = Application()

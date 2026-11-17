@@ -4,6 +4,7 @@ In-memory storage implementation for the Sentinel Memory subsystem.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from threading import RLock
 
 from sentinel.memory.exceptions import (
@@ -40,6 +41,17 @@ class InMemoryStore(Memory):
                 )
 
             self._entries[entry.id] = entry
+
+    def upsert(self, entry: MemoryEntry) -> None:
+        """Insert or replace a memory entry atomically."""
+        with self._lock:
+            self._entries[entry.id] = entry
+
+    def connect(self) -> None:
+        """Connect to the in-memory store (no operation required)."""
+
+    def close(self) -> None:
+        """Close the in-memory store (no operation required)."""
 
     def get(self, memory_id: str) -> MemoryEntry:
         """
@@ -112,7 +124,7 @@ class InMemoryStore(Memory):
         with self._lock:
             return list(self._entries.values())
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[MemoryEntry]:
         """Iterate over a stable snapshot of stored memory entries."""
         with self._lock:
             entries = tuple(self._entries.values())

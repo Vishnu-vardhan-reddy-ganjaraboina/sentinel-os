@@ -16,6 +16,8 @@ from sentinel.control.target import ProcessControlTarget
 class _ControlTCPServer(
     socketserver.ThreadingTCPServer,
 ):
+    process_host: ProcessControlTarget
+
     allow_reuse_address = True
     daemon_threads = True
 
@@ -111,7 +113,7 @@ class _ControlRequestHandler(
         if command is ControlCommand.HEALTH:
             return ControlProtocol.encode_response(
                 True,
-                data=host.health(),
+                data=dict(host.health()),
             )
 
         if command is ControlCommand.STOP:

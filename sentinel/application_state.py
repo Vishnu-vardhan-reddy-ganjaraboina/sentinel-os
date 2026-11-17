@@ -2,10 +2,10 @@
 Application lifecycle states for Sentinel OS.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ApplicationState(str, Enum):
+class ApplicationState(StrEnum):
     """Lifecycle states for Sentinel applications."""
 
     REGISTERED = "registered"

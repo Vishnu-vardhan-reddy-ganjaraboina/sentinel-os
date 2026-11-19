@@ -259,8 +259,9 @@ class _WindowsJob:
         from ctypes import wintypes
 
         self._ctypes = ctypes
-        get_last_error = ctypes.get_last_error
-        win_dll = cast(Callable[..., Any], ctypes.WinDLL)
+        ctypes_api = cast(Any, ctypes)
+        get_last_error = cast(Callable[[], int], ctypes_api.get_last_error)
+        win_dll = cast(Callable[..., Any], ctypes_api.WinDLL)
         self._kernel32 = win_dll("kernel32", use_last_error=True)
         self._kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         self._kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]

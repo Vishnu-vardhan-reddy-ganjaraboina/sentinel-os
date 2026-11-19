@@ -1,4 +1,4 @@
-﻿"""
+"""
 Concrete implementation of the Sentinel Brain context.
 """
 
@@ -33,15 +33,14 @@ class BrainContext(Context):
         if data is not None and not isinstance(data, dict):
             raise TypeError("data must be a dictionary.")
 
-        self._id = context_id
         self._lock = RLock()
+        self._id = context_id
         self._data: dict[str, Any] = (
             deepcopy(data) if data is not None else {}
         )
 
-        now = datetime.now(UTC)
-        self._created_at = now
-        self._updated_at = now
+        self._created_at = datetime.now(UTC)
+        self._updated_at = self._created_at
 
     @property
     def id(self) -> str:
@@ -57,7 +56,8 @@ class BrainContext(Context):
 
     @property
     def created_at(self) -> datetime:
-        return self._created_at
+        with self._lock:
+            return self._created_at
 
     @property
     def updated_at(self) -> datetime:
@@ -71,10 +71,10 @@ class BrainContext(Context):
         Values are deep-copied before entering the context so callers cannot
         mutate stored state through shared references.
         """
-        updates = deepcopy(kwargs)
+        copied_values = deepcopy(kwargs)
 
         with self._lock:
-            self._data.update(updates)
+            self._data.update(copied_values)
             self._updated_at = datetime.now(UTC)
 
     def get(
@@ -82,9 +82,7 @@ class BrainContext(Context):
         key: str,
         default: Any = None,
     ) -> Any:
-        """
-        Retrieve an isolated copy of a context value.
-        """
+        """Retrieve an isolated copy of a context value."""
         with self._lock:
             value = self._data.get(key, default)
             return deepcopy(value)

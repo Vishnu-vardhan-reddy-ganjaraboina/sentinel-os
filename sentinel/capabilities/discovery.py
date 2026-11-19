@@ -106,7 +106,7 @@ class CapabilityDiscovery:
 
         for capability in self._capabilities.list():
             metadata = capability.metadata
-            if not metadata.enabled:
+            if not capability.enabled:
                 continue
 
             score = self._score(

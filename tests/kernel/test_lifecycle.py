@@ -30,12 +30,13 @@ class FailingInitialize(Service):
 
     def __init__(self):
         super().__init__("failing")
+        self.shutdown_called = False
 
     def initialize(self):
         raise RuntimeError("initialize failed")
 
     def shutdown(self):
-        pass
+        self.shutdown_called = True
 
 
 class FailingShutdown(Service):
@@ -106,6 +107,38 @@ def test_initialize_failure_sets_failed_state():
         manager.start(service)
 
     assert manager.state(service) is ServiceState.FAILED
+    assert service.shutdown_called
+
+
+def test_initialize_and_cleanup_failure_preserves_startup_error():
+    manager = LifecycleManager(EventBus())
+
+    class FailingService(Service):
+
+        def __init__(self):
+            super().__init__("failing")
+
+        def initialize(self):
+            raise RuntimeError("original initialize failure")
+
+        def shutdown(self):
+            raise RuntimeError("partial cleanup failure")
+
+    service = FailingService()
+
+    with pytest.raises(
+        RuntimeError,
+        match="original initialize failure",
+    ) as exc_info:
+        manager.start(service)
+
+    assert manager.state(service) is ServiceState.FAILED
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any(
+        "partial cleanup failure" in note
+        for note in notes
+    )
 
 
 def test_shutdown_failure_sets_failed_state():

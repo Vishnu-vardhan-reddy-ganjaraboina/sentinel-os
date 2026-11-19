@@ -82,20 +82,28 @@ class LifecycleManager:
                 raise ServiceAlreadyRunningError(
                     f"{service.name} is already starting."
                 )
-            
+
             if current_state is ServiceState.STOPPING:
                 raise ServiceAlreadyRunningError(
                     f"{service.name} is already stopping."
                 )
-            
+
             self._states[service.name] = ServiceState.STARTING
 
         try:
             service.initialize()
 
-        except Exception:
-            with self._lock:
-                self._states[service.name] = ServiceState.FAILED
+        except Exception as startup_error:
+            try:
+                service.shutdown()
+            except Exception as cleanup_error:
+                startup_error.add_note(
+                    f"Startup cleanup failed for service "
+                    f"'{service.name}': {cleanup_error}"
+                )
+            finally:
+                with self._lock:
+                    self._states[service.name] = ServiceState.FAILED
             raise
 
         with self._lock:

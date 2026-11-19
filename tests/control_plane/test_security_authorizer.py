@@ -273,7 +273,7 @@ def test_security_service_is_the_authorization_source() -> None:
 
     context = create_context()
 
-    assert authorizer.security is security
+
 
     security.grant(
         Role.USER,
@@ -294,3 +294,41 @@ def test_security_service_is_the_authorization_source() -> None:
         context,
         ControlPermission.READ,
     ) is False
+
+def test_authenticate_identity_uses_backing_security_service() -> None:
+    security = create_security_service()
+    identity = create_identity()
+    credentials = create_credentials()
+
+    security.register_identity(identity, credentials)
+
+    authorizer = SecurityControlAuthorizer(security)
+
+    assert authorizer.authenticate_identity(credentials) is identity
+
+
+def test_authenticate_identity_rejects_invalid_credentials() -> None:
+    security = create_security_service()
+    identity = create_identity()
+
+    security.register_identity(
+        identity,
+        create_credentials(),
+    )
+
+    authorizer = SecurityControlAuthorizer(security)
+
+    assert authorizer.authenticate_identity(
+        SecurityCredentials(
+            username="test-user",
+            secret="wrong-secret",
+        )
+    ) is None
+
+
+def test_authorizer_does_not_expose_security_service() -> None:
+    authorizer = SecurityControlAuthorizer(
+        create_security_service()
+    )
+
+    assert not hasattr(authorizer, "security")

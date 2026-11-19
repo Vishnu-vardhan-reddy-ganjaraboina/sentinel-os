@@ -16,10 +16,9 @@ from sentinel.control.target import ProcessControlTarget
 class _ControlTCPServer(
     socketserver.ThreadingTCPServer,
 ):
-    process_host: ProcessControlTarget
-
     allow_reuse_address = True
     daemon_threads = True
+    process_host: ProcessControlTarget | None = None
 
 
 class _ControlRequestHandler(

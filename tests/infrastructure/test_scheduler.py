@@ -5,6 +5,7 @@ Unit tests for the Scheduler service.
 from __future__ import annotations
 
 import time
+from threading import Thread
 
 import pytest
 
@@ -248,6 +249,34 @@ def test_shutdown_stops_thread() -> None:
     scheduler = Scheduler()
 
     scheduler.initialize()
+
+    scheduler.shutdown()
+
+    assert scheduler._thread is None
+
+
+def test_scheduler_initialize_cleans_up_when_thread_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler = Scheduler()
+
+    def fail_start(thread: Thread) -> None:
+        raise RuntimeError("thread startup failed")
+
+    monkeypatch.setattr(Thread, "start", fail_start)
+
+    with pytest.raises(RuntimeError, match="thread startup failed"):
+        scheduler.initialize()
+
+    assert scheduler._thread is None
+
+    # Cleanup after failed initialization must be safe.
+    scheduler.shutdown()
+
+
+def test_scheduler_shutdown_handles_unstarted_thread() -> None:
+    scheduler = Scheduler()
+    scheduler._thread = Thread(target=lambda: None)
 
     scheduler.shutdown()
 

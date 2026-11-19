@@ -24,7 +24,11 @@ from sentinel.control_plane.endpoint_registry import (
     ControlPlaneEndpointRegistry,
 )
 from sentinel.control_plane.result import ControlResult
+from sentinel.infrastructure.logger import configure_logging, shutdown_logging
 from sentinel.process import ProcessHost
+from sentinel.security.production_bootstrap import (
+    create_production_security_service,
+)
 
 DEFAULT_CONFIG = Path("configs/development.yaml")
 
@@ -287,44 +291,62 @@ class CLI:
             print("Sentinel OS is already running.")
             return 1
 
-        configuration = BootConfiguration()
-        configuration.load(config_path)
-
-        profile = BootProfile(
-            name=profile_name,
-        )
-
-        boot_manager = BootManager.from_configuration(
-            configuration,
-            profile,
-        )
-
-        process = ProcessHost(
-            boot_manager,
-            endpoint_registry=self._endpoint_registry,
-        )
-
-        self._process = process
-
         try:
-            result = process.start()
+            configuration = BootConfiguration()
+            configuration.load(config_path)
 
+            log_file_setting = configuration.get(
+                "logging.file",
+                "logs/sentinel.log",
+            )
+            if not isinstance(log_file_setting, str):
+                raise TypeError("logging.file must be a string")
+
+            log_path = Path(log_file_setting)
+            configure_logging(
+                log_level=configuration.get("logging.level", "INFO"),
+                log_directory=log_path.parent,
+                log_file=log_path.name,
+            )
+
+            profile = BootProfile(name=profile_name)
+            infrastructure_configuration = configuration.configuration
+            authentication_enabled = infrastructure_configuration.get(
+                "control_plane.authentication.enabled",
+                False,
+            )
+
+            if authentication_enabled:
+                security_service = create_production_security_service()
+                boot_manager = BootManager.from_configuration(
+                    configuration,
+                    profile,
+                    security_service=security_service,
+                )
+            else:
+                boot_manager = BootManager.from_configuration(
+                    configuration,
+                    profile,
+                )
+            process = ProcessHost(
+                boot_manager,
+                endpoint_registry=self._endpoint_registry,
+            )
+            self._process = process
+
+            result = process.start()
             print(result.message)
 
             try:
                 process.wait()
             except KeyboardInterrupt:
                 print("Shutdown requested.")
-
                 if process.running:
                     try:
                         process.stop()
                     except Exception as exc:
-                        print(
-                            f"Sentinel OS shutdown failed: {exc}"
-                        )
+                        print(f"Sentinel OS shutdown failed: {exc}")
                         return 1
-
                 return 0
 
             if process.running:
@@ -334,23 +356,20 @@ class CLI:
 
         except KeyboardInterrupt:
             print("Shutdown requested.")
-
-            if process.running:
+            if self._process is not None and self._process.running:
                 try:
-                    process.stop()
+                    self._process.stop()
                 except Exception as exc:
-                    print(
-                        f"Sentinel OS shutdown failed: {exc}"
-                    )
+                    print(f"Sentinel OS shutdown failed: {exc}")
                     return 1
-
             return 0
 
         except Exception as exc:
-            print(
-                f"Sentinel OS start failed: {exc}"
-            )
+            print(f"Sentinel OS start failed: {exc}")
             return 1
+
+        finally:
+            shutdown_logging()
 
     def _stop(self) -> int:
         """Stop the running Sentinel process."""

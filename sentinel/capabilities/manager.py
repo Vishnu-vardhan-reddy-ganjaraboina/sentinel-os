@@ -1,8 +1,5 @@
 """
 Capability manager for the Sentinel Capabilities subsystem.
-
-The manager provides the execution boundary between registered
-capabilities and the rest of Sentinel OS.
 """
 
 from __future__ import annotations
@@ -13,16 +10,17 @@ from sentinel.capabilities.capability import BaseCapability
 from sentinel.capabilities.exceptions import (
     CapabilityDisabledError,
     CapabilityExecutionError,
+    CapabilityNotFoundError,
 )
 from sentinel.capabilities.registry import CapabilityRegistry
 
 
 class CapabilityManager:
     """
-    Manages capability registration and execution.
+    Manages capability execution.
 
-    The manager deliberately does not maintain a second capability store.
-    The registry remains the source of truth.
+    The manager acts as the runtime layer between the registry
+    and the rest of Sentinel OS.
     """
 
     def __init__(
@@ -30,83 +28,91 @@ class CapabilityManager:
         registry: CapabilityRegistry | None = None,
     ) -> None:
         self._registry = (
-            registry
-            if registry is not None
-            else CapabilityRegistry()
+            registry if registry is not None else CapabilityRegistry()
         )
+
 
     @property
     def registry(self) -> CapabilityRegistry:
-        """
-        Return the capability registry.
-        """
+        """Return the capability registry."""
         return self._registry
 
     def register(
         self,
         capability: BaseCapability,
     ) -> None:
-        """
-        Register a capability.
-        """
+        """Register a capability."""
         self._registry.register(capability)
 
     def unregister(
         self,
         capability_id: str,
     ) -> None:
-        """
-        Unregister a capability.
-        """
+        """Unregister a capability."""
         self._registry.unregister(capability_id)
+
+    def get(self, capability_id: str) -> BaseCapability:
+        """Return a registered capability by ID."""
+        return self._registry.get(capability_id)
 
     def execute(
         self,
         capability_id: str,
         **kwargs: Any,
     ) -> Any:
-        """
-        Execute a registered capability.
-
-        The capability is looked up before execution. The registry lock
-        is not held during execution, which prevents long-running
-        capabilities from blocking registry operations.
-
-        CapabilityDisabledError is intentionally preserved.
-
-        Other exceptions are wrapped in CapabilityExecutionError while
-        preserving the original exception as ``__cause__``.
-        """
+        """Execute a registered capability by ID."""
         capability = self._registry.get(capability_id)
+        return self.execute_instance(capability, **kwargs)
 
+    def _admit_instance(
+        self,
+        capability: BaseCapability,
+    ) -> BaseCapability:
+        """Admit the exact registered capability without running it."""
+        with self._registry.execution_admission(capability):
+            pass
+        return capability
+
+    def _execute_admitted_instance(
+        self,
+        capability: BaseCapability,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute a capability whose admission has already succeeded."""
         try:
-            return capability.execute(**kwargs)
+            return capability._execute_admitted(**kwargs)
 
-        except CapabilityDisabledError:
+        except (
+            CapabilityDisabledError,
+            CapabilityNotFoundError,
+        ):
             raise
 
         except Exception as exc:
             raise CapabilityExecutionError(
-                f"Capability '{capability_id}' failed."
+                f"Capability '{capability.id}' failed."
             ) from exc
 
+    def execute_instance(
+        self,
+        capability: BaseCapability,
+        **kwargs: Any,
+    ) -> Any:
+        """Admit and execute the exact currently registered instance."""
+        self._admit_instance(capability)
+        return self._execute_admitted_instance(capability, **kwargs)
+
     def list(self) -> list[BaseCapability]:
-        """
-        Return a stable snapshot of registered capabilities.
-        """
+        """Return all registered capabilities."""
         return self._registry.list()
 
     def exists(
         self,
         capability_id: str,
     ) -> bool:
-        """
-        Return whether a capability is registered.
-        """
+        """Return True if the capability exists."""
         return self._registry.exists(capability_id)
 
     def clear(self) -> None:
-        """
-        Remove all registered capabilities.
-        """
+        """Remove all registered capabilities."""
         self._registry.clear()

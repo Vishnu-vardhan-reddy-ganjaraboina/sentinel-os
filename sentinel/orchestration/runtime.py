@@ -67,10 +67,6 @@ class OrchestrationRuntimeService(Service):
         """Return the capability manager."""
         return self._orchestration.capabilities
 
-    @property
-    def security(self) -> SecurityManager:
-        """Return the Security manager."""
-        return self._orchestration.security
 
     @property
     def identity(self) -> SecurityIdentity | None:

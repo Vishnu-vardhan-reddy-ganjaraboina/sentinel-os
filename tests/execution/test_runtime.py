@@ -138,7 +138,6 @@ def test_runtime_delegates_execute_task() -> None:
 
 def test_runtime_delegates_submit() -> None:
     runtime = ExecutionRuntimeService()
-
     completed = threading.Event()
 
     def add_and_signal(a: int, b: int) -> int:
@@ -146,18 +145,17 @@ def test_runtime_delegates_submit() -> None:
         completed.set()
         return result
 
-    task_id = runtime.submit(
-        add_and_signal,
-        4,
-        6,
-    )
+    try:
+        task_id = runtime.submit(add_and_signal, 4, 6)
 
-    assert completed.wait(timeout=1)
+        assert completed.wait(timeout=2)
 
-    context = runtime.get_context(task_id)
+        context = runtime.get_context(task_id)
+        assert isinstance(context, ExecutionContext)
+        assert context.result == 10
+    finally:
+        runtime.shutdown()
 
-    assert isinstance(context, ExecutionContext)
-    assert context.result == 10
 
 def test_runtime_delegates_cancel() -> None:
     runtime = ExecutionRuntimeService()
@@ -195,10 +193,7 @@ def test_runtime_delegates_run_command() -> None:
 
     assert isinstance(result, CommandResult)
     assert result.succeeded
-    assert (
-        "Python" in result.stdout
-        or "Python" in result.stderr
-    )
+    assert "Python" in result.stdout or "Python" in result.stderr
 
 
 def test_runtime_delegates_run_command_checked() -> None:
@@ -231,6 +226,7 @@ def test_runtime_delegates_start_process() -> None:
     finally:
         runtime.terminate_process()
 
+
 def test_runtime_delegates_wait_for_process() -> None:
     runtime = ExecutionRuntimeService()
 
@@ -246,10 +242,9 @@ def test_runtime_delegates_wait_for_process() -> None:
         exit_code = runtime.wait_for_process()
 
         assert exit_code == 0
-
-        runtime.read_process_output()
     finally:
         runtime.terminate_process()
+
 
 def test_runtime_delegates_read_process_output() -> None:
     runtime = ExecutionRuntimeService()

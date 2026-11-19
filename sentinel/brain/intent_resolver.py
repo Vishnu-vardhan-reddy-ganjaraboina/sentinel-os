@@ -1,4 +1,4 @@
-﻿"""
+"""
 Intent resolution for the Sentinel Brain subsystem.
 
 Intent resolution converts an incoming user goal into a structured
@@ -46,7 +46,7 @@ class DefaultIntentResolver(IntentResolver):
     Deterministic default Intent resolver.
 
     The default resolver creates a structured Intent without executing
-    capabilities or performing authorization.
+    any capability or performing authorization.
     """
 
     EXECUTION_SELECTION_THRESHOLD = 0.85
@@ -112,7 +112,7 @@ class DefaultIntentResolver(IntentResolver):
                 >= self.EXECUTION_SELECTION_THRESHOLD
             ):
                 candidate = result.candidate
-                capability = self._capabilities.registry.get(
+                capability = self._capabilities.get(
                     candidate.capability_id
                 )
 

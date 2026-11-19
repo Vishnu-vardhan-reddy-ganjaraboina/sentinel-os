@@ -20,7 +20,6 @@ from sentinel.orchestration.models import (
 from sentinel.orchestration.runtime import OrchestrationRuntimeService
 from sentinel.orchestration.service import OrchestrationService
 from sentinel.security.identity import SecurityIdentity
-from sentinel.security.manager import SecurityManager
 
 
 def test_runtime_name() -> None:
@@ -62,14 +61,10 @@ def test_runtime_exposes_capabilities() -> None:
     )
 
 
-def test_runtime_exposes_security() -> None:
+def test_runtime_does_not_expose_security() -> None:
     runtime = OrchestrationRuntimeService()
 
-    assert isinstance(
-        runtime.security,
-        SecurityManager,
-    )
-
+    assert not hasattr(runtime, "security")
 
 def test_runtime_exposes_identity() -> None:
     identity = SecurityIdentity(

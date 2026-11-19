@@ -7,7 +7,7 @@ from __future__ import annotations
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO, cast
 
 import pytest
 
@@ -240,9 +240,7 @@ def test_file_handler_close_waits_for_active_emit(
     )
 
     original_stream = handler._stream  # noqa: SLF001
-    handler._stream = BlockingStream(  # type: ignore[assignment]  # noqa: SLF001
-        original_stream
-    )
+    cast(Any, handler)._stream = BlockingStream(original_stream)  # noqa: SLF001
 
     def emit() -> None:
         try:

@@ -20,13 +20,6 @@ class SecurityService:
     def __init__(self) -> None:
         self._manager = SecurityManager()
 
-    @property
-    def manager(self) -> SecurityManager:
-        """
-        Return the underlying manager.
-        """
-        return self._manager
-
     def register_identity(
         self,
         identity: SecurityIdentity,
@@ -75,7 +68,9 @@ class SecurityService:
         self,
         credentials: SecurityCredentials,
     ) -> SecurityIdentity | None:
-        """Authenticate credentials and return the associated identity."""
+        """
+        Authenticate credentials and return the registered identity.
+        """
         return self._manager.authenticate_identity(credentials)
 
     def authorize(

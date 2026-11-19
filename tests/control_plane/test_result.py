@@ -42,6 +42,21 @@ def test_control_result_can_contain_error() -> None:
     assert result.error == "Service is not running."
 
 
+
+def test_control_result_isolated_from_nested_input_mutation() -> None:
+    data = {"nested": {"value": "original"}}
+
+    result = ControlResult(
+        success=True,
+        command="system.status",
+        data=data,
+    )
+
+    data["nested"]["value"] = "changed"
+
+    assert result.data["nested"]["value"] == "original"
+
+
 def test_control_result_is_immutable() -> None:
     result = ControlResult(
         success=True,

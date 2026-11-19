@@ -121,6 +121,7 @@ def test_registry_concurrent_registration() -> None:
 
     assert len(registry) == 100
 
+
 def test_list_returns_snapshot() -> None:
     registry = CapabilityRegistry()
 

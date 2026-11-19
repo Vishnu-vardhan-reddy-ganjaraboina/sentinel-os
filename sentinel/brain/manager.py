@@ -1,4 +1,4 @@
-﻿"""
+"""
 Manager for the Sentinel Brain subsystem.
 """
 
@@ -28,8 +28,9 @@ class BrainManager:
         self,
         intent_resolver: IntentResolver | None = None,
     ) -> None:
-        self._lock = RLock()
         self._engine = BrainEngine()
+        self._lock = RLock()
+
         self._intent_resolver: IntentResolver
 
         if intent_resolver is None:
@@ -39,15 +40,20 @@ class BrainManager:
                 raise TypeError(
                     "intent_resolver must be an IntentResolver instance."
                 )
-
             self._intent_resolver = intent_resolver
 
     @property
     def engine(self) -> BrainEngine:
+        """
+        Return the Brain engine.
+        """
         return self._engine
 
     @property
     def intent_resolver(self) -> IntentResolver:
+        """
+        Return the configured intent resolver.
+        """
         with self._lock:
             return self._intent_resolver
 
@@ -78,9 +84,7 @@ class BrainManager:
         Execute a Brain request through the BrainEngine.
         """
         if not isinstance(context, BrainContext):
-            raise TypeError(
-                "context must be a BrainContext instance."
-            )
+            raise TypeError("context must be a BrainContext instance.")
 
         return self._engine.execute(
             request,

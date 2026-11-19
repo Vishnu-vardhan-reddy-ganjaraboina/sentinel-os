@@ -51,7 +51,7 @@ def test_disconnect():
     service.connect("echo")
     service.disconnect("echo")
 
-    assert service.registry.get("echo").connected is False
+    assert service.get("echo").connected is False
 
 
 def test_unregister():
@@ -80,3 +80,20 @@ def test_clear():
     service.clear()
 
     assert len(service.list()) == 0
+def test_injected_empty_manager_is_preserved() -> None:
+    from sentinel.devices.manager import DeviceManager
+
+    manager = DeviceManager()
+    service = DeviceService(manager)
+
+    device = EchoDevice()
+    service.register(device)
+
+    assert manager.get("echo") is device
+
+
+def test_service_does_not_expose_internal_accessors() -> None:
+    service = DeviceService()
+
+    assert not hasattr(service, "manager")
+    assert not hasattr(service, "registry")

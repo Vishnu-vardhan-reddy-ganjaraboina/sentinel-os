@@ -335,3 +335,19 @@ def test_emit_preserves_successful_handlers_when_multiple_handlers_fail() -> Non
     assert first.attempts == 1
     assert second.records == [record]
     assert third.attempts == 1
+
+
+def test_emit_groups_base_exceptions_without_masking_them() -> None:
+    first_error = KeyboardInterrupt("first handler interrupted")
+    second_error = SystemExit("second handler exited")
+
+    first = FailingHandler(first_error)
+    second = FailingHandler(second_error)
+    manager = LogManager([first, second])
+
+    with pytest.raises(BaseExceptionGroup) as exc_info:
+        manager.emit(make_record())
+
+    assert exc_info.value.exceptions == (first_error, second_error)
+    assert first.attempts == 1
+    assert second.attempts == 1

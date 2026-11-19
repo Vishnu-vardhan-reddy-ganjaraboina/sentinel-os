@@ -221,7 +221,7 @@ def test_execute_request_uses_request_context() -> None:
         command=KernelCommand.SYSTEM_HEALTH,
         context=ControlContext(
             caller_id="explicit-caller",
-            caller_type="test",
+            caller_type="api",
         ),
     )
 
@@ -356,8 +356,123 @@ def test_failed_request_is_audited() -> None:
     assert event.command == str(KernelCommand.SERVICE_STATUS)
     assert event.success is False
     assert event.data == {"service": "does-not-exist"}
+    assert event.error == "Command 'service.status' failed."
+    assert "does-not-exist" not in event.error
+    assert result.error is not None
+    assert "does-not-exist" in result.error
+
+
+def test_audit_redacts_sensitive_nested_request_data() -> None:
+    recorder = InMemoryControlAuditRecorder()
+    _, controller = create_controller(
+        {ControlPermission.READ}
+    )
+
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,
+    )
+
+    controller.execute(
+        KernelCommand.SERVICE_STATUS,
+        {
+            "service": "memory",
+            "metadata": {
+                "api_token": "do-not-log-this",
+                "apiToken": "camel-case-secret",
+                "api.token": "dotted-secret",
+                "owner": "test-user",
+                "api_key": "api-key-secret",
+                "apiKey": "camel-api-key-secret",
+                "encryption_key": "encryption-secret",
+                "encryptionKey": "camel-encryption-secret",
+                "signing_key": "signing-secret",
+                "signingKey": "camel-signing-secret",
+            },
+            "credentials": {
+                "password": "another-secret",
+            },
+        },
+    )
+
+    event = recorder.events[0]
+
+    assert event.data["service"] == "memory"
+    assert event.data["metadata"]["api_token"] == "[REDACTED]"
+    assert event.data["metadata"]["apiToken"] == "[REDACTED]"
+    assert event.data["metadata"]["api.token"] == "[REDACTED]"
+    assert event.data["metadata"]["owner"] == "test-user"
+    assert event.data["metadata"]["api_key"] == "[REDACTED]"
+    assert event.data["metadata"]["apiKey"] == "[REDACTED]"
+    assert event.data["metadata"]["encryption_key"] == "[REDACTED]"
+    assert event.data["metadata"]["encryptionKey"] == "[REDACTED]"
+    assert event.data["metadata"]["signing_key"] == "[REDACTED]"
+    assert event.data["metadata"]["signingKey"] == "[REDACTED]"
+    assert event.data["credentials"] == "[REDACTED]"
+    assert "do-not-log-this" not in repr(event.data)
+    assert "camel-case-secret" not in repr(event.data)
+    assert "dotted-secret" not in repr(event.data)
+    assert "another-secret" not in repr(event.data)
+    assert "api-key-secret" not in repr(event.data)
+    assert "camel-api-key-secret" not in repr(event.data)
+    assert "encryption-secret" not in repr(event.data)
+    assert "camel-encryption-secret" not in repr(event.data)
+    assert "signing-secret" not in repr(event.data)
+    assert "camel-signing-secret" not in repr(event.data)
+
+def test_audit_error_does_not_expose_unexpected_exception_text() -> None:
+    recorder = InMemoryControlAuditRecorder()
+    kernel, controller = create_controller(
+        {ControlPermission.READ}
+    )
+
+    class FailingTarget:
+        def service_names(self):
+            return kernel.service_names()
+
+        def health(self):
+            return kernel.health()
+
+        def service_state(self, service):
+            raise RuntimeError(
+                "backend failed with secret-value-do-not-log"
+            )
+
+        def start_service(self, service):
+            return kernel.start_service(service)
+
+        def stop_service(self, service):
+            return kernel.stop_service(service)
+
+        def restart_service(self, service):
+            return kernel.restart_service(service)
+
+    controller = KernelController(
+        FailingTarget(),
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_STATUS,
+        {"service": "memory"},
+    )
+
+    assert result.success is False
+    assert result.error == (
+        "Command 'service.status' failed."
+    )
+    assert "secret-value-do-not-log" not in result.error
+
+    event = recorder.events[0]
     assert event.error is not None
-    assert "does-not-exist" in event.error
+    assert "secret-value-do-not-log" not in event.error
+    assert event.error == (
+        "Command 'service.status' failed."
+    )
 
 
 def test_audit_recorder_is_optional() -> None:
@@ -415,3 +530,98 @@ def test_ai_agent_cannot_control_service() -> None:
     assert result.success is False
     assert result.error is not None
     assert "permission" in result.error.lower()
+
+
+class FailingAuditRecorder:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def record(self, event) -> None:
+        self.calls += 1
+        raise RuntimeError("Audit database unavailable")
+
+
+def test_audit_failure_does_not_hide_successful_operation() -> None:
+    recorder = FailingAuditRecorder()
+    _, controller = create_controller(
+        {ControlPermission.READ}
+    )
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_STATUS,
+        {"service": "memory"},
+    )
+
+    assert result.success is True
+    assert result.data["service"] == "memory"
+    assert result.data["state"] == "created"
+    assert result.audit_error == "Audit recording failed."
+    assert recorder.calls == 1
+
+
+def test_audit_failure_does_not_hide_denied_operation() -> None:
+    recorder = FailingAuditRecorder()
+    _, controller = create_controller(
+        {ControlPermission.READ}
+    )
+    controller = KernelController(
+        controller.target,
+        controller.authorizer,
+        controller.context,
+        audit_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = controller.execute(
+        KernelCommand.SERVICE_START,
+        {"service": "memory"},
+    )
+
+    assert result.success is False
+    assert result.error == (
+        "Permission denied: 'control' permission required."
+    )
+    assert result.audit_error == "Audit recording failed."
+    assert recorder.calls == 1
+
+
+def test_api_caller_cannot_start_service_with_default_control_authorizer() -> None:
+    kernel, controller = create_controller()
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_START,
+        context=ControlContext(
+            caller_id="external-api",
+            caller_type="api",
+        ),
+        data={"service": "memory"},
+    )
+
+    result = controller.execute_request(request)
+
+    assert result.success is False
+    assert result.error == (
+        "Permission denied: 'control' permission required."
+    )
+    assert kernel.running("memory") is False
+
+
+def test_unknown_caller_type_cannot_start_service() -> None:
+    kernel, controller = create_controller()
+    request = ControlRequest(
+        command=KernelCommand.SERVICE_START,
+        context=ControlContext(
+            caller_id="unknown-caller",
+            caller_type="unrecognized_type",
+        ),
+        data={"service": "memory"},
+    )
+
+    result = controller.execute_request(request)
+
+    assert result.success is False
+    assert kernel.running("memory") is False

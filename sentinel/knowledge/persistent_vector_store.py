@@ -17,6 +17,7 @@ from sentinel.knowledge.similarity import (
     SimilarityMetric,
 )
 from sentinel.knowledge.vector_store import VectorStore
+from sentinel.storage.exceptions import StorageKeyNotFoundError
 from sentinel.storage.interfaces import StorageBackend
 
 
@@ -101,6 +102,9 @@ class PersistentVectorStore(VectorStore):
         silently performing delete-then-insert would violate the production
         consistency guarantee.
         """
+        if not isinstance(document_id, str) or not document_id.strip():
+            raise ValueError("Document id cannot be empty.")
+
         prepared: list[tuple[str, str]] = []
         seen_ids: set[str] = set()
 
@@ -115,6 +119,9 @@ class PersistentVectorStore(VectorStore):
                 raise ValueError(
                     f"Duplicate chunk ID '{chunk.id}' in replacement."
                 )
+
+            if not embedding:
+                raise ValueError("Embedding cannot be empty.")
 
             seen_ids.add(chunk.id)
 
@@ -138,6 +145,19 @@ class PersistentVectorStore(VectorStore):
 
             try:
                 with transaction:
+                    # Prevent replacement from overwriting another
+                    # document's chunk when IDs collide.
+                    for chunk, _ in chunks:
+                        existing = self._load_locked(chunk.id)
+                        if (
+                            existing is not None
+                            and existing[0].document_id != document_id
+                        ):
+                            raise ValueError(
+                                f"Chunk ID '{chunk.id}' already belongs "
+                                "to another document."
+                            )
+
                     old_keys = self._document_keys_locked(
                         document_id,
                     )
@@ -169,8 +189,10 @@ class PersistentVectorStore(VectorStore):
         key = self._key(chunk_id)
 
         with self._lock:
-            if self._backend.exists(key):
+            try:
                 self._backend.delete(key)
+            except StorageKeyNotFoundError:
+                pass
 
     def delete_document(
         self,
@@ -187,8 +209,10 @@ class PersistentVectorStore(VectorStore):
             )
 
             for key in keys:
-                if self._backend.exists(key):
+                try:
                     self._backend.delete(key)
+                except StorageKeyNotFoundError:
+                    pass
 
     def search(
         self,
@@ -202,6 +226,12 @@ class PersistentVectorStore(VectorStore):
         Persistent records are loaded into a stable snapshot before
         similarity calculations.
         """
+        query_embedding = [float(value) for value in embedding]
+        if not all(isfinite(value) for value in query_embedding):
+            raise ValueError(
+                "Query embedding must contain only finite values."
+            )
+
         if limit <= 0:
             return []
 
@@ -212,7 +242,7 @@ class PersistentVectorStore(VectorStore):
 
         for chunk, stored_embedding in snapshot:
             score = self._similarity.similarity(
-                embedding,
+                query_embedding,
                 stored_embedding,
             )
 
@@ -271,8 +301,10 @@ class PersistentVectorStore(VectorStore):
             keys = self._chunk_keys_locked()
 
             for key in keys:
-                if self._backend.exists(key):
+                try:
                     self._backend.delete(key)
+                except StorageKeyNotFoundError:
+                    pass
 
     def __len__(self) -> int:
         with self._lock:
@@ -374,10 +406,10 @@ class PersistentVectorStore(VectorStore):
         """
         key = self._key(chunk_id)
 
-        if not self._backend.exists(key):
+        try:
+            raw = self._backend.get(key)
+        except StorageKeyNotFoundError:
             return None
-
-        raw = self._backend.get(key)
 
         if not isinstance(raw, str):
             raise TypeError(
@@ -436,14 +468,23 @@ class PersistentVectorStore(VectorStore):
                 f"Stored metadata for '{chunk_id}' is invalid."
             )
 
+        if (
+            not isinstance(chunk_data["id"], str)
+            or not isinstance(chunk_data["document_id"], str)
+            or not isinstance(chunk_data["text"], str)
+            or isinstance(chunk_data["index"], bool)
+            or not isinstance(chunk_data["index"], int)
+        ):
+            raise ValueError(
+                f"Stored chunk '{chunk_id}' has invalid field types."
+            )
+
         try:
             chunk = Chunk(
-                id=str(chunk_data["id"]),
-                document_id=str(
-                    chunk_data["document_id"]
-                ),
-                text=str(chunk_data["text"]),
-                index=int(chunk_data["index"]),
+                id=chunk_data["id"],
+                document_id=chunk_data["document_id"],
+                text=chunk_data["text"],
+                index=chunk_data["index"],
                 metadata={
                     str(key): str(value)
                     for key, value in metadata.items()
@@ -459,10 +500,10 @@ class PersistentVectorStore(VectorStore):
         for value in embedding_data:
             try:
                 numeric = float(value)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError(
                     f"Stored embedding for '{chunk_id}' "
-                    "contains a non-numeric value."
+                    "contains an invalid numeric value."
                 ) from exc
 
             if not isfinite(numeric):

@@ -58,3 +58,7 @@ def test_command_result_property():
     )
 
     assert result.succeeded
+
+def test_shell_execution_is_rejected():
+    with pytest.raises(ValueError, match='shell=True is not supported'):
+        CommandExecutor(shell=True)

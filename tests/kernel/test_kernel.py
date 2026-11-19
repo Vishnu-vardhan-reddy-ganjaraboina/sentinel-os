@@ -161,6 +161,7 @@ def test_get_typed_rejects_wrong_type() -> None:
             OtherService,
         )
 
+
 def test_boot_rolls_back_started_services_on_failure() -> None:
     kernel = Kernel()
 
@@ -235,6 +236,7 @@ def test_shutdown_continues_when_one_service_fails() -> None:
     assert application.stopped
     assert failing.stopped
     assert logger.stopped
+
 
 def test_health_reports_all_services() -> None:
     kernel = Kernel()
@@ -328,6 +330,7 @@ def test_health_is_unhealthy_after_services_stop() -> None:
 
     assert health["healthy"] is False
     assert health["services"]["logger"]["healthy"] is True
+
 
 def test_start_service_with_dependencies() -> None:
     kernel = Kernel()
@@ -464,6 +467,73 @@ def test_restart_missing_service_raises() -> None:
     with pytest.raises(ServiceNotFoundError):
         kernel.restart("missing")
 
+
+def test_boot_records_rollback_failure_without_hiding_startup_error() -> None:
+    kernel = Kernel()
+
+    class CleanupFailingService(DummyService):
+        def shutdown(self) -> None:
+            raise RuntimeError("cleanup failed")
+
+    class StartupFailingService(Service):
+        def __init__(self) -> None:
+            super().__init__("startup_failing", ("cleanup_failing",))
+
+        def initialize(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def shutdown(self) -> None:
+            pass
+
+    cleanup_service = CleanupFailingService("cleanup_failing")
+    startup_service = StartupFailingService()
+
+    kernel.register(startup_service)
+    kernel.register(cleanup_service)
+
+    with pytest.raises(RuntimeError, match="startup failed") as exc_info:
+        kernel.boot()
+
+    assert kernel.state("startup_failing") is ServiceState.FAILED
+    assert kernel.state("cleanup_failing") is ServiceState.FAILED
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("cleanup failed" in note for note in notes)
+
+
+def test_start_records_rollback_failure_without_hiding_startup_error() -> None:
+    kernel = Kernel()
+
+    class CleanupFailingService(DummyService):
+        def shutdown(self) -> None:
+            raise RuntimeError("cleanup failed")
+
+    class StartupFailingService(Service):
+        def __init__(self) -> None:
+            super().__init__("startup_failing", ("cleanup_failing",))
+
+        def initialize(self) -> None:
+            raise RuntimeError("startup failed")
+
+        def shutdown(self) -> None:
+            pass
+
+    cleanup_service = CleanupFailingService("cleanup_failing")
+    startup_service = StartupFailingService()
+
+    kernel.register(startup_service)
+    kernel.register(cleanup_service)
+
+    with pytest.raises(RuntimeError, match="startup failed") as exc_info:
+        kernel.start("startup_failing")
+
+    assert kernel.state("startup_failing") is ServiceState.FAILED
+    assert kernel.state("cleanup_failing") is ServiceState.FAILED
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("cleanup failed" in note for note in notes)
+
+
 def test_restart_failure_sets_service_to_failed() -> None:
     kernel = Kernel()
 
@@ -525,6 +595,7 @@ def test_failed_restart_can_be_retried() -> None:
     assert kernel.state("recovering") is ServiceState.RUNNING
     assert kernel.running("recovering")
 
+
 def test_restart_failure_preserves_running_dependencies() -> None:
     kernel = Kernel()
 
@@ -562,6 +633,7 @@ def test_restart_failure_preserves_running_dependencies() -> None:
 
     assert kernel.running("database")
     assert kernel.running("logger")
+
 
 def test_failed_boot_can_be_retried() -> None:
     kernel = Kernel()
@@ -602,6 +674,7 @@ def test_failed_boot_can_be_retried() -> None:
     assert kernel.running("recovering")
     assert kernel.running("logger")
 
+
 def test_concurrent_kernel_start_only_starts_once() -> None:
     from threading import Thread
 
@@ -629,10 +702,7 @@ def test_concurrent_kernel_start_only_starts_once() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        Thread(target=start_service)
-        for _ in range(10)
-    ]
+    threads = [Thread(target=start_service) for _ in range(10)]
 
     for thread in threads:
         thread.start()
@@ -643,6 +713,7 @@ def test_concurrent_kernel_start_only_starts_once() -> None:
     assert service.initialize_calls == 1
     assert kernel.running("counting")
     assert errors == []
+
 
 def test_concurrent_kernel_stop_only_stops_once() -> None:
     from threading import Thread
@@ -672,10 +743,7 @@ def test_concurrent_kernel_stop_only_stops_once() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        Thread(target=stop_service)
-        for _ in range(10)
-    ]
+    threads = [Thread(target=stop_service) for _ in range(10)]
 
     for thread in threads:
         thread.start()
@@ -686,6 +754,7 @@ def test_concurrent_kernel_stop_only_stops_once() -> None:
     assert service.shutdown_calls == 1
     assert not kernel.running("counting")
     assert len(errors) == 9
+
 
 def test_concurrent_kernel_restart_is_serialized() -> None:
     from threading import Thread
@@ -716,10 +785,7 @@ def test_concurrent_kernel_restart_is_serialized() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        Thread(target=restart_service)
-        for _ in range(10)
-    ]
+    threads = [Thread(target=restart_service) for _ in range(10)]
 
     for thread in threads:
         thread.start()
@@ -731,6 +797,7 @@ def test_concurrent_kernel_restart_is_serialized() -> None:
     assert service.shutdown_calls == 10
     assert kernel.running("counting")
     assert errors == []
+
 
 def test_concurrent_kernel_boot_is_serialized() -> None:
     from threading import Thread
@@ -759,10 +826,7 @@ def test_concurrent_kernel_boot_is_serialized() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        Thread(target=boot_kernel)
-        for _ in range(10)
-    ]
+    threads = [Thread(target=boot_kernel) for _ in range(10)]
 
     for thread in threads:
         thread.start()
@@ -773,10 +837,8 @@ def test_concurrent_kernel_boot_is_serialized() -> None:
     assert service.initialize_calls == 1
     assert kernel.running("counting")
     assert len(errors) == 9
-    assert all(
-        isinstance(error, ServiceAlreadyRunningError)
-        for error in errors
-    )
+    assert all(isinstance(error, ServiceAlreadyRunningError) for error in errors)
+
 
 def test_concurrent_kernel_shutdown_is_serialized() -> None:
     from threading import Thread
@@ -806,10 +868,7 @@ def test_concurrent_kernel_shutdown_is_serialized() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        Thread(target=shutdown_kernel)
-        for _ in range(10)
-    ]
+    threads = [Thread(target=shutdown_kernel) for _ in range(10)]
 
     for thread in threads:
         thread.start()

@@ -33,6 +33,11 @@ class MemoryStore(Memory):
 
             self._entries[entry.id] = entry
 
+    def upsert(self, entry: MemoryEntry) -> None:
+        """Insert or atomically replace an entry by ID."""
+        with self._lock:
+            self._entries[entry.id] = entry
+
     def get(self, memory_id: str) -> MemoryEntry:
         with self._lock:
             if memory_id not in self._entries:

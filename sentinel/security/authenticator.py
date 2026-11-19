@@ -16,6 +16,7 @@ from sentinel.security.interfaces import Authenticator, Credentials
 _PBKDF2_ITERATIONS = 600_000
 _SALT_SIZE = 16
 _DIGEST_SIZE = 32
+_DUMMY_SALT = b"sentinel-auth-dummy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,23 @@ class SecurityAuthenticator(Authenticator):
         with self._lock:
             self._credentials[username] = record
 
+    def _snapshot(self, username: str) -> _CredentialRecord | None:
+        """Capture the current verifier for rollback."""
+        with self._lock:
+            return self._credentials.get(username)
+
+    def _restore(
+        self,
+        username: str,
+        record: _CredentialRecord | None,
+    ) -> None:
+        """Restore a verifier after a failed manager registration."""
+        with self._lock:
+            if record is None:
+                self._credentials.pop(username, None)
+            else:
+                self._credentials[username] = record
+
     def register(
         self,
         credentials: SecurityCredentials,
@@ -137,24 +155,34 @@ class SecurityAuthenticator(Authenticator):
     ) -> bool:
         """
         Authenticate supplied credentials.
+
+        Unknown usernames perform a dummy PBKDF2 derivation to reduce
+        the timing difference between known and unknown usernames.
         """
+        authenticated, _ = self._authenticate_record(credentials)
+        return authenticated
+
+    def _authenticate_record(
+        self,
+        credentials: Credentials,
+    ) -> tuple[bool, _CredentialRecord | None]:
+        """Authenticate credentials and return the verified record snapshot."""
         with self._lock:
-            stored = self._credentials.get(
-                credentials.username,
-            )
+            stored = self._credentials.get(credentials.username)
 
         if stored is None:
-            return False
+            self._derive(
+                credentials.secret,
+                _DUMMY_SALT,
+            )
+            return False, None
 
         candidate = self._derive(
             credentials.secret,
             stored.salt,
         )
 
-        return hmac.compare_digest(
-            stored.digest,
-            candidate,
-        )
+        return hmac.compare_digest(stored.digest, candidate), stored
 
     def exists(
         self,

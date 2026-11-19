@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
@@ -13,6 +14,24 @@ from threading import RLock
 from sentinel.control_plane.audit import ControlAuditEvent
 from sentinel.control_plane.audit_query import ControlAuditQuery
 from sentinel.control_plane.audit_store import ControlAuditStore
+
+
+def _to_json_compatible(value: object) -> object:
+    """Convert recursively frozen audit data to JSON-compatible values."""
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    "Audit data mapping keys must be strings."
+                )
+            result[key] = _to_json_compatible(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_to_json_compatible(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_to_json_compatible(item) for item in value]
+    return value
 
 
 class SQLiteControlAuditStore(ControlAuditStore):
@@ -82,7 +101,7 @@ class SQLiteControlAuditStore(ControlAuditStore):
 
     def append(self, event: ControlAuditEvent) -> None:
         """
-        Persist one audit event atomically.
+        Persist one audit event.
         """
         if not isinstance(event, ControlAuditEvent):
             raise TypeError(
@@ -112,11 +131,10 @@ class SQLiteControlAuditStore(ControlAuditStore):
                         event.caller_type,
                         event.command,
                         int(event.success),
-                        json.dumps(dict(event.data)),
+                        json.dumps(_to_json_compatible(event.data)),
                         event.error,
                     ),
                 )
-
                 connection.commit()
             except BaseException:
                 try:
@@ -124,6 +142,7 @@ class SQLiteControlAuditStore(ControlAuditStore):
                 except BaseException:
                     pass
                 raise
+
     def events(self) -> tuple[ControlAuditEvent, ...]:
         """
         Return persisted audit events in chronological order.

@@ -100,7 +100,6 @@ def test_handler_failure():
     assert called
 
 
-
 def test_concurrent_duplicate_subscription_registers_once():
     bus = EventBus()
 

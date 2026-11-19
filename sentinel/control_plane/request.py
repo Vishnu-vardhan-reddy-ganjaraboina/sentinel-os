@@ -33,8 +33,11 @@ class ControlRequest:
                 "context must be a ControlContext."
             )
 
+        if not isinstance(self.data, Mapping):
+            raise TypeError("data must be a mapping.")
+
         object.__setattr__(
             self,
             "data",
-            deepcopy(self.data),
+            deepcopy(dict(self.data)),
         )

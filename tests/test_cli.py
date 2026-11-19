@@ -446,3 +446,18 @@ def test_kernel_control_connection_failure_returns_one(
         "Unable to contact Kernel Control Plane: "
         "connection failed\n"
     )
+
+
+def test_start_with_missing_configuration_returns_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli = CLI()
+    missing_config = tmp_path / "missing.yaml"
+
+    result = cli.run(
+        ["start", "--config", str(missing_config)]
+    )
+
+    assert result == 1
+    assert "Sentinel OS start failed:" in capsys.readouterr().out

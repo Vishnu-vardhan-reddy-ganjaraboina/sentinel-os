@@ -120,3 +120,18 @@ def test_registry_concurrent_registration() -> None:
         list(executor.map(register, range(100)))
 
     assert len(registry) == 100
+def test_iteration_uses_stable_snapshot() -> None:
+    registry = DeviceRegistry()
+
+    first = DummyDevice("device1")
+    second = DummyDevice("device2")
+
+    registry.register(first)
+
+    snapshot = iter(registry)
+
+    registry.register(second)
+    registry.unregister("device1")
+
+    assert list(snapshot) == [first]
+    assert registry.list() == [second]

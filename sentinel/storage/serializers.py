@@ -1,4 +1,4 @@
-"""
+﻿"""
 Serialization utilities for Sentinel OS.
 """
 
@@ -74,9 +74,14 @@ class JsonSerializer(Serializer[TextIO]):
 
 class PickleSerializer(Serializer[BinaryIO]):
     """
-    Binary pickle serializer.
+    Serialize and deserialize Python objects using pickle.
 
-    Only use for trusted internal data.
+    SECURITY WARNING:
+        Pickle deserialization can execute arbitrary code. Never load data
+        from untrusted, user-controlled, or otherwise unverified sources.
+        Only deserialize data whose origin and integrity you trust.
+
+    Prefer JsonSerializer for ordinary data whenever possible.
     """
 
     def dump(
@@ -99,7 +104,7 @@ class PickleSerializer(Serializer[BinaryIO]):
         stream: BinaryIO,
     ) -> Any:
         try:
-            return pickle.load(stream)
+            return pickle.load(stream)  # nosec B301
         except Exception as exc:
             raise StorageSerializationError(
                 str(exc)

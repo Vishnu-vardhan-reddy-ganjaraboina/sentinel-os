@@ -21,7 +21,85 @@ from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
 from sentinel.control_plane.target import KernelControlTarget
 from sentinel.control_plane.validator import ControlRequestValidator
+from sentinel.kernel.exceptions import ServiceNotFoundError
 
+_SENSITIVE_AUDIT_KEYS = {
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "authorization",
+    "credential",
+    "credentials",
+    "private_key",
+    "client_secret",
+    "api_key",
+    "encryption_key",
+    "signing_key",
+}
+
+
+def _safe_audit_error(
+    command: KernelCommand,
+    error: str | None,
+) -> str | None:
+    """Return a safe, bounded error description for audit records."""
+    if error is None:
+        return None
+
+    # Preserve known controller-generated messages that contain no
+    # arbitrary exception details or credential values.
+    if error == "Permission denied: 'control' permission required.":
+        return error
+
+    if error == "Service value must be a string.":
+        return error
+
+
+    return f"Command '{command.value}' failed."
+
+
+def _sanitize_audit_value(value: Any) -> Any:
+    """Redact sensitive fields in audit data without changing the request."""
+    if isinstance(value, Mapping):
+        sanitized: dict[str, Any] = {}
+
+        for key, item in value.items():
+            raw_key = str(key).replace("-", "_").replace(".", "_")
+            normalized_key = "".join(
+                "_" + char.lower()
+                if char.isupper()
+                and index > 0
+                and (
+                    raw_key[index - 1].islower()
+                    or raw_key[index - 1].isdigit()
+                )
+                else char.lower()
+                for index, char in enumerate(raw_key)
+            )
+            key_parts = normalized_key.split("_")
+
+            sensitive = (
+                normalized_key in _SENSITIVE_AUDIT_KEYS
+                or any(
+                    part in _SENSITIVE_AUDIT_KEYS
+                    for part in key_parts
+                )
+            )
+
+            if sensitive:
+                sanitized[key] = "[REDACTED]"
+            else:
+                sanitized[key] = _sanitize_audit_value(item)
+
+        return sanitized
+
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_audit_value(item) for item in value]
+
+    return value
 
 class KernelController:
     """
@@ -126,9 +204,7 @@ class KernelController:
                 error=str(exc),
             )
 
-            self._record_audit(request, result)
-
-            return result
+            return self._audit_result(request, result)
 
         except (TypeError, ValueError) as exc:
             result = ControlResult(
@@ -137,9 +213,7 @@ class KernelController:
                 error=str(exc),
             )
 
-            self._record_audit(request, result)
-
-            return result
+            return self._audit_result(request, result)
 
         except Exception as exc:
             result = ControlResult(
@@ -147,10 +221,7 @@ class KernelController:
                 command=request.command.value,
                 error=str(exc),
             )
-
-            self._record_audit(request, result)
-
-            return result
+        return self._audit_result(request, result)
 
     def _authorize(
         self,
@@ -201,7 +272,7 @@ class KernelController:
                 request.context,
             )
 
-        return self._authorizer
+        return ControlAuthorizer(permissions=())
 
     def _execute_and_audit(
         self,
@@ -210,6 +281,8 @@ class KernelController:
         """
         Execute a validated and authorized request and audit the result.
         """
+        preserve_error = False
+
         try:
             result = self._dispatch(
                 request.command,
@@ -223,19 +296,37 @@ class KernelController:
                 error=str(exc),
             )
 
-        except Exception as exc:
+        except ServiceNotFoundError as exc:
+            preserve_error = True
             result = ControlResult(
                 success=False,
                 command=request.command.value,
                 error=str(exc),
             )
 
-        self._record_audit(
-            request,
-            result,
-        )
+        except (TypeError, ValueError) as exc:
+            safe_validation_errors = {
+                "Command requires a non-empty 'service' value.",
+                "Service value must be a string.",
+            }
+            error = (
+                str(exc)
+                if str(exc) in safe_validation_errors
+                else f"Command '{request.command.value}' failed."
+            )
+            result = ControlResult(
+                success=False,
+                command=request.command.value,
+                error=error,
+            )
 
-        return result
+        except Exception as exc:
+            result = ControlResult(
+                success=False,
+                command=request.command.value,
+                error=str(exc),
+            )
+        return self._audit_result(request, result, preserve_error=preserve_error)
 
     def _dispatch(
         self,
@@ -411,6 +502,42 @@ class KernelController:
 
         return service
 
+    def _audit_result(
+        self,
+        request: ControlRequest,
+        result: ControlResult,
+        preserve_error: bool = False,
+    ) -> ControlResult:
+        """Preserve operation errors if audit recording fails."""
+        try:
+            self._record_audit(request, result)
+        except Exception:
+            return ControlResult(
+                success=result.success,
+                command=result.command,
+                data=result.data,
+                error=result.error,
+                audit_error="Audit recording failed.",
+            )
+
+        if result.error is None:
+            return result
+
+        safe_service_errors = {
+            "Command requires a non-empty 'service' value.",
+            "Service value must be a string.",
+        }
+
+        if result.error in safe_service_errors or preserve_error:
+            return result
+
+        return ControlResult(
+            success=result.success,
+            command=result.command,
+            data=result.data,
+            error=_safe_audit_error(request.command, result.error),
+            audit_error=result.audit_error,
+        )
     def _record_audit(
         self,
         request: ControlRequest,
@@ -418,10 +545,6 @@ class KernelController:
     ) -> None:
         """
         Record an audit event when an audit recorder is configured.
-
-        Audit persistence is secondary to the control operation itself.
-        Failure to record an audit event must not replace the operation
-        result or cause a second control operation failure.
         """
         if self._audit_recorder is None:
             return
@@ -431,11 +554,8 @@ class KernelController:
             caller_type=request.context.caller_type,
             command=request.command.value,
             success=result.success,
-            data=request.data,
-            error=result.error,
+            data=_sanitize_audit_value(request.data),
+            error=_safe_audit_error(request.command, result.error),
         )
 
-        try:
-            self._audit_recorder.record(event)
-        except Exception:
-            return
+        self._audit_recorder.record(event)

@@ -5,7 +5,6 @@ Audit events for the Sentinel Kernel Control Plane.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from threading import RLock
@@ -14,6 +13,25 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sentinel.control_plane.audit_store import ControlAuditStore
+
+
+def _freeze_value(value: Any) -> Any:
+    """Recursively freeze containers in audit event data."""
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze_value(item) for item in value)
+    return value
+
+
+def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return a read-only mapping with recursively frozen values."""
+    return MappingProxyType({
+        key: _freeze_value(item)
+        for key, item in value.items()
+    })
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,33 +56,24 @@ class ControlAuditEvent:
     def __post_init__(self) -> None:
         if not isinstance(self.caller_id, str):
             raise TypeError("caller_id must be a string.")
+        if not isinstance(self.caller_type, str):
+            raise TypeError("caller_type must be a string.")
+        if not isinstance(self.command, str):
+            raise TypeError("command must be a string.")
+        if not isinstance(self.timestamp, datetime):
+            raise TypeError("timestamp must be a datetime.")
 
         if not self.caller_id.strip():
             raise ValueError("caller_id must not be empty.")
 
-        if not isinstance(self.caller_type, str):
-            raise TypeError("caller_type must be a string.")
-
         if not self.caller_type.strip():
             raise ValueError("caller_type must not be empty.")
-
-        if not isinstance(self.command, str):
-            raise TypeError("command must be a string.")
 
         if not self.command.strip():
             raise ValueError("command must not be empty.")
 
         if not isinstance(self.success, bool):
             raise TypeError("success must be a boolean.")
-
-        if not isinstance(self.timestamp, datetime):
-            raise TypeError("timestamp must be a datetime.")
-
-        if self.timestamp.tzinfo is None:
-            raise ValueError("timestamp must be timezone-aware.")
-
-        if not isinstance(self.data, Mapping):
-            raise TypeError("data must be a mapping.")
 
         if self.error is not None and not isinstance(self.error, str):
             raise TypeError("error must be a string or None.")
@@ -79,13 +88,15 @@ class ControlAuditEvent:
                 "Failed audit events must contain an error."
             )
 
-        copied_data = deepcopy(dict(self.data))
+        if self.timestamp.tzinfo is None:
+            raise ValueError(
+                "timestamp must be timezone-aware."
+            )
 
-        object.__setattr__(
-            self,
-            "data",
-            MappingProxyType(copied_data),
-        )
+        if not isinstance(self.data, Mapping):
+            raise TypeError("data must be a mapping.")
+
+        object.__setattr__(self, "data", _freeze_mapping(self.data))
 
 
 class ControlAuditRecorder:
@@ -101,7 +112,6 @@ class ControlAuditRecorder:
         Record an audit event.
         """
         raise NotImplementedError
-
 
 class InMemoryControlAuditRecorder(ControlAuditRecorder):
     """
@@ -119,7 +129,7 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
     @property
     def events(self) -> tuple[ControlAuditEvent, ...]:
         """
-        Return all recorded events as an immutable snapshot.
+        Return all recorded events.
         """
         with self._lock:
             return tuple(self._events)
@@ -145,7 +155,6 @@ class InMemoryControlAuditRecorder(ControlAuditRecorder):
         """
         with self._lock:
             self._events.clear()
-
 
 class PersistentControlAuditRecorder(ControlAuditRecorder):
     """

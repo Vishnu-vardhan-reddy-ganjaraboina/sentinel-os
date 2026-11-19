@@ -3,7 +3,9 @@ Tests for the persistent knowledge vector store.
 """
 
 import json
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from math import inf, nan
 from pathlib import Path
 from threading import Barrier
 
@@ -16,36 +18,39 @@ from sentinel.knowledge.persistent_vector_store import (
 from sentinel.knowledge.similarity import DotProductSimilarity
 from sentinel.storage.backends.sqlite import SQLiteBackend
 
+_CREATED_STORES: list[PersistentVectorStore] = []
 
-@pytest.fixture
-def store_factory():
-    """Create persistent stores and close all of them after the test."""
-    stores: list[PersistentVectorStore] = []
 
-    def create(database: Path) -> PersistentVectorStore:
-        backend = SQLiteBackend(database)
+def create_store(
+    database: Path,
+) -> PersistentVectorStore:
+    """Create a persistent vector store for testing."""
+    backend = SQLiteBackend(database)
+    store = PersistentVectorStore(backend=backend)
+    _CREATED_STORES.append(store)
+    return store
 
-        store = PersistentVectorStore(
-            backend=backend,
-        )
 
-        stores.append(store)
-
-        return store
-
-    yield create
-
-    for store in stores:
-        store.close()
+@pytest.fixture(autouse=True)
+def close_created_stores() -> Generator[None]:
+    """Close all stores created during each test."""
+    _CREATED_STORES.clear()
+    try:
+        yield
+    finally:
+        try:
+            for store in reversed(_CREATED_STORES):
+                store.close()
+        finally:
+            _CREATED_STORES.clear()
 
 
 def test_add_and_get(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = store_factory(database)
+    store = create_store(database)
 
     chunk = Chunk(
         id="chunk.1",
@@ -71,11 +76,10 @@ def test_add_and_get(
 
 def test_persistence_survives_reopen(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    first = store_factory(database)
+    first = create_store(database)
 
     chunk = Chunk(
         id="chunk.1",
@@ -89,9 +93,9 @@ def test_persistence_survives_reopen(
         [1.0, 0.0, 0.0],
     )
 
-    first.close()
+    first.backend.close()
 
-    second = store_factory(database)
+    second = create_store(database)
 
     stored = second.get("chunk.1")
 
@@ -100,14 +104,15 @@ def test_persistence_survives_reopen(
     assert stored.document_id == "doc.1"
     assert stored.text == "Persistent Sentinel knowledge"
 
+    second.backend.close()
+
 
 def test_search(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = store_factory(database)
+    store = create_store(database)
 
     store.add(
         Chunk(
@@ -140,11 +145,10 @@ def test_search(
 
 def test_delete(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = store_factory(database)
+    store = create_store(database)
 
     store.add(
         Chunk(
@@ -164,11 +168,10 @@ def test_delete(
 
 def test_delete_document(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = store_factory(database)
+    store = create_store(database)
 
     store.add(
         Chunk(
@@ -209,11 +212,10 @@ def test_delete_document(
 
 def test_clear(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
 
-    store = store_factory(database)
+    store = create_store(database)
 
     store.add(
         Chunk(
@@ -230,12 +232,10 @@ def test_clear(
     assert len(store) == 0
     assert store.list_chunks() == []
 
-
 def test_search_with_non_positive_limit_returns_empty(
     tmp_path: Path,
-    store_factory,
 ) -> None:
-    store = store_factory(tmp_path / "knowledge.db")
+    store = create_store(tmp_path / "knowledge.db")
 
     store.add(
         Chunk(
@@ -253,20 +253,17 @@ def test_search_with_non_positive_limit_returns_empty(
 
 def test_missing_chunk_returns_none(
     tmp_path: Path,
-    store_factory,
 ) -> None:
-    store = store_factory(tmp_path / "knowledge.db")
+    store = create_store(tmp_path / "knowledge.db")
 
     assert store.get("missing") is None
 
 
 def test_corrupt_json_is_rejected(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
-
-    store = store_factory(database)
+    store = create_store(database)
 
     store.backend.set(
         "knowledge:chunk:broken",
@@ -279,11 +276,9 @@ def test_corrupt_json_is_rejected(
 
 def test_invalid_payload_is_rejected(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
-
-    store = store_factory(database)
+    store = create_store(database)
 
     store.backend.set(
         "knowledge:chunk:broken",
@@ -296,11 +291,9 @@ def test_invalid_payload_is_rejected(
 
 def test_invalid_embedding_is_rejected(
     tmp_path: Path,
-    store_factory,
 ) -> None:
     database = tmp_path / "knowledge.db"
-
-    store = store_factory(database)
+    store = create_store(database)
 
     store.backend.set(
         "knowledge:chunk:broken",
@@ -321,207 +314,184 @@ def test_invalid_embedding_is_rejected(
     with pytest.raises(ValueError, match="Stored embedding"):
         store.get("broken")
 
-
-def test_concurrent_unique_adds(
+@pytest.mark.parametrize(
+    "embedding",
+    [
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_add_rejects_non_finite_embedding(
     tmp_path: Path,
-    store_factory,
+    embedding: list[float],
 ) -> None:
-    store = store_factory(
-        tmp_path / "knowledge.db",
+    store = create_store(tmp_path / "knowledge.db")
+
+    chunk = Chunk(
+        id="chunk.nonfinite",
+        document_id="doc.1",
+        text="Test embedding",
+        index=0,
     )
 
-    workers = 10
-    per_worker = 20
-
-    def add_worker(worker_id: int) -> None:
-        for index in range(per_worker):
-            chunk_id = f"{worker_id}:{index}"
-
-            store.add(
-                Chunk(
-                    id=chunk_id,
-                    document_id=f"doc:{worker_id}",
-                    text=chunk_id,
-                    index=index,
-                ),
-                [float(worker_id), float(index)],
-            )
-
-    with ThreadPoolExecutor(
-        max_workers=workers,
-    ) as executor:
-        list(
-            executor.map(
-                add_worker,
-                range(workers),
-            )
-        )
-
-    assert len(store) == workers * per_worker
-
-    for worker_id in range(workers):
-        for index in range(per_worker):
-            assert store.exists(
-                f"{worker_id}:{index}",
-            )
+    with pytest.raises(ValueError, match="finite"):
+        store.add(chunk, embedding)
 
 
-def test_concurrent_replacement_preserves_complete_records(
+@pytest.mark.parametrize(
+    "embedding",
+    [
+        [nan],
+        [inf],
+        [-inf],
+    ],
+)
+def test_search_rejects_non_finite_query_embedding(
     tmp_path: Path,
-    store_factory,
+    embedding: list[float],
 ) -> None:
-    store = store_factory(
-        tmp_path / "knowledge.db",
-    )
+    store = create_store(tmp_path / "knowledge.db")
 
-    store.add(
-        Chunk(
-            id="shared",
-            document_id="initial",
-            text="initial",
-            index=0,
+    with pytest.raises(ValueError, match="finite"):
+        store.search(embedding)
+
+def test_replace_document_rolls_back_when_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+    old = Chunk(
+        id="doc.1:0",
+        document_id="doc.1",
+        text="Old text",
+        index=0,
+    )
+    store.add(old, [1.0, 0.0])
+
+    original_set = store.backend.set
+    calls = 0
+
+    def failing_set(key: str, value: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("simulated storage failure")
+        original_set(key, value)
+
+    monkeypatch.setattr(store.backend, "set", failing_set)
+
+    replacements = [
+        (
+            Chunk(
+                id="doc.1:0",
+                document_id="doc.1",
+                text="New first",
+                index=0,
+            ),
+            [0.0, 1.0],
         ),
-        [1.0, 0.0],
-    )
-
-    barrier = Barrier(10)
-
-    def replace(worker_id: int) -> None:
-        barrier.wait()
-
-        store.add(
+        (
             Chunk(
-                id="shared",
-                document_id=f"doc:{worker_id}",
-                text=f"text:{worker_id}",
-                index=worker_id,
+                id="doc.1:1",
+                document_id="doc.1",
+                text="New second",
+                index=1,
             ),
-            [float(worker_id), 1.0],
-        )
+            [0.5, 0.5],
+        ),
+    ]
 
-    with ThreadPoolExecutor(
-        max_workers=10,
-    ) as executor:
-        list(
-            executor.map(
-                replace,
-                range(10),
-            )
-        )
+    with pytest.raises(RuntimeError, match="simulated storage failure"):
+        store.replace_document("doc.1", replacements)
 
-    stored = store.get("shared")
-
+    stored = store.get("doc.1:0")
     assert stored is not None
-    assert stored.id == "shared"
-
-    results = store.search(
-        [0.0, 1.0],
-        limit=1,
-    )
-
-    assert len(results) == 1
-    assert results[0].id == "shared"
+    assert stored.text == "Old text"
+    assert store.get("doc.1:1") is None
 
 
-def test_concurrent_search_and_delete(
+def test_replace_document_collision_preserves_both_documents(
     tmp_path: Path,
-    store_factory,
 ) -> None:
-    store = store_factory(
-        tmp_path / "knowledge.db",
+    store = create_store(tmp_path / "knowledge.db")
+
+    original_doc1 = Chunk(
+        id="doc.1:0",
+        document_id="doc.1",
+        text="Original document one",
+        index=0,
+    )
+    original_doc2 = Chunk(
+        id="doc.2:0",
+        document_id="doc.2",
+        text="Original document two",
+        index=0,
     )
 
-    for index in range(100):
-        store.add(
-            Chunk(
-                id=str(index),
-                document_id="doc",
-                text=str(index),
-                index=index,
-            ),
-            [1.0, 0.0],
+    store.add(original_doc1, [1.0, 0.0])
+    store.add(original_doc2, [0.0, 1.0])
+
+    conflicting_replacement = Chunk(
+        id="doc.2:0",
+        document_id="doc.1",
+        text="Must not overwrite document two",
+        index=0,
+    )
+
+    with pytest.raises(ValueError):
+        store.replace_document(
+            "doc.1",
+            [(conflicting_replacement, [0.5, 0.5])],
         )
 
-    def delete_worker() -> None:
-        for index in range(100):
-            store.delete(str(index))
+    stored_doc1 = store.get("doc.1:0")
+    stored_doc2 = store.get("doc.2:0")
 
-    def search_worker() -> None:
-        for _ in range(100):
-            store.search(
-                [1.0, 0.0],
-                limit=10,
-            )
-
-    with ThreadPoolExecutor(
-        max_workers=4,
-    ) as executor:
-        futures = [
-            executor.submit(delete_worker),
-            executor.submit(delete_worker),
-            executor.submit(search_worker),
-            executor.submit(search_worker),
-        ]
-
-        for future in futures:
-            future.result()
-
-    assert len(store) == 0
+    assert stored_doc1 == original_doc1
+    assert stored_doc2 == original_doc2
+    assert len(store) == 2
 
 
-def test_concurrent_clear_and_reads(
+def test_replace_document_removes_stale_chunks_and_preserves_other_documents(
     tmp_path: Path,
-    store_factory,
 ) -> None:
-    store = store_factory(
-        tmp_path / "knowledge.db",
+    store = create_store(tmp_path / "knowledge.db")
+
+    old_chunks = [
+        Chunk(
+            id=f"doc.1:{index}",
+            document_id="doc.1",
+            text=f"Old chunk {index}",
+            index=index,
+        )
+        for index in range(3)
+    ]
+    other_document = Chunk(
+        id="doc.2:0",
+        document_id="doc.2",
+        text="Keep this document",
+        index=0,
     )
 
-    for index in range(50):
-        store.add(
-            Chunk(
-                id=str(index),
-                document_id="doc",
-                text=str(index),
-                index=index,
-            ),
-            [1.0, 0.0],
-        )
+    for chunk in old_chunks:
+        store.add(chunk, [1.0, 0.0])
+    store.add(other_document, [0.0, 1.0])
 
-    barrier = Barrier(4)
+    replacement = Chunk(
+        id="doc.1:0",
+        document_id="doc.1",
+        text="Replacement chunk",
+        index=0,
+    )
 
-    def clear_worker() -> None:
-        barrier.wait()
+    store.replace_document("doc.1", [(replacement, [0.5, 0.5])])
 
-        for _ in range(20):
-            store.clear()
-
-    def read_worker() -> None:
-        barrier.wait()
-
-        for _ in range(20):
-            store.list_chunks()
-            len(store)
-            store.exists("1")
-            store.get("1")
-            store.search(
-                [1.0, 0.0],
-            )
-
-    with ThreadPoolExecutor(
-        max_workers=4,
-    ) as executor:
-        futures = [
-            executor.submit(clear_worker),
-            executor.submit(clear_worker),
-            executor.submit(read_worker),
-            executor.submit(read_worker),
-        ]
-
-        for future in futures:
-            future.result()
-
-    assert len(store) == 0
+    assert store.get("doc.1:0") == replacement
+    assert store.get("doc.1:1") is None
+    assert store.get("doc.1:2") is None
+    assert store.get("doc.2:0") == other_document
+    assert len(store) == 2
 
 
 def test_falsey_similarity_is_preserved(
@@ -532,17 +502,247 @@ def test_falsey_similarity_is_preserved(
             return False
 
     similarity = FalseySimilarity()
-
-    backend = SQLiteBackend(
-        tmp_path / "knowledge.db",
-    )
-
+    backend = SQLiteBackend(tmp_path / "knowledge.db")
     store = PersistentVectorStore(
         backend=backend,
         similarity=similarity,
     )
+    _CREATED_STORES.append(store)
 
-    try:
-        assert store._similarity is similarity
-    finally:
-        store.close()
+    assert store._similarity is similarity
+
+
+def test_concurrent_unique_adds(tmp_path: Path) -> None:
+    store = create_store(tmp_path / "concurrent-adds.db")
+
+    def add_chunk(index: int) -> None:
+        chunk = Chunk(
+            id=f"chunk-{index}",
+            document_id=f"doc-{index}",
+            text=f"Concurrent chunk {index}",
+            index=0,
+        )
+        store.add(chunk, [float(index + 1), 1.0])
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        list(executor.map(add_chunk, range(200)))
+
+    assert len(store) == 200
+    assert all(store.exists(f"chunk-{index}") for index in range(200))
+
+
+def test_concurrent_replacement_preserves_complete_records(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "concurrent-replace.db")
+    store.add(
+        Chunk(
+            id="shared",
+            document_id="shared-document",
+            text="Initial record",
+            index=0,
+        ),
+        [1.0, 0.0],
+    )
+
+    workers = 10
+    barrier = Barrier(workers)
+
+    def replace(index: int) -> None:
+        barrier.wait()
+        chunk = Chunk(
+            id="shared",
+            document_id="shared-document",
+            text=f"Replacement {index}",
+            index=0,
+        )
+        store.replace_document(
+            "shared-document",
+            [(chunk, [float(index + 1), 1.0])],
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(replace, index) for index in range(workers)]
+        for future in futures:
+            future.result()
+
+    stored = store.get("shared")
+    assert stored is not None
+    assert stored.id == "shared"
+    assert stored.text.startswith("Replacement ")
+    assert len(store.search([1.0, 1.0], limit=20)) == 1
+
+
+def test_concurrent_search_and_delete(tmp_path: Path) -> None:
+    store = create_store(tmp_path / "concurrent-search-delete.db")
+
+    for index in range(100):
+        store.add(
+            Chunk(
+                id=f"chunk-{index}",
+                document_id=f"doc-{index}",
+                text=f"Chunk {index}",
+                index=0,
+            ),
+            [float(index + 1), 1.0],
+        )
+
+    def delete_chunks() -> None:
+        for index in range(100):
+            store.delete(f"chunk-{index}")
+
+    def search_chunks() -> None:
+        for _ in range(100):
+            results = store.search([1.0, 1.0], limit=10)
+            assert len(results) <= 10
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(delete_chunks),
+            executor.submit(delete_chunks),
+            executor.submit(search_chunks),
+            executor.submit(search_chunks),
+        ]
+        for future in futures:
+            future.result()
+
+    assert len(store) == 0
+
+
+def test_concurrent_clear_and_reads(tmp_path: Path) -> None:
+    store = create_store(tmp_path / "concurrent-clear-reads.db")
+
+    for index in range(50):
+        store.add(
+            Chunk(
+                id=f"chunk-{index}",
+                document_id=f"doc-{index}",
+                text=f"Chunk {index}",
+                index=0,
+            ),
+            [float(index + 1), 1.0],
+        )
+
+    barrier = Barrier(4)
+
+    def clear_repeatedly() -> None:
+        barrier.wait()
+        for _ in range(20):
+            store.clear()
+
+    def read_repeatedly() -> None:
+        barrier.wait()
+        for _ in range(20):
+            chunks = store.list_chunks()
+            assert isinstance(chunks, list)
+            assert len(store) >= 0
+            store.exists("chunk-1")
+            store.get("chunk-1")
+            store.search([1.0, 1.0], limit=5)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(clear_repeatedly),
+            executor.submit(clear_repeatedly),
+            executor.submit(read_repeatedly),
+            executor.submit(read_repeatedly),
+        ]
+        for future in futures:
+            future.result()
+
+    assert len(store) == 0
+
+@pytest.mark.parametrize("embedding", [[nan], [inf], [-inf]])
+def test_persisted_embedding_rejects_non_finite_values(
+    tmp_path: Path,
+    embedding: list[float],
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+    store.backend.set(
+        "knowledge:chunk:broken",
+        json.dumps(
+            {
+                "chunk": {
+                    "id": "broken",
+                    "document_id": "doc.1",
+                    "text": "Hello",
+                    "index": 0,
+                    "metadata": {},
+                },
+                "embedding": embedding,
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="finite"):
+        store.get("broken")
+
+
+def test_persisted_embedding_rejects_non_numeric_values(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+    store.backend.set(
+        "knowledge:chunk:broken",
+        json.dumps(
+            {
+                "chunk": {
+                    "id": "broken",
+                    "document_id": "doc.1",
+                    "text": "Hello",
+                    "index": 0,
+                    "metadata": {},
+                },
+                "embedding": ["not-a-number"],
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Stored embedding"):
+        store.get("broken")
+
+
+def test_persisted_chunk_rejects_missing_required_field(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+    store.backend.set(
+        "knowledge:chunk:broken",
+        json.dumps(
+            {
+                "chunk": {
+                    "id": "broken",
+                    "document_id": "doc.1",
+                    "text": "Hello",
+                },
+                "embedding": [1.0, 0.0],
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="missing 'index'"):
+        store.get("broken")
+
+
+def test_persisted_chunk_rejects_invalid_field_types(
+    tmp_path: Path,
+) -> None:
+    store = create_store(tmp_path / "knowledge.db")
+    store.backend.set(
+        "knowledge:chunk:broken",
+        json.dumps(
+            {
+                "chunk": {
+                    "id": "broken",
+                    "document_id": "doc.1",
+                    "text": "Hello",
+                    "index": "not-an-integer",
+                    "metadata": {},
+                },
+                "embedding": [1.0, 0.0],
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="invalid field types"):
+        store.get("broken")

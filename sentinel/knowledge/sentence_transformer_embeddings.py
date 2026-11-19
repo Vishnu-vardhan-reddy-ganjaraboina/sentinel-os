@@ -31,7 +31,7 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
             raise ValueError("batch_size must be a positive integer.")
 
         try:
-            from sentence_transformers import (  # type: ignore[import-not-found]
+            from sentence_transformers import (
                 SentenceTransformer,
             )
         except ImportError as exc:

@@ -1,9 +1,13 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import select
 import socket
-import threading
+import ssl
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,27 +55,9 @@ class FakeAuthorizer:
             raise PermissionError("denied")
 
 
-class BlockingControlPlane(ControlPlane):
-    def __init__(self, controller: KernelController) -> None:
-        super().__init__(controller)
-        self.started = threading.Event()
-        self.release = threading.Event()
-
-    def execute_request(
-        self,
-        request: ControlRequest,
-    ) -> ControlResult:
-        if request.context.caller_id == "slow-client":
-            self.started.set()
-            if not self.release.wait():
-                raise RuntimeError("Blocking test was not released.")
-
-        return super().execute_request(request)
-
-
 def create_server(
-    client_timeout: float | None = None,
-    max_workers: int | None = None,
+    read_timeout: float = 5.0,
+    max_active_workers: int = 64,
 ) -> ControlPlaneTransportServer:
     controller = KernelController(
         target=FakeTarget(),
@@ -84,19 +70,35 @@ def create_server(
 
     plane = ControlPlane(controller)
 
-    server_kwargs: dict[str, object] = {
-        "control_plane": plane,
-        "host": "127.0.0.1",
-        "port": 0,
-    }
+    return ControlPlaneTransportServer(
+        control_plane=plane,
+        host="127.0.0.1",
+        port=0,
+        read_timeout=read_timeout,
+        max_active_workers=max_active_workers,
+    )
 
-    if client_timeout is not None:
-        server_kwargs["client_timeout"] = client_timeout
 
-    if max_workers is not None:
-        server_kwargs["max_workers"] = max_workers
+def create_tls_server(
+    max_connections_per_minute: int = 60,
+) -> ControlPlaneTransportServer:
+    base_server = create_server()
+    cert_dir = Path(__file__).resolve().parents[1] / "certs"
 
-    return ControlPlaneTransportServer(**server_kwargs)
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(
+        certfile=cert_dir / "transport-test-cert.pem",
+        keyfile=cert_dir / "transport-test-key.pem",
+    )
+
+    return ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        max_connections_per_minute=max_connections_per_minute,
+        ssl_context=ssl_context,
+    )
+
 
 def wait_for_server(server: ControlPlaneTransportServer) -> None:
     deadline = time.monotonic() + 2.0
@@ -110,11 +112,10 @@ def wait_for_server(server: ControlPlaneTransportServer) -> None:
 def send_request(
     server: ControlPlaneTransportServer,
     request: ControlRequest,
-    timeout: float = 2.0,
 ) -> ControlResult:
     with socket.create_connection(
         (server.host, server.port),
-        timeout=timeout,
+        timeout=2.0,
     ) as connection:
         connection.sendall(ControlPlaneProtocol.encode_request(request))
 
@@ -259,6 +260,77 @@ def test_server_can_handle_multiple_connections() -> None:
         server.stop()
 
 
+def test_server_rejects_eof_without_newline() -> None:
+    server = create_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(b'{"version":1,"type":"request"}')
+            connection.shutdown(socket.SHUT_WR)
+
+            data = b""
+            while b"\n" not in data:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert "newline-terminated" in result.error.lower()
+    finally:
+        server.stop()
+
+
+def test_server_recovers_after_client_disconnects_mid_request() -> None:
+    server = create_server(read_timeout=0.5)
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        # Send an incomplete request, then disconnect before completing it.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.sendall(b'{"version":1,"type":"request"')
+
+        # The server should recover and accept a subsequent valid request.
+        deadline = time.monotonic() + 2.0
+        result = None
+
+        while time.monotonic() < deadline:
+            try:
+                result = send_request(
+                    server,
+                    ControlRequest(
+                        command=KernelCommand.SYSTEM_STATUS,
+                        context=ControlContext(
+                            caller_id="recovery-client",
+                            caller_type="cli",
+                        ),
+                    ),
+                )
+                break
+            except (OSError, TimeoutError):
+                time.sleep(0.05)
+
+        assert result is not None, "Server did not recover after client disconnect."
+        assert result.success is True
+        assert result.command == KernelCommand.SYSTEM_STATUS.value
+    finally:
+        server.stop()
+
+
 def test_server_rejects_second_start() -> None:
     server = create_server()
 
@@ -273,15 +345,41 @@ def test_server_rejects_second_start() -> None:
         server.stop()
 
 
-def test_server_stop_is_idempotent() -> None:
+def test_server_stop_closes_idle_client_connection() -> None:
     server = create_server()
+    server.start()
 
-    server.stop()
-    server.stop()
+    connection = None
+    server_thread = None
 
-    assert server.running is False
-def test_server_times_out_incomplete_client_message() -> None:
-    server = create_server(client_timeout=0.1)
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+
+        # Allow the server to accept the connection and wait for its data.
+        time.sleep(0.1)
+        server_thread = server._thread
+
+        assert server_thread is not None
+        assert server_thread.is_alive()
+
+        server.stop()
+
+        assert not server_thread.is_alive(), (
+            "Server thread remained alive after stopping with an idle client."
+        )
+    finally:
+        if connection is not None:
+            connection.close()
+        server.stop()
+
+
+def test_server_times_out_when_client_sends_incomplete_message() -> None:
+    server = create_server(read_timeout=0.2)
     server.start()
 
     try:
@@ -289,222 +387,860 @@ def test_server_times_out_incomplete_client_message() -> None:
 
         with socket.create_connection(
             (server.host, server.port),
-            timeout=1.0,
+            timeout=2.0,
         ) as connection:
+            connection.settimeout(3.0)
             connection.sendall(b'{"version":1,"type":"request"')
 
             data = b""
-            deadline = time.monotonic() + 1.0
-
             while b"\n" not in data:
-                if time.monotonic() >= deadline:
-                    raise AssertionError(
-                        "Server did not respond to incomplete message."
-                    )
-
                 chunk = connection.recv(4096)
-
                 if not chunk:
                     break
-
                 data += chunk
 
         result = ControlPlaneProtocol.decode_response(data)
 
         assert result.success is False
         assert result.command == "transport.error"
-        assert result.error
+        assert result.error is not None
     finally:
         server.stop()
-def test_server_rejects_non_positive_client_timeout() -> None:
-    with pytest.raises(ValueError, match="greater than zero"):
-        create_server(client_timeout=0)
-
-    with pytest.raises(ValueError, match="greater than zero"):
-        create_server(client_timeout=-1)
 
 
-def test_server_rejects_invalid_client_timeout_type() -> None:
-    with pytest.raises(TypeError, match="must be a number"):
-        create_server(client_timeout="1")  # type: ignore[arg-type]
-
-    with pytest.raises(TypeError, match="must be a number"):
-        create_server(client_timeout=True)  # type: ignore[arg-type]
-
-
-def test_server_exposes_client_timeout() -> None:
-    server = create_server(client_timeout=2.5)
-
-    assert server.client_timeout == 2.5
-def test_server_handles_connections_concurrently() -> None:
-    controller = KernelController(
-        target=FakeTarget(),
-        authorizer=FakeAuthorizer(),
-        context=ControlContext(
-            caller_id="test",
-            caller_type="test",
-        ),
-    )
-    plane = BlockingControlPlane(controller)
+def test_server_enforces_total_message_deadline() -> None:
+    base_server = create_server()
     server = ControlPlaneTransportServer(
-        control_plane=plane,
+        control_plane=base_server.control_plane,
         host="127.0.0.1",
         port=0,
-        client_timeout=1.0,
+        read_timeout=1.0,
+        message_timeout=0.5,
     )
-
     server.start()
-
-    slow_connection: socket.socket | None = None
 
     try:
         wait_for_server(server)
 
-        slow_request = ControlRequest(
-            command=KernelCommand.SYSTEM_STATUS,
-            context=ControlContext(
-                caller_id="slow-client",
-                caller_type="cli",
-            ),
-        )
-
-        fast_request = ControlRequest(
-            command=KernelCommand.SYSTEM_STATUS,
-            context=ControlContext(
-                caller_id="fast-client",
-                caller_type="cli",
-            ),
-        )
-
-        slow_connection = socket.create_connection(
+        with socket.create_connection(
             (server.host, server.port),
-            timeout=1.0,
-        )
-        slow_connection.sendall(
-            ControlPlaneProtocol.encode_request(slow_request)
-        )
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            data = b""
 
-        assert plane.started.wait(timeout=1.0)
-
-        fast_result = send_request(
-            server,
-            fast_request,
-            timeout=0.5,
-        )
-
-        assert fast_result.success is True
-        assert fast_result.command == KernelCommand.SYSTEM_STATUS.value
-    finally:
-        plane.release.set()
-
-        if slow_connection is not None:
-            try:
-                slow_connection.close()
-            except OSError:
-                pass
-
-        server.stop()
-def test_server_respects_max_workers_limit() -> None:
-    controller = KernelController(
-        target=FakeTarget(),
-        authorizer=FakeAuthorizer(),
-        context=ControlContext(
-            caller_id="test",
-            caller_type="test",
-        ),
-    )
-    plane = BlockingControlPlane(controller)
-    server = ControlPlaneTransportServer(
-        control_plane=plane,
-        host="127.0.0.1",
-        port=0,
-        client_timeout=1.0,
-        max_workers=1,
-    )
-
-    server.start()
-
-    slow_connection: socket.socket | None = None
-    fast_connection: socket.socket | None = None
-
-    try:
-        wait_for_server(server)
-
-        slow_request = ControlRequest(
-            command=KernelCommand.SYSTEM_STATUS,
-            context=ControlContext(
-                caller_id="slow-client",
-                caller_type="cli",
-            ),
-        )
-
-        fast_request = ControlRequest(
-            command=KernelCommand.SYSTEM_STATUS,
-            context=ControlContext(
-                caller_id="fast-client",
-                caller_type="cli",
-            ),
-        )
-
-        slow_connection = socket.create_connection(
-            (server.host, server.port),
-            timeout=1.0,
-        )
-        slow_connection.sendall(
-            ControlPlaneProtocol.encode_request(slow_request)
-        )
-
-        assert plane.started.wait(timeout=1.0)
-
-        fast_connection = socket.create_connection(
-            (server.host, server.port),
-            timeout=1.0,
-        )
-        fast_connection.sendall(
-            ControlPlaneProtocol.encode_request(fast_request)
-        )
-        fast_connection.settimeout(0.25)
-
-        with pytest.raises(socket.timeout):
-            fast_connection.recv(4096)
-
-        plane.release.set()
-
-        fast_connection.settimeout(1.0)
-        response = fast_connection.recv(4096)
-
-        fast_result = ControlPlaneProtocol.decode_response(response)
-
-        assert fast_result.success is True
-        assert fast_result.command == KernelCommand.SYSTEM_STATUS.value
-    finally:
-        plane.release.set()
-
-        for connection in (slow_connection, fast_connection):
-            if connection is not None:
+            for _ in range(20):
                 try:
-                    connection.close()
+                    connection.sendall(b"x")
                 except OSError:
-                    pass
+                    break
 
+                readable, _, _ = select.select(
+                    [connection], [], [], 0.1
+                )
+                if readable:
+                    try:
+                        chunk = connection.recv(4096)
+                    except OSError:
+                        break
+
+                    if not chunk:
+                        break
+
+                    data += chunk
+                    if b"\\n" in data:
+                        break
+
+        assert data, "Server closed the connection without a response."
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert result.command == "transport.error"
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
+    finally:
         server.stop()
 
 
-def test_server_rejects_invalid_max_workers() -> None:
-    with pytest.raises(ValueError, match="greater than zero"):
-        create_server(max_workers=0)
+def test_server_rejects_connections_over_rate_limit() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        max_connections_per_minute=1,
+    )
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_HEALTH,
+        context=ControlContext(
+            caller_id="test-client",
+            caller_type="cli",
+        ),
+    )
 
-    with pytest.raises(ValueError, match="greater than zero"):
-        create_server(max_workers=-1)
+    server.start()
 
-    with pytest.raises(TypeError, match="must be an integer"):
-        create_server(max_workers="4")  # type: ignore[arg-type]
+    try:
+        wait_for_server(server)
 
-    with pytest.raises(TypeError, match="must be an integer"):
-        create_server(max_workers=True)  # type: ignore[arg-type]
+        first_result = send_request(server, request)
+        assert first_result.success is True
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(
+                ControlPlaneProtocol.encode_request(request)
+            )
+
+            data = b""
+            while b"\n" not in data:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+
+        assert result.success is False
+        assert result.command == "transport.error"
+        assert result.error is not None
+        assert "rate limit" in result.error.lower()
+    finally:
+        server.stop()
 
 
-def test_server_exposes_max_workers() -> None:
-    server = create_server(max_workers=8)
 
-    assert server.max_workers == 8
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_server_rejects_invalid_max_active_workers(limit: object) -> None:
+    base_server = create_server()
+
+    with pytest.raises(ValueError, match="max_active_workers"):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            max_active_workers=limit,
+        )
+
+
+def test_server_exposes_max_active_workers() -> None:
+    server = create_server(max_active_workers=8)
+
+    assert server.max_active_workers == 8
+
+
+def test_server_enforces_worker_limit_and_recovers_capacity() -> None:
+    import threading
+
+    server = create_server(max_active_workers=1)
+    request_started = threading.Event()
+    release_request = threading.Event()
+    original_execute = server.control_plane.execute_request
+
+    def blocked_execute(request: ControlRequest) -> ControlResult:
+        request_started.set()
+        if not release_request.wait(timeout=5.0):
+            raise TimeoutError("Test request release timed out.")
+        return original_execute(request)
+
+    server.control_plane.execute_request = blocked_execute
+    server.start()
+    first_connection = None
+
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_STATUS,
+        context=ControlContext(caller_id="worker-cap-client", caller_type="cli"),
+    )
+
+    try:
+        wait_for_server(server)
+        first_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        first_connection.settimeout(2.0)
+        first_connection.sendall(ControlPlaneProtocol.encode_request(request))
+
+        assert request_started.wait(timeout=2.0), (
+            "The first request did not occupy the worker slot."
+        )
+        assert len(server._worker_threads) == 1
+
+        # With the only worker occupied, the next connection must be closed
+        # without creating another worker thread.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as excess_connection:
+            excess_connection.settimeout(2.0)
+            assert excess_connection.recv(1) == b""
+
+        assert len(server._worker_threads) == 1
+
+        # Release the first worker and verify the slot becomes reusable.
+        release_request.set()
+        response = b""
+        while b"\\n" not in response:
+            chunk = first_connection.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+
+        result = ControlPlaneProtocol.decode_response(response)
+        assert result.success is True
+
+        deadline = time.monotonic() + 2.0
+        while server._worker_threads and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not server._worker_threads, "Worker slot was not released."
+
+        server.control_plane.execute_request = original_execute
+        recovered = send_request(server, request)
+        assert recovered.success is True
+    finally:
+        release_request.set()
+        if first_connection is not None:
+            first_connection.close()
+        server.stop()
+        server.control_plane.execute_request = original_execute
+
+
+def test_server_rejects_invalid_listen_backlog() -> None:
+    base_server = create_server()
+
+    with pytest.raises(ValueError, match="listen_backlog"):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            host="127.0.0.1",
+            port=0,
+            listen_backlog=0,
+        )
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [0, -1, True, 1.5],
+)
+def test_server_rejects_invalid_connection_rate_limit(limit: object) -> None:
+    base_server = create_server()
+
+    with pytest.raises(
+        ValueError,
+        match="max_connections_per_minute",
+    ):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            host="127.0.0.1",
+            port=0,
+            max_connections_per_minute=limit,
+        )
+
+
+def test_concurrent_connections_respect_global_rate_limit() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=100,
+        max_total_connections_per_minute=10,
+    )
+
+    client_ips = [f"192.0.2.{index}" for index in range(1, 31)]
+
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        results = list(
+            executor.map(server._is_rate_limited, client_ips)
+        )
+
+    assert results.count(False) == 10
+    assert results.count(True) == 20
+    assert len(server._total_connection_times) == 10
+
+
+def test_concurrent_connections_respect_per_ip_rate_limit() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=5,
+        max_total_connections_per_minute=100,
+    )
+
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        results = list(
+            executor.map(
+                server._is_rate_limited,
+                ["192.0.2.60"] * 30,
+            )
+        )
+
+    assert results.count(False) == 5
+    assert results.count(True) == 25
+    assert len(server._total_connection_times) == 5
+
+
+def test_expired_client_ip_entries_are_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_time = [100.0]
+    monkeypatch.setattr(
+        "sentinel.control_plane.transport_server.time",
+        SimpleNamespace(monotonic=lambda: current_time[0]),
+    )
+
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=1,
+        max_total_connections_per_minute=100,
+    )
+
+    assert server._is_rate_limited("192.0.2.70") is False
+    assert "192.0.2.70" in server._connection_times_by_ip
+
+    current_time[0] = 160.0
+    assert server._is_rate_limited("192.0.2.71") is False
+
+    assert "192.0.2.70" not in server._connection_times_by_ip
+    assert len(server._total_connection_times) == 1
+
+
+def test_connection_rate_limit_is_isolated_per_ip() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.10") is False
+    assert server._is_rate_limited("192.0.2.10") is True
+    assert server._is_rate_limited("192.0.2.11") is False
+
+
+def test_global_connection_rate_limit_applies_across_ips() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=2,
+        max_total_connections_per_minute=2,
+    )
+
+    assert server._is_rate_limited("192.0.2.40") is False
+    assert server._is_rate_limited("192.0.2.41") is False
+    assert server._is_rate_limited("192.0.2.42") is True
+
+
+def test_global_connection_rate_limit_expires_after_sixty_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    current_time = [100.0]
+    monkeypatch.setattr(
+        "sentinel.control_plane.transport_server.time",
+        SimpleNamespace(monotonic=lambda: current_time[0]),
+    )
+
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=10,
+        max_total_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.50") is False
+
+    current_time[0] = 159.999
+    assert server._is_rate_limited("192.0.2.51") is True
+
+    current_time[0] = 160.0
+    assert server._is_rate_limited("192.0.2.51") is False
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [0, -1, True, 1.5],
+)
+def test_server_rejects_invalid_global_connection_rate_limit(
+    limit: object,
+) -> None:
+    base_server = create_server()
+
+    with pytest.raises(
+        ValueError,
+        match="max_total_connections_per_minute",
+    ):
+        ControlPlaneTransportServer(
+            control_plane=base_server.control_plane,
+            max_total_connections_per_minute=limit,
+        )
+
+
+def test_connection_rate_limit_expires_after_sixty_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_time = [100.0]
+    monkeypatch.setattr(
+        "sentinel.control_plane.transport_server.time",
+        SimpleNamespace(monotonic=lambda: current_time[0]),
+    )
+
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        max_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.20") is False
+
+    current_time[0] = 159.999
+    assert server._is_rate_limited("192.0.2.20") is True
+
+    current_time[0] = 160.0
+    assert server._is_rate_limited("192.0.2.20") is False
+
+
+def test_connection_rate_limit_history_persists_after_restart() -> None:
+    base_server = create_server()
+    server = ControlPlaneTransportServer(
+        control_plane=base_server.control_plane,
+        host="127.0.0.1",
+        port=0,
+        max_connections_per_minute=1,
+    )
+
+    assert server._is_rate_limited("192.0.2.30") is False
+
+    server.start()
+    try:
+        wait_for_server(server)
+        server.stop()
+
+        server.start()
+        wait_for_server(server)
+
+        assert server._is_rate_limited("192.0.2.30") is True
+    finally:
+        server.stop()
+
+
+def test_server_can_restart_after_stop() -> None:
+    server = create_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+    finally:
+        server.stop()
+
+    assert server.running is False
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        request = ControlRequest(
+            command=KernelCommand.SYSTEM_STATUS,
+            context=ControlContext(
+                caller_id="restart-client",
+                caller_type="cli",
+            ),
+        )
+
+        result = send_request(server, request)
+
+        assert result.success is True
+        assert result.command == KernelCommand.SYSTEM_STATUS.value
+    finally:
+        server.stop()
+
+    assert server.running is False
+
+
+def test_server_stop_is_idempotent() -> None:
+    server = create_server()
+
+    server.stop()
+    server.stop()
+
+    assert server.running is False
+
+
+def test_server_handles_concurrent_stop_calls() -> None:
+    server = create_server()
+    server.start()
+    wait_for_server(server)
+
+    thread = server._thread
+    assert thread is not None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(server.stop),
+            executor.submit(server.stop),
+        ]
+        for future in futures:
+            future.result(timeout=3.0)
+
+    assert not thread.is_alive()
+    assert server.running is False
+    assert server._active_connection is None
+
+
+def test_server_stops_when_shutdown_races_with_rate_limit_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    server = create_server()
+    rate_check_reached = threading.Event()
+    release_rate_check = threading.Event()
+
+    def pause_rate_check(client_ip: str) -> bool:
+        rate_check_reached.set()
+        if not release_rate_check.wait(timeout=3.0):
+            raise AssertionError("Rate-limit check was not released.")
+        return False
+
+    monkeypatch.setattr(server, "_is_rate_limited", pause_rate_check)
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+
+        assert rate_check_reached.wait(timeout=2.0), (
+            "Server did not reach the rate-limit check."
+        )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            stop_future = executor.submit(server.stop)
+
+            deadline = time.monotonic() + 2.0
+            while not server._stop_event.is_set():
+                if time.monotonic() >= deadline:
+                    raise AssertionError("Shutdown did not start.")
+                time.sleep(0.005)
+
+            release_rate_check.set()
+            stop_future.result(timeout=3.0)
+
+        thread = server._thread
+        assert thread is None or not thread.is_alive()
+        assert server.running is False
+        assert server._active_connection is None
+    finally:
+        release_rate_check.set()
+        if connection is not None:
+            connection.close()
+        server.stop()
+
+
+
+def test_server_stop_interrupts_stalled_tls_handshake() -> None:
+    server = create_tls_server()
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            active = server._active_connection
+            if isinstance(active, ssl.SSLSocket):
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("Server did not begin the TLS handshake.")
+
+        server_thread = server._thread
+        assert server_thread is not None
+
+        server.stop()
+
+        assert not server_thread.is_alive(), (
+            "Server thread remained alive during TLS handshake shutdown."
+        )
+        assert server._active_connection is None
+    finally:
+        if connection is not None:
+            connection.close()
+        server.stop()
+
+def test_rate_limited_tls_connection_is_closed_before_handshake() -> None:
+    server = create_tls_server(max_connections_per_minute=1)
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        # Consume the only allowed connection.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ):
+            pass
+
+        # The next connection must close without a TLS handshake.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            data = connection.recv(4096)
+
+        assert data == b""
+    finally:
+        server.stop()
+
+
+def test_unexpected_exception_is_not_exposed_to_client() -> None:
+    server = create_server()
+    original_execute = server.control_plane.execute_request
+
+    def raise_internal_error(request: ControlRequest) -> ControlResult:
+        raise RuntimeError("internal-secret-database-detail")
+
+    server.control_plane.execute_request = raise_internal_error
+    request = ControlRequest(
+        command=KernelCommand.SYSTEM_HEALTH,
+        context=ControlContext(
+            caller_id="test-client",
+            caller_type="cli",
+        ),
+    )
+
+    server.start()
+
+    try:
+        wait_for_server(server)
+        result = send_request(server, request)
+
+        assert result.success is False
+        assert result.error is not None
+        assert "internal-secret-database-detail" not in result.error
+    finally:
+        server.control_plane.execute_request = original_execute
+        server.stop()
+
+
+
+def test_stalled_client_does_not_delay_healthy_client() -> None:
+    server = create_server(read_timeout=0.8)
+    server.start()
+    stalled_connection = None
+
+    try:
+        wait_for_server(server)
+
+        stalled_connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        stalled_connection.sendall(b'{"version":1,"type":"request"')
+
+        # Give the server time to accept the stalled client.
+        time.sleep(0.1)
+
+        started = time.monotonic()
+        healthy_result = send_request(
+            server,
+            ControlRequest(
+                command=KernelCommand.SYSTEM_STATUS,
+                context=ControlContext(
+                    caller_id="healthy-client",
+                    caller_type="cli",
+                ),
+            ),
+        )
+        elapsed = time.monotonic() - started
+
+        assert healthy_result.success is True
+        assert elapsed < 0.5, (
+            "A stalled client delayed a healthy request: "
+            f"{elapsed:.3f}s."
+        )
+    finally:
+        if stalled_connection is not None:
+            stalled_connection.close()
+        server.stop()
+
+
+
+def test_server_rejects_restart_while_worker_is_alive() -> None:
+    import threading
+
+    server = create_server()
+    request_started = threading.Event()
+    release_request = threading.Event()
+    original_execute = server.control_plane.execute_request
+
+    def blocked_execute(request: ControlRequest) -> ControlResult:
+        request_started.set()
+        if not release_request.wait(timeout=10.0):
+            raise TimeoutError("Test request release timed out.")
+        return original_execute(request)
+
+    server.control_plane.execute_request = blocked_execute
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        connection.sendall(
+            ControlPlaneProtocol.encode_request(
+                ControlRequest(
+                    command=KernelCommand.SYSTEM_STATUS,
+                    context=ControlContext(
+                        caller_id="blocked-client",
+                        caller_type="cli",
+                    ),
+                )
+            )
+        )
+
+        assert request_started.wait(timeout=2.0), (
+            "The request worker did not enter blocked execution."
+        )
+
+        server.stop()
+
+        assert any(worker.is_alive() for worker in server._worker_threads), (
+            "Expected the deliberately blocked worker to remain alive."
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="client workers are still shutting down",
+        ):
+            server.start()
+    finally:
+        release_request.set()
+        if connection is not None:
+            connection.close()
+        server.stop()
+        server.control_plane.execute_request = original_execute
+
+def test_invalid_tls_handshake_does_not_prevent_healthy_client() -> None:
+    server = create_tls_server()
+    server.start()
+
+    try:
+        wait_for_server(server)
+
+        # Malformed TLS data may cause a graceful close or a TCP reset.
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            connection.settimeout(2.0)
+            connection.sendall(b"not a TLS handshake")
+
+            try:
+                response = connection.recv(4096)
+            except ConnectionResetError:
+                response = b""
+
+            assert response == b""
+
+        # Verify that a legitimate TLS client can still make a request.
+        cert_path = (
+            Path(__file__).resolve().parents[1]
+            / "certs"
+            / "transport-test-cert.pem"
+        )
+        client_context = ssl.create_default_context(
+            ssl.Purpose.SERVER_AUTH,
+            cafile=str(cert_path),
+        )
+
+        with socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        ) as connection:
+            with client_context.wrap_socket(
+                connection,
+                server_hostname="localhost",
+            ) as tls_connection:
+                request = ControlRequest(
+                    command=KernelCommand.SYSTEM_HEALTH,
+                    context=ControlContext(
+                        caller_id="test-client",
+                        caller_type="cli",
+                    ),
+                )
+                tls_connection.sendall(
+                    ControlPlaneProtocol.encode_request(request)
+                )
+
+                data = b""
+                while b"\\n" not in data:
+                    chunk = tls_connection.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+
+        result = ControlPlaneProtocol.decode_response(data)
+        assert result.success is True
+        assert result.data["healthy"] is True
+    finally:
+        server.stop()
+def test_server_cleans_up_when_client_worker_fails_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    server = create_server(max_active_workers=1)
+    original_start = threading.Thread.start
+    worker_start_attempted = threading.Event()
+
+    def fail_client_worker_start(thread: threading.Thread) -> None:
+        if thread.name == "sentinel-control-plane-client":
+            worker_start_attempted.set()
+            raise RuntimeError("Simulated client worker start failure.")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", fail_client_worker_start)
+
+    server.start()
+    connection = None
+
+    try:
+        wait_for_server(server)
+
+        connection = socket.create_connection(
+            (server.host, server.port),
+            timeout=2.0,
+        )
+        connection.settimeout(2.0)
+
+        assert worker_start_attempted.wait(timeout=2.0), (
+            "The client worker start failure was not triggered."
+        )
+
+        deadline = time.monotonic() + 2.0
+        while server._active_connections and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        assert not server._worker_threads
+        assert not server._active_connections
+        assert server._active_connection is None
+        assert server.running is True
+    finally:
+        if connection is not None:
+            connection.close()
+        server.stop()

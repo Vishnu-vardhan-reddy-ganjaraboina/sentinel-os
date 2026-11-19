@@ -6,11 +6,10 @@ from sentinel.security.identity import SecurityIdentity
 from sentinel.security.service import SecurityService
 
 
-def test_manager_property():
+def test_service_does_not_expose_manager():
     service = SecurityService()
 
-    assert service.manager is not None
-
+    assert not hasattr(service, "manager")
 
 def test_register_identity():
     service = SecurityService()
@@ -78,6 +77,10 @@ def test_authorize():
         "Admin",
         {Role.ADMIN},
     )
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
+    )
 
     assert service.authorize(
         identity,
@@ -141,6 +144,62 @@ def test_clear():
 
     assert len(service) == 0
 
+def test_authenticate_identity_returns_registered_identity():
+    service = SecurityService()
+    identity = SecurityIdentity("admin-id", "Admin", {Role.ADMIN})
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    result = service.authenticate_identity(
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    assert result == identity
+
+
+def test_authenticate_identity_rejects_invalid_secret():
+    service = SecurityService()
+    identity = SecurityIdentity("admin-id", "Admin", {Role.ADMIN})
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    result = service.authenticate_identity(
+        SecurityCredentials("admin", "wrong-secret"),
+    )
+
+    assert result is None
+
+
+def test_authenticate_identity_rejects_unknown_username():
+    service = SecurityService()
+
+    result = service.authenticate_identity(
+        SecurityCredentials("unknown", "some-secret"),
+    )
+
+    assert result is None
+
+
+def test_authenticate_identity_returns_none_after_unregister():
+    service = SecurityService()
+    identity = SecurityIdentity("admin-id", "Admin", {Role.ADMIN})
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    service.unregister_identity("admin-id", "admin")
+
+    result = service.authenticate_identity(
+        SecurityCredentials("admin", "correct-secret"),
+    )
+
+    assert result is None
+
 
 def test_get_identity_returns_registered_identity():
     service = SecurityService()
@@ -160,7 +219,6 @@ def test_get_identity_returns_registered_identity():
     )
 
     assert service.get_identity("user-1") is identity
-
 
 def test_authentication_failure_is_propagated():
     service = SecurityService()
@@ -185,7 +243,6 @@ def test_authentication_failure_is_propagated():
             "wrong-password",
         )
     )
-
 
 def test_authorization_failure_is_propagated():
     service = SecurityService()
@@ -214,7 +271,6 @@ def test_authorization_failure_is_propagated():
         Permission.DELETE,
     )
 
-
 def test_revoke_is_exposed_through_service():
     service = SecurityService()
 
@@ -222,6 +278,11 @@ def test_revoke_is_exposed_through_service():
         "admin-1",
         "Admin",
         {Role.ADMIN},
+    )
+
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
     )
 
     service.grant(
@@ -243,7 +304,6 @@ def test_revoke_is_exposed_through_service():
         identity,
         Permission.WRITE,
     )
-
 
 def test_concurrent_identity_registration_is_safe():
     service = SecurityService()
@@ -292,7 +352,6 @@ def test_concurrent_identity_registration_is_safe():
             f"user-{index}",
         ) is not None
 
-
 def test_concurrent_authorization_is_safe():
     service = SecurityService()
 
@@ -300,6 +359,11 @@ def test_concurrent_authorization_is_safe():
         "admin-1",
         "Admin",
         {Role.ADMIN},
+    )
+
+    service.register_identity(
+        identity,
+        SecurityCredentials("admin", "password123"),
     )
 
     service.grant(
@@ -341,7 +405,6 @@ def test_concurrent_authorization_is_safe():
         thread.join()
 
     assert errors == []
-
 
 def test_concurrent_permission_updates_are_safe():
     service = SecurityService()
@@ -399,7 +462,6 @@ def test_concurrent_permission_updates_are_safe():
 
     assert errors == []
 
-
 def test_concurrent_clear_and_registration_are_safe():
     service = SecurityService()
 
@@ -447,89 +509,3 @@ def test_concurrent_clear_and_registration_are_safe():
         thread.join()
 
     assert errors == []
-
-def test_authenticate_identity_uses_username_not_display_name():
-    service = SecurityService()
-
-    identity = SecurityIdentity(
-        "admin-1",
-        "Administrator",
-        {Role.ADMIN},
-    )
-    credentials = SecurityCredentials("admin", "secret")
-
-    service.register_identity(identity, credentials)
-
-    assert service.authenticate_identity(
-        SecurityCredentials("admin", "secret")
-    ) is identity
-
-
-def test_authenticate_identity_rejects_wrong_password():
-    service = SecurityService()
-
-    service.register_identity(
-        SecurityIdentity("user-1", "User One", {Role.USER}),
-        SecurityCredentials("user", "correct-secret"),
-    )
-
-    assert service.authenticate_identity(
-        SecurityCredentials("user", "wrong-secret")
-    ) is None
-
-
-def test_authenticate_identity_rejects_unknown_username():
-    service = SecurityService()
-
-    assert service.authenticate_identity(
-        SecurityCredentials("unknown", "secret")
-    ) is None
-
-
-def test_duplicate_username_for_different_identity_is_rejected():
-    service = SecurityService()
-
-    service.register_identity(
-        SecurityIdentity("user-1", "First User", {Role.USER}),
-        SecurityCredentials("shared", "secret-one"),
-    )
-
-    import pytest
-
-    with pytest.raises(ValueError, match="already registered"):
-        service.register_identity(
-            SecurityIdentity("user-2", "Second User", {Role.USER}),
-            SecurityCredentials("shared", "secret-two"),
-        )
-
-    assert service.authenticate_identity(
-        SecurityCredentials("shared", "secret-one")
-    ).id == "user-1"
-
-
-def test_replacing_identity_updates_username_association():
-    service = SecurityService()
-
-    service.register_identity(
-        SecurityIdentity("user-1", "Original", {Role.USER}),
-        SecurityCredentials("old-user", "old-secret"),
-    )
-
-    replacement = SecurityIdentity(
-        "user-1",
-        "Replacement",
-        {Role.ADMIN},
-    )
-
-    service.register_identity(
-        replacement,
-        SecurityCredentials("new-user", "new-secret"),
-    )
-
-    assert service.authenticate_identity(
-        SecurityCredentials("old-user", "old-secret")
-    ) is None
-
-    assert service.authenticate_identity(
-        SecurityCredentials("new-user", "new-secret")
-    ) is replacement

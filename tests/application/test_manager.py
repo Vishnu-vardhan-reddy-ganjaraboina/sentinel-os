@@ -634,14 +634,11 @@ def test_manager_manifests_snapshot() -> None:
         ("second", second),
     )
 
+
 def test_health_all_returns_snapshot_for_all_applications() -> None:
     manager = ApplicationManager()
-
-    first = create_application()
-    second = create_application()
-
-    manager.register("first", first)
-    manager.register("second", second)
+    manager.register("first", create_application())
+    manager.register("second", create_application())
 
     health = manager.health_all()
 
@@ -663,9 +660,7 @@ def test_health_all_uses_a_stable_application_snapshot() -> None:
             return {"healthy": True}
 
     manager = ApplicationManager()
-    application = BlockingHealthApplication()
-
-    manager.register("blocking", application)
+    manager.register("blocking", BlockingHealthApplication())
     manager.start("blocking")
 
     health_result: list[dict[str, object]] = []
@@ -680,7 +675,6 @@ def test_health_all_uses_a_stable_application_snapshot() -> None:
 
     try:
         health_thread.start()
-
         assert health_started.wait(1.0) is True
 
         manager.stop("blocking")
@@ -694,14 +688,12 @@ def test_health_all_uses_a_stable_application_snapshot() -> None:
 
         assert not health_thread.is_alive()
         assert health_result == [
-            {
-                "healthy": True,
-                "state": "running",
-            }
+            {"healthy": True, "state": "running"}
         ]
     finally:
         release_health.set()
-        health_thread.join(timeout=2.0)
+        if health_thread.ident is not None:
+            health_thread.join(timeout=2.0)
 
         if not stopped and manager.contains("blocking"):
             manager.stop("blocking")
@@ -723,21 +715,19 @@ def test_health_all_does_not_hold_manager_lock_during_application_health() -> No
             return {"healthy": True}
 
     manager = ApplicationManager()
-    application = BlockingHealthApplication()
-
-    manager.register("blocking", application)
+    manager.register("blocking", BlockingHealthApplication())
     manager.start("blocking")
 
     health_result: list[dict[str, object]] = []
-
-    def collect_health() -> None:
-        health_result.append(dict(manager.health_all()["blocking"]))
-
-    health_thread = threading.Thread(target=collect_health)
+    health_thread = threading.Thread(
+        target=lambda: health_result.append(
+            dict(manager.health_all()["blocking"]),
+        ),
+    )
+    registration_thread: threading.Thread | None = None
 
     try:
         health_thread.start()
-
         assert health_started.wait(1.0) is True
 
         def register_application() -> None:
@@ -752,22 +742,21 @@ def test_health_all_does_not_hold_manager_lock_during_application_health() -> No
         assert registration_finished.wait(1.0) is True
 
         release_health.set()
-
         health_thread.join(timeout=2.0)
         registration_thread.join(timeout=2.0)
 
         assert not health_thread.is_alive()
         assert not registration_thread.is_alive()
         assert health_result == [
-            {
-                "healthy": True,
-                "state": "running",
-            }
+            {"healthy": True, "state": "running"}
         ]
         assert manager.contains("new-app")
     finally:
         release_health.set()
-        health_thread.join(timeout=2.0)
+        if health_thread.ident is not None:
+            health_thread.join(timeout=2.0)
+        if registration_thread is not None:
+            registration_thread.join(timeout=2.0)
 
         if manager.running("blocking"):
             manager.stop("blocking")
@@ -783,18 +772,50 @@ def test_health_all_handles_application_health_failure() -> None:
             raise RuntimeError("health failed")
 
     manager = ApplicationManager()
-    application = FailingHealthApplication()
-
-    manager.register("failing", application)
+    manager.register("failing", FailingHealthApplication())
     manager.start("failing")
 
     try:
-        health = manager.health_all()
-
-        assert health["failing"] == {
+        assert manager.health_all()["failing"] == {
             "healthy": False,
             "state": "running",
             "error": "health failed",
         }
     finally:
         manager.stop("failing")
+
+
+def test_health_all_handles_invalid_application_health_result() -> None:
+    class InvalidHealthApplication(Application):
+        @property
+        def health(self):  # type: ignore[override]
+            return "invalid"
+
+    manager = ApplicationManager()
+    manager.register("invalid", InvalidHealthApplication())
+    manager.start("invalid")
+
+    try:
+        assert manager.health_all()["invalid"] == {
+            "healthy": False,
+            "state": "running",
+            "error": "Application health result is invalid.",
+        }
+    finally:
+        manager.stop("invalid")
+
+
+def test_registry_items_returns_stable_snapshot() -> None:
+    registry = ApplicationRegistry()
+    first = create_application()
+    second = create_application()
+
+    registry.register("first", first)
+    snapshot = registry.items()
+    registry.register("second", second)
+
+    assert snapshot == (("first", first),)
+    assert registry.items() == (
+        ("first", first),
+        ("second", second),
+    )

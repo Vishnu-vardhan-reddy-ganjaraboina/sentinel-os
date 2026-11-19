@@ -5,6 +5,7 @@ Vector store interfaces for Sentinel OS.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from math import isfinite
 from threading import RLock
 
 from sentinel.knowledge.chunk import Chunk
@@ -155,6 +156,11 @@ class InMemoryVectorStore(VectorStore):
             for value in embedding
         ]
 
+        if not copied_embedding:
+            raise ValueError("Embedding cannot be empty.")
+        if not all(isfinite(value) for value in copied_embedding):
+            raise ValueError("Embedding must contain only finite values.")
+
         with self._lock:
             self._chunks[chunk.id] = chunk
             self._embeddings[chunk.id] = copied_embedding
@@ -209,6 +215,9 @@ class InMemoryVectorStore(VectorStore):
         Validation/copying occurs before acquiring the mutation lock so
         invalid input cannot destroy the existing version.
         """
+        if not document_id.strip():
+            raise ValueError("Document id cannot be empty.")
+
         prepared: list[tuple[Chunk, list[float]]] = []
 
         for chunk, embedding in chunks:
@@ -218,15 +227,13 @@ class InMemoryVectorStore(VectorStore):
                     f"document ID '{document_id}'."
                 )
 
-            prepared.append(
-                (
-                    chunk,
-                    [
-                        float(value)
-                        for value in embedding
-                    ],
-                )
-            )
+            values = [float(value) for value in embedding]
+            if not values:
+                raise ValueError("Embedding cannot be empty.")
+            if not all(isfinite(value) for value in values):
+                raise ValueError("Embedding must contain only finite values.")
+
+            prepared.append((chunk, values))
 
         new_ids = {
             chunk.id
@@ -239,6 +246,16 @@ class InMemoryVectorStore(VectorStore):
             )
 
         with self._lock:
+            for chunk, _ in prepared:
+                existing = self._chunks.get(chunk.id)
+                if (
+                    existing is not None
+                    and existing.document_id != document_id
+                ):
+                    raise ValueError(
+                        f"Chunk id {chunk.id!r} belongs to another document."
+                    )
+
             old_ids = [
                 chunk_id
                 for chunk_id, chunk in self._chunks.items()
@@ -274,6 +291,14 @@ class InMemoryVectorStore(VectorStore):
         if limit <= 0:
             return []
 
+        query_embedding = [float(value) for value in embedding]
+        if not query_embedding:
+            raise ValueError("Query embedding cannot be empty.")
+        if not all(isfinite(value) for value in query_embedding):
+            raise ValueError(
+                "Query embedding must contain only finite values."
+            )
+
         with self._lock:
             snapshot = [
                 (
@@ -290,7 +315,7 @@ class InMemoryVectorStore(VectorStore):
 
         for chunk, stored_embedding in snapshot:
             score = self._similarity.similarity(
-                embedding,
+                query_embedding,
                 stored_embedding,
             )
 

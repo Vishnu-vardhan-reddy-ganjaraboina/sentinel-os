@@ -200,6 +200,63 @@ class Configuration:
                 If a configured value has an invalid type or value.
         """
         with self._lock:
+            control_plane = deepcopy(
+                self._config.get("control_plane", {})
+            )
+
+        if not isinstance(control_plane, dict):
+            raise ConfigurationError(
+                "The control_plane configuration must be a mapping."
+            )
+
+        tls = control_plane.get("tls", {})
+        if not isinstance(tls, dict):
+            raise ConfigurationError(
+                "control_plane.tls must be a mapping."
+            )
+
+        tls_enabled = tls.get("enabled", False)
+        if not isinstance(tls_enabled, bool):
+            raise ConfigurationError(
+                "control_plane.tls.enabled must be a Boolean."
+            )
+
+        for path_key in ("certfile", "keyfile"):
+            if path_key in tls:
+                path_value = tls[path_key]
+                if not isinstance(path_value, str) or not path_value.strip():
+                    raise ConfigurationError(
+                        f"control_plane.tls.{path_key} must be a non-empty string."
+                    )
+
+        if tls_enabled:
+            for path_key in ("certfile", "keyfile"):
+                path_value = tls.get(path_key)
+                if not isinstance(path_value, str) or not path_value.strip():
+                    raise ConfigurationError(
+                        f"control_plane.tls.{path_key} is required when TLS is enabled."
+                    )
+
+
+        authentication = control_plane.get("authentication", {})
+        if not isinstance(authentication, dict):
+            raise ConfigurationError(
+                "control_plane.authentication must be a mapping."
+            )
+
+        authentication_enabled = authentication.get("enabled", False)
+        if not isinstance(authentication_enabled, bool):
+            raise ConfigurationError(
+                "control_plane.authentication.enabled must be a Boolean."
+            )
+
+        if authentication_enabled and not tls_enabled:
+            raise ConfigurationError(
+                "control_plane.authentication.enabled requires TLS."
+            )
+
+
+        with self._lock:
             knowledge = deepcopy(
                 self._config.get("knowledge", {})
             )
@@ -240,6 +297,84 @@ class Configuration:
             if not str(database_path).strip():
                 raise ConfigurationError(
                     "knowledge.database_path cannot be empty."
+                )
+
+        embedding = knowledge.get("embedding", {})
+        if not isinstance(embedding, dict):
+            raise ConfigurationError(
+                "knowledge.embedding must be a mapping."
+            )
+
+        provider = embedding.get("provider", "dummy")
+        if not isinstance(provider, str):
+            raise ConfigurationError(
+                "knowledge.embedding.provider must be a string."
+            )
+
+        provider = provider.strip().lower()
+        if provider not in {"dummy", "sentence-transformers"}:
+            raise ConfigurationError(
+                f"Unsupported knowledge embedding provider: '{provider}'."
+            )
+
+        for key in ("model", "device"):
+            if key in embedding:
+                value = embedding[key]
+                if not isinstance(value, str) or not value.strip():
+                    raise ConfigurationError(
+                        f"knowledge.embedding.{key} must be a non-empty string."
+                    )
+
+        if "batch_size" in embedding:
+            batch_size = embedding["batch_size"]
+            if (
+                isinstance(batch_size, bool)
+                or not isinstance(batch_size, int)
+                or batch_size <= 0
+            ):
+                raise ConfigurationError(
+                    "knowledge.embedding.batch_size must be a positive integer."
+                )
+        with self._lock:
+            storage = deepcopy(self._config.get("storage", {}))
+
+        if not isinstance(storage, dict):
+            raise ConfigurationError(
+                "The 'storage' configuration must be a mapping."
+            )
+
+        storage_backend = storage.get("backend", "memory")
+        if not isinstance(storage_backend, str):
+            raise ConfigurationError(
+                "storage.backend must be a string."
+            )
+
+        storage_backend = storage_backend.strip().lower()
+        if storage_backend not in {"memory", "filesystem", "sqlite"}:
+            raise ConfigurationError(
+                f"Unsupported storage backend: '{storage_backend}'."
+            )
+
+        if storage_backend == "sqlite":
+            storage_database = storage.get("database", "data/sentinel.db")
+            if not isinstance(storage_database, (str, Path)):
+                raise ConfigurationError(
+                    "storage.database must be a string or path."
+                )
+            if not str(storage_database).strip():
+                raise ConfigurationError(
+                    "storage.database cannot be empty."
+                )
+
+        if storage_backend == "filesystem":
+            storage_directory = storage.get("directory", "data/storage")
+            if not isinstance(storage_directory, (str, Path)):
+                raise ConfigurationError(
+                    "storage.directory must be a string or path."
+                )
+            if not str(storage_directory).strip():
+                raise ConfigurationError(
+                    "storage.directory cannot be empty."
                 )
 
     @staticmethod

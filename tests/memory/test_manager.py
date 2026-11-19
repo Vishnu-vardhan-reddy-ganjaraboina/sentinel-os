@@ -147,6 +147,7 @@ def test_len() -> None:
 
     assert len(manager) == 1
 
+
 def test_falsey_custom_store_is_preserved() -> None:
     class FalseyStore:
         def __bool__(self) -> bool:

@@ -50,6 +50,8 @@ def test_cycle():
     with pytest.raises(CircularDependencyError):
         DependencyResolver().resolve([a, b])
 
+
+
 def test_duplicate_service_names_are_rejected():
     first = Dummy("database")
     second = Dummy("database")

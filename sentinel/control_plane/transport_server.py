@@ -4,12 +4,19 @@ Network transport server for the Sentinel Kernel Control Plane.
 
 from __future__ import annotations
 
+import math
 import socket
+import ssl
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from collections import deque
 
 from sentinel.control.exceptions import ControlProtocolError
+from sentinel.control_plane.callers import ControlCallerType
+from sentinel.control_plane.context import ControlContext
+from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
 from sentinel.control_plane.service import ControlPlane
 from sentinel.control_plane.transport import ControlPlaneProtocol
 
@@ -30,20 +37,41 @@ class ControlPlaneTransportServer:
     """
 
     MAX_MESSAGE_SIZE = 64 * 1024
-    DEFAULT_CLIENT_TIMEOUT = 5.0
-    DEFAULT_MAX_WORKERS = 4
 
     def __init__(
         self,
         control_plane: ControlPlane,
         host: str = "127.0.0.1",
         port: int = 0,
-        client_timeout: float = DEFAULT_CLIENT_TIMEOUT,
-        *,
-        max_workers: int = DEFAULT_MAX_WORKERS,
+        read_timeout: float = 5.0,
+        message_timeout: float = 30.0,
+        listen_backlog: int = 5,
+        max_connections_per_minute: int = 60,
+        max_total_connections_per_minute: int = 300,
+        max_active_workers: int = 64,
+        ssl_context: ssl.SSLContext | None = None,
     ) -> None:
         if not isinstance(control_plane, ControlPlane):
             raise TypeError("control_plane must be a ControlPlane.")
+
+        if ssl_context is not None and not isinstance(
+            ssl_context, ssl.SSLContext
+        ):
+            raise TypeError("ssl_context must be an SSLContext or None.")
+
+        from sentinel.control_plane.security_authorizer import (
+            SecurityControlAuthorizer,
+        )
+
+        authorizer = control_plane.controller.authorizer
+        security_backed = isinstance(
+            authorizer, SecurityControlAuthorizer
+        )
+
+        if security_backed and ssl_context is None:
+            raise ValueError(
+                "TLS is required for security-backed Control Plane servers."
+            )
 
         if not isinstance(host, str) or not host.strip():
             raise ValueError("host must not be empty.")
@@ -54,30 +82,79 @@ class ControlPlaneTransportServer:
         if port < 0 or port > 65535:
             raise ValueError("port must be between 0 and 65535.")
 
-        if isinstance(client_timeout, bool) or not isinstance(
-            client_timeout,
-            (int, float),
+        if (
+            isinstance(listen_backlog, bool)
+            or not isinstance(listen_backlog, int)
+            or listen_backlog <= 0
         ):
-            raise TypeError("client_timeout must be a number.")
+            raise ValueError("listen_backlog must be a positive integer.")
 
-        if client_timeout <= 0:
-            raise ValueError("client_timeout must be greater than zero.")
+        if (
+            isinstance(read_timeout, bool)
+            or not isinstance(read_timeout, (int, float))
+            or not math.isfinite(read_timeout)
+            or read_timeout <= 0
+        ):
+            raise ValueError("read_timeout must be a finite positive number.")
 
-        if isinstance(max_workers, bool) or not isinstance(max_workers, int):
-            raise TypeError("max_workers must be an integer.")
+        if (
+            isinstance(message_timeout, bool)
+            or not isinstance(message_timeout, (int, float))
+            or not math.isfinite(message_timeout)
+            or message_timeout <= 0
+        ):
+            raise ValueError(
+                "message_timeout must be a finite positive number."
+            )
 
-        if max_workers <= 0:
-            raise ValueError("max_workers must be greater than zero.")
+        if (
+            isinstance(max_connections_per_minute, bool)
+            or not isinstance(max_connections_per_minute, int)
+            or max_connections_per_minute <= 0
+        ):
+            raise ValueError(
+                "max_connections_per_minute must be a positive integer."
+            )
 
         self._control_plane = control_plane
+        self._ssl_context = ssl_context
+        self._security_backed = security_backed
         self._host = host
         self._port = port
-        self._client_timeout = float(client_timeout)
-        self._max_workers = max_workers
+        self._listen_backlog = listen_backlog
+        self._max_connections_per_minute = max_connections_per_minute
+        if (
+            isinstance(max_total_connections_per_minute, bool)
+            or not isinstance(max_total_connections_per_minute, int)
+            or max_total_connections_per_minute <= 0
+        ):
+            raise ValueError(
+                "max_total_connections_per_minute must be a positive integer."
+            )
 
-        self._executor: ThreadPoolExecutor | None = None
+        self._max_total_connections_per_minute = (
+            max_total_connections_per_minute
+        )
+        if (
+            isinstance(max_active_workers, bool)
+            or not isinstance(max_active_workers, int)
+            or max_active_workers <= 0
+        ):
+            raise ValueError("max_active_workers must be a positive integer.")
+
+        self._max_active_workers = max_active_workers
+        self._connection_times_by_ip: dict[str, deque[float]] = {}
+        self._total_connection_times: deque[float] = deque()
+        self._rate_limit_lock = threading.Lock()
+        self._read_timeout = float(read_timeout)
+        self._message_timeout = float(message_timeout)
+
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
+        self._active_connection: socket.socket | None = None
+        self._active_connections: set[socket.socket] = set()
+        self._worker_threads: set[threading.Thread] = set()
+        self._request_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
 
@@ -97,12 +174,8 @@ class ControlPlaneTransportServer:
             return int(self._socket.getsockname()[1])
 
     @property
-    def client_timeout(self) -> float:
-        return self._client_timeout
-
-    @property
-    def max_workers(self) -> int:
-        return self._max_workers
+    def max_active_workers(self) -> int:
+        return self._max_active_workers
 
     @property
     def running(self) -> bool:
@@ -114,28 +187,21 @@ class ControlPlaneTransportServer:
             if self.running:
                 raise RuntimeError("Control Plane transport server is already running.")
 
+            if any(worker.is_alive() for worker in self._worker_threads):
+                raise RuntimeError(
+                    "Control Plane transport server cannot restart while "
+                    "client workers are still shutting down."
+                )
+
             self._stop_event.clear()
 
-            executor = ThreadPoolExecutor(
-                max_workers=self._max_workers,
-                thread_name_prefix="sentinel-control-plane-worker",
-            )
-
-            try:
-                server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                server_socket.setsockopt(
-                    socket.SOL_SOCKET,
-                    socket.SO_REUSEADDR,
-                    1,
-                )
-                server_socket.bind((self._host, self._port))
-                server_socket.listen()
-            except Exception:
-                executor.shutdown(wait=True)
-                raise
+            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_socket.settimeout(0.2)
+            server_socket.bind((self._host, self._port))
+            server_socket.listen(self._listen_backlog)
 
             self._socket = server_socket
-            self._executor = executor
 
             thread = threading.Thread(
                 target=self._serve,
@@ -143,37 +209,23 @@ class ControlPlaneTransportServer:
                 daemon=True,
             )
             self._thread = thread
+            thread.start()
 
-            try:
-                thread.start()
-            except Exception:
-                self._thread = None
-                self._socket = None
-                self._executor = None
-
-                try:
-                    server_socket.close()
-                except OSError:
-                    pass
-
-                executor.shutdown(wait=True)
-                raise
     def stop(self) -> None:
         with self._lock:
             if (
                 not self.running
                 and self._socket is None
-                and self._executor is None
+                and not self._active_connections
             ):
                 return
 
             self._stop_event.set()
-
             server_socket = self._socket
-            executor = self._executor
-
             self._socket = None
-            self._executor = None
+            active_connections = tuple(self._active_connections)
+            listener_thread = self._thread
+            worker_threads = tuple(self._worker_threads)
 
         if server_socket is not None:
             try:
@@ -181,82 +233,311 @@ class ControlPlaneTransportServer:
             except OSError:
                 pass
 
-        thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=2.0)
-
-        if executor is not None:
-            executor.shutdown(wait=True)
-
-        with self._lock:
-            self._thread = None
-    def _serve(self) -> None:
-        server_socket = self._socket
-        executor = self._executor
-
-        if server_socket is None or executor is None:
-            return
-
-        while not self._stop_event.is_set():
+        for connection in active_connections:
             try:
-                connection, _address = server_socket.accept()
+                connection.shutdown(socket.SHUT_RDWR)
             except OSError:
-                if self._stop_event.is_set():
-                    break
-                continue
-
-            try:
-                executor.submit(
-                    self._handle_connection_and_close,
-                    connection,
-                )
-            except RuntimeError:
-                try:
-                    connection.close()
-                except OSError:
-                    pass
-    def _handle_connection_and_close(
-        self,
-        connection: socket.socket,
-    ) -> None:
-        try:
-            self._handle_connection(connection)
-        finally:
+                pass
             try:
                 connection.close()
             except OSError:
                 pass
 
+        current = threading.current_thread()
+        if listener_thread is not None and listener_thread is not current:
+            listener_thread.join(timeout=2.0)
+
+        for worker in worker_threads:
+            if worker is not current:
+                worker.join(timeout=2.0)
+
+        with self._lock:
+            if listener_thread is not None and not listener_thread.is_alive():
+                if self._thread is listener_thread:
+                    self._thread = None
+
+            self._active_connection = next(
+                iter(self._active_connections), None
+            )
+            self._worker_threads = {
+                worker for worker in self._worker_threads if worker.is_alive()
+            }
+
+    def _serve(self) -> None:
+        with self._lock:
+            server_socket = self._socket
+
+        if server_socket is None:
+            return
+
+        while not self._stop_event.is_set():
+            try:
+                connection, address = server_socket.accept()
+            except TimeoutError:
+                if self._stop_event.is_set():
+                    break
+                continue
+            except OSError:
+                if self._stop_event.is_set():
+                    break
+                continue
+
+            rejected = False
+            stopping = False
+            start_error = False
+
+            # Reserve a worker slot and register the connection atomically.
+            # Starting the thread while holding the lock also prevents stop()
+            # from trying to join a Thread object before it has started.
+            with self._lock:
+                stopping = self._stop_event.is_set()
+                if (
+                    not stopping
+                    and len(self._worker_threads) >= self._max_active_workers
+                ):
+                    rejected = True
+                elif not stopping:
+                    self._active_connections.add(connection)
+                    if self._active_connection is None:
+                        self._active_connection = connection
+
+                    worker = threading.Thread(
+                        target=self._handle_client,
+                        args=(connection, address),
+                        name="sentinel-control-plane-client",
+                        daemon=True,
+                    )
+                    self._worker_threads.add(worker)
+                    try:
+                        worker.start()
+                    except RuntimeError:
+                        self._worker_threads.discard(worker)
+                        self._active_connections.discard(connection)
+                        if self._active_connection is connection:
+                            self._active_connection = next(
+                                iter(self._active_connections), None
+                            )
+                        start_error = True
+
+            if stopping:
+                connection.close()
+                break
+
+            if rejected or start_error:
+                connection.close()
+
+    def _handle_client(
+        self,
+        connection: socket.socket,
+        address: tuple[str, int],
+    ) -> None:
+        transport_connection = connection
+        try:
+            if self._is_rate_limited(address[0]):
+                if self._ssl_context is None:
+                    self._discard_pending_message(connection)
+                    self._send_protocol_error(
+                        connection,
+                        "Connection rate limit exceeded.",
+                    )
+                return
+
+            if self._ssl_context is not None:
+                connection.settimeout(self._read_timeout)
+                transport_connection = self._ssl_context.wrap_socket(
+                    connection,
+                    server_side=True,
+                    do_handshake_on_connect=False,
+                )
+                with self._lock:
+                    if self._stop_event.is_set():
+                        return
+
+                    self._active_connections.discard(connection)
+                    self._active_connections.add(transport_connection)
+                    if self._active_connection is connection:
+                        self._active_connection = transport_connection
+
+                transport_connection.settimeout(self._read_timeout)
+                transport_connection.do_handshake()
+
+            if not self._stop_event.is_set():
+                self._handle_connection(transport_connection)
+        except (OSError, ssl.SSLError, TimeoutError):
+            pass
+        finally:
+            for active in (connection, transport_connection):
+                try:
+                    active.close()
+                except OSError:
+                    pass
+
+            with self._lock:
+                self._active_connections.discard(connection)
+                self._active_connections.discard(transport_connection)
+                if self._active_connection in (connection, transport_connection):
+                    self._active_connection = next(
+                        iter(self._active_connections), None
+                    )
+                self._worker_threads.discard(threading.current_thread())
+
+    def _is_rate_limited(self, client_ip: str) -> bool:
+        now = time.monotonic()
+        cutoff = now - 60.0
+
+        with self._rate_limit_lock:
+            return self._check_rate_limits(client_ip, now, cutoff)
+
+    def _check_rate_limits(
+        self,
+        client_ip: str,
+        now: float,
+        cutoff: float,
+    ) -> bool:
+        while (
+            self._total_connection_times
+            and self._total_connection_times[0] <= cutoff
+        ):
+            self._total_connection_times.popleft()
+
+        # Discard expired entries for all tracked client IPs.
+        for tracked_ip, timestamps in list(
+            self._connection_times_by_ip.items()
+        ):
+            while timestamps and timestamps[0] <= cutoff:
+                timestamps.popleft()
+            if not timestamps:
+                del self._connection_times_by_ip[tracked_ip]
+
+        timestamps = self._connection_times_by_ip.setdefault(
+            client_ip, deque()
+        )
+        if (
+            len(timestamps) >= self._max_connections_per_minute
+            or len(self._total_connection_times)
+            >= self._max_total_connections_per_minute
+        ):
+            return True
+
+        timestamps.append(now)
+        self._total_connection_times.append(now)
+        return False
+
+    def _discard_pending_message(
+        self,
+        connection: socket.socket,
+    ) -> None:
+        """Briefly drain pending input before rejecting a rate-limited client."""
+        deadline = time.monotonic() + min(self._read_timeout, 0.25)
+        total_size = 0
+
+        try:
+            while total_size <= self.MAX_MESSAGE_SIZE:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+
+                connection.settimeout(min(0.05, remaining))
+                chunk = connection.recv(4096)
+
+                if not chunk:
+                    break
+
+                total_size += len(chunk)
+
+                if total_size > self.MAX_MESSAGE_SIZE or b"\n" in chunk:
+                    break
+        except (OSError, TimeoutError):
+            pass
+
     def _handle_connection(self, connection: socket.socket) -> None:
         try:
-            connection.settimeout(self._client_timeout)
-            message = self._receive_message(connection)
-            connection.settimeout(None)
+            deadline = time.monotonic() + self._message_timeout
+            message = self._receive_message(connection, deadline)
+            request, credentials = (
+                ControlPlaneProtocol.decode_authenticated_request(message)
+            )
 
-            request = ControlPlaneProtocol.decode_request(message)
+            if self._security_backed:
+                authorizer = self._control_plane.controller.authorizer
+                if not isinstance(authorizer, SecurityControlAuthorizer):
+                    self._send_protocol_error(
+                        connection,
+                        "Security authorizer is not configured correctly.",
+                    )
+                    return
 
-            result = self._control_plane.execute_request(request)
+                if credentials is None:
+                    self._send_protocol_error(
+                        connection,
+                        "Authentication required or invalid credentials.",
+                    )
+                    return
+
+                identity = authorizer.authenticate_identity(credentials)
+                if identity is None:
+                    self._send_protocol_error(
+                        connection,
+                        "Authentication required or invalid credentials.",
+                    )
+                    return
+
+                # Never authorize using caller identity or caller type
+                # supplied by the remote client.
+                verified_context = ControlContext(
+                    caller_id=identity.id,
+                    caller_type=ControlCallerType.API,
+                    metadata=request.context.metadata,
+                )
+                request = ControlRequest(
+                    command=request.command,
+                    context=verified_context,
+                    data=request.data,
+                )
+
+            with self._request_lock:
+                result = self._control_plane.execute_request(request)
 
             response = ControlPlaneProtocol.encode_response(result)
             connection.sendall(response)
 
+        except TimeoutError:
+            self._send_protocol_error(connection, "Control message timed out.")
         except ControlProtocolError as exc:
             self._send_protocol_error(connection, str(exc))
 
-        except Exception as exc:
+        except Exception:
+            # Do not disclose internal exception details to remote clients.
             self._send_protocol_error(
                 connection,
-                f"Control Plane request failed: {exc}",
+                "Control Plane request failed.",
             )
 
-    def _receive_message(self, connection: socket.socket) -> bytes:
+    def _receive_message(
+        self,
+        connection: socket.socket,
+        deadline: float,
+    ) -> bytes:
         chunks: list[bytes] = []
         total_size = 0
 
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Control message timed out.")
+
+            connection.settimeout(min(self._read_timeout, remaining))
             chunk = connection.recv(4096)
 
             if not chunk:
+                if not chunks:
+                    raise ControlProtocolError(
+                        "Control message cannot be empty."
+                    )
+                if not any(b"\n" in part for part in chunks):
+                    raise ControlProtocolError(
+                        "Control message must be newline-terminated."
+                    )
                 break
 
             total_size += len(chunk)
@@ -293,7 +574,6 @@ class ControlPlaneTransportServer:
 
 
 def _protocol_error_result(message: str) -> ControlResult:
-    from sentinel.control_plane.result import ControlResult
 
     return ControlResult(
         success=False,

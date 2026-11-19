@@ -100,26 +100,19 @@ class ExecutionService:
         """
         failures: list[BaseException] = []
 
-        try:
-            self._executor.shutdown()
-        except BaseException as exc:
-            failures.append(exc)
-
-        try:
-            self._process_manager.shutdown()
-        except BaseException as exc:
-            failures.append(exc)
-
-        if not failures:
-            return
+        for component in (self._executor, self._process_manager):
+            try:
+                component.shutdown()
+            except BaseException as exc:
+                failures.append(exc)
 
         if len(failures) == 1:
             raise failures[0]
-
-        raise BaseExceptionGroup(
-            "Execution service shutdown failed.",
-            failures,
-        )
+        if failures:
+            raise BaseExceptionGroup(
+                "Execution service shutdown failed.",
+                failures,
+            )
 
     # ------------------------------------------------------------------
     # Command execution

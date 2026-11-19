@@ -89,6 +89,14 @@ def test_disabled_capability_is_not_a_candidate() -> None:
     assert result.candidate is None
     assert result.candidates == ()
 
+    disabled.enable()
+
+    enabled_result = discovery.discover("database query")
+
+    assert enabled_result.status == DiscoveryStatus.MATCHED
+    assert enabled_result.candidate is not None
+    assert enabled_result.candidate.capability_id == "database.disabled"
+
 
 def test_equal_matches_are_ambiguous_and_unselected() -> None:
     first = DiscoveryTestCapability(

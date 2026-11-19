@@ -18,10 +18,7 @@ class ControlResult:
     command: str
     data: Mapping[str, Any] = field(default_factory=dict)
     error: str | None = None
+    audit_error: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "data",
-            deepcopy(self.data),
-        )
+        object.__setattr__(self, "data", deepcopy(self.data))

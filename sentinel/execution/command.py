@@ -49,7 +49,9 @@ class CommandExecutor:
         timeout: int = DEFAULT_TIMEOUT_SECONDS,
         cwd: str | Path | None = None,
     ) -> None:
-        self._shell = shell
+        if shell:
+            raise ValueError("shell=True is not supported; pass an argument sequence")
+        self._shell = False
         self._timeout = timeout
         self._cwd = Path(cwd).resolve() if cwd else None
 
@@ -69,7 +71,6 @@ class CommandExecutor:
                 capture_output=CAPTURE_OUTPUT,
                 text=TEXT_MODE,
                 timeout=self._timeout,
-                shell=self._shell,
                 cwd=self._cwd,
                 check=False,
             )

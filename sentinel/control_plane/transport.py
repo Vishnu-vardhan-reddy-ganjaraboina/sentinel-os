@@ -1,4 +1,4 @@
-"""
+﻿"""
 JSON transport protocol for the Sentinel Kernel Control Plane.
 """
 
@@ -12,6 +12,7 @@ from sentinel.control_plane.commands import KernelCommand
 from sentinel.control_plane.context import ControlContext
 from sentinel.control_plane.request import ControlRequest
 from sentinel.control_plane.result import ControlResult
+from sentinel.security.credentials import SecurityCredentials
 
 
 class ControlPlaneProtocol:
@@ -28,6 +29,7 @@ class ControlPlaneProtocol:
     @staticmethod
     def encode_request(
         request: ControlRequest,
+        credentials: SecurityCredentials | None = None,
     ) -> bytes:
         """Encode a ControlRequest as a newline-delimited JSON message."""
         if not isinstance(request, ControlRequest):
@@ -53,6 +55,16 @@ class ControlPlaneProtocol:
             "data": dict(request.data),
         }
 
+        if credentials is not None:
+            if not isinstance(credentials, SecurityCredentials):
+                raise TypeError(
+                    "credentials must be SecurityCredentials or None."
+                )
+            payload["auth"] = {
+                "username": credentials.username,
+                "secret": credentials.secret,
+            }
+
         return (
             json.dumps(
                 payload,
@@ -66,7 +78,44 @@ class ControlPlaneProtocol:
         message: bytes | str,
     ) -> ControlRequest:
         """Decode and validate a ControlRequest message."""
+        request, _credentials = (
+            ControlPlaneProtocol.decode_authenticated_request(message)
+        )
+        return request
+
+    @staticmethod
+    def decode_authenticated_request(
+        message: bytes | str,
+    ) -> tuple[ControlRequest, SecurityCredentials | None]:
+        """Decode a request and its optional authentication envelope."""
         payload = ControlPlaneProtocol._decode_json(message)
+
+        credentials: SecurityCredentials | None = None
+        if "auth" in payload:
+            auth_data = payload["auth"]
+            if not isinstance(auth_data, dict):
+                raise ControlProtocolError(
+                    "Request authentication must be a dictionary."
+                )
+
+            username = auth_data.get("username")
+            secret = auth_data.get("secret")
+            if (
+                not isinstance(username, str)
+                or not username.strip()
+                or not isinstance(secret, str)
+                or not secret
+            ):
+                raise ControlProtocolError(
+                    "Request authentication requires a username and secret."
+                )
+
+            try:
+                credentials = SecurityCredentials(username, secret)
+            except (TypeError, ValueError) as exc:
+                raise ControlProtocolError(
+                    "Invalid request authentication data."
+                ) from exc
 
         if payload.get("version") != ControlPlaneProtocol.VERSION:
             raise ControlProtocolError(
@@ -81,7 +130,7 @@ class ControlPlaneProtocol:
         command_value = payload.get("command")
         if not isinstance(command_value, str):
             raise ControlProtocolError(
-                "Control command must be a string."
+                "Kernel command must be a string."
             )
 
         try:
@@ -131,11 +180,12 @@ class ControlPlaneProtocol:
                 metadata=metadata,
             )
 
-            return ControlRequest(
+            request = ControlRequest(
                 command=command,
                 context=context,
                 data=data,
             )
+            return request, credentials
         except (TypeError, ValueError) as exc:
             raise ControlProtocolError(
                 f"Invalid control request: {exc}"
@@ -161,6 +211,9 @@ class ControlPlaneProtocol:
 
         if result.error is not None:
             payload["error"] = result.error
+
+        if result.audit_error is not None:
+            payload["audit_error"] = result.audit_error
 
         return (
             json.dumps(
@@ -209,10 +262,16 @@ class ControlPlaneProtocol:
             )
 
         error = payload.get("error")
+        audit_error = payload.get("audit_error")
 
         if error is not None and not isinstance(error, str):
             raise ControlProtocolError(
                 "Response error must be a string or None."
+            )
+
+        if audit_error is not None and not isinstance(audit_error, str):
+            raise ControlProtocolError(
+                "Response audit_error must be a string or None."
             )
 
         if success and error is not None:
@@ -230,6 +289,7 @@ class ControlPlaneProtocol:
             command=command,
             data=data,
             error=error,
+            audit_error=audit_error,
         )
 
     @staticmethod

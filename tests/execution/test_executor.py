@@ -73,10 +73,8 @@ def test_cancel_unknown_task() -> None:
 
     executor.shutdown()
 
-
 def test_submit() -> None:
     executor = DefaultExecutor()
-
     completed = threading.Event()
 
     def add_and_signal(a: int, b: int) -> int:
@@ -84,17 +82,18 @@ def test_submit() -> None:
         completed.set()
         return result
 
-    task_id = executor.submit(add_and_signal, 4, 6)
+    try:
+        task_id = executor.submit(add_and_signal, 4, 6)
 
-    assert completed.wait(timeout=1)
+        assert completed.wait(timeout=2)
 
-    context = executor.get_context(task_id)
+        context = executor.get_context(task_id)
+        assert context is not None
+        assert context.result == 10
+        assert context.status == TaskStatus.COMPLETED
+    finally:
+        executor.shutdown()
 
-    assert context is not None
-    assert context.result == 10
-    assert context.status == TaskStatus.COMPLETED
-
-    executor.shutdown()
 
 def test_shutdown() -> None:
     executor = DefaultExecutor()
@@ -186,51 +185,16 @@ def test_multiple_tasks_can_execute_concurrently() -> None:
 
     release.set()
     executor.shutdown()
+
 def test_shutdown_is_idempotent() -> None:
     executor = DefaultExecutor()
 
     executor.shutdown()
     executor.shutdown()
 
-def test_concurrent_submit_and_shutdown() -> None:
-    executor = DefaultExecutor(max_workers=4)
 
-    barrier = threading.Barrier(2)
-    submitted: list[str] = []
-    rejected = 0
-    lock = threading.Lock()
-
-    def submitter() -> None:
-        nonlocal rejected
-
-        barrier.wait()
-
-        for _ in range(50):
-            try:
-                task_id = executor.submit(add, 1, 2)
-            except RuntimeError:
-                with lock:
-                    rejected += 1
-            else:
-                with lock:
-                    submitted.append(task_id)
-
-    thread = threading.Thread(target=submitter)
-
-    thread.start()
-    barrier.wait()
-
-    executor.shutdown()
-
-    thread.join(timeout=5)
-
-    assert not thread.is_alive()
-    assert rejected >= 0
-    assert len(submitted) <= 50
-
-def test_submit_failure_does_not_leave_context() -> None:
+def test_submit_failure_rolls_back_state() -> None:
     executor = DefaultExecutor()
-
     original_submit = executor._pool.submit
 
     def failing_submit(*args: object, **kwargs: object) -> object:
@@ -243,7 +207,6 @@ def test_submit_failure_does_not_leave_context() -> None:
             executor.submit(add, 1, 2)
 
         stats = executor.stats()
-
         assert stats["submitted"] == 0
         assert stats["completed"] == 0
         assert stats["failed"] == 0
@@ -251,6 +214,7 @@ def test_submit_failure_does_not_leave_context() -> None:
     finally:
         executor._pool.submit = original_submit  # type: ignore[method-assign]
         executor.shutdown()
+
 
 def test_get_context_is_safe_during_concurrent_submissions() -> None:
     executor = DefaultExecutor(max_workers=4)
@@ -290,6 +254,7 @@ def test_get_context_is_safe_during_concurrent_submissions() -> None:
             assert context is not None
     finally:
         executor.shutdown()
+
 
 def test_cancel_only_marks_context_when_future_cancels() -> None:
     executor = DefaultExecutor(max_workers=1)

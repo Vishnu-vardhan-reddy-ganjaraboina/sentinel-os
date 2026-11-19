@@ -90,16 +90,29 @@ def test_service_command_rejects_empty_service() -> None:
             KernelCommand.SERVICE_START,
             {"service": "   "},
         )
+
+
+def test_service_command_rejects_unexpected_fields() -> None:
+    with pytest.raises(ValueError):
+        ControlRequestValidator.validate(
+            KernelCommand.SERVICE_START,
+            {
+                "service": "memory",
+                "force": True,
+            },
+        )
+
+
 def test_validator_rejects_invalid_command_type() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="command must be a KernelCommand"):
         ControlRequestValidator.validate(
             "system.status",  # type: ignore[arg-type]
             {},
         )
 
 
-def test_validator_rejects_invalid_data_type() -> None:
-    with pytest.raises(TypeError):
+def test_validator_rejects_non_mapping_data() -> None:
+    with pytest.raises(TypeError, match="data must be a mapping"):
         ControlRequestValidator.validate(
             KernelCommand.SYSTEM_STATUS,
             None,  # type: ignore[arg-type]

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Protocol definitions for Sentinel local control.
 """
 

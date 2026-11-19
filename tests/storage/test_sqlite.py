@@ -144,3 +144,188 @@ def test_clear(tmp_path: Path) -> None:
     assert backend.keys() == []
 
     backend.disconnect()
+
+
+def test_connect_closes_connection_when_initialization_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    connection = Mock()
+    connection.execute.side_effect = sqlite3.OperationalError(
+        "simulated initialization failure"
+    )
+
+    monkeypatch.setattr(
+        "sentinel.storage.backends.sqlite.sqlite3.connect",
+        lambda *args, **kwargs: connection,
+    )
+
+    with pytest.raises(
+        StorageConnectionError,
+        match="simulated initialization failure",
+    ):
+        SQLiteBackend(tmp_path / "failure.db")
+
+    connection.close.assert_called_once()
+
+
+def test_set_preserves_write_error_when_rollback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "rollback_failure.db")
+    backend.disconnect()
+    connection = Mock()
+    connection.execute.side_effect = sqlite3.OperationalError(
+        "simulated write failure"
+    )
+    connection.rollback.side_effect = sqlite3.OperationalError(
+        "simulated rollback failure"
+    )
+
+    monkeypatch.setattr(backend, "_connection", connection)
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated write failure",
+    ) as exc_info:
+        backend.set("key", "value")
+
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("simulated rollback failure" in note for note in notes)
+
+    backend.disconnect()
+
+
+def test_set_preserves_commit_error_when_rollback_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "commit_failure.db")
+    backend.disconnect()
+    connection = Mock()
+    connection.commit.side_effect = sqlite3.OperationalError(
+        "simulated commit failure"
+    )
+    monkeypatch.setattr(backend, "_connection", connection)
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated commit failure",
+    ) as exc_info:
+        backend.set("key", "value")
+
+    assert isinstance(exc_info.value.__cause__, sqlite3.OperationalError)
+    connection.rollback.assert_called_once()
+    backend.disconnect()
+
+
+def test_set_preserves_commit_and_rollback_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+    from unittest.mock import Mock
+
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "commit_rollback_failure.db")
+    backend.disconnect()
+
+    connection = Mock()
+    connection.commit.side_effect = sqlite3.OperationalError(
+        "simulated commit failure"
+    )
+    connection.rollback.side_effect = sqlite3.OperationalError(
+        "simulated rollback failure"
+    )
+    monkeypatch.setattr(backend, "_connection", connection)
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated commit failure",
+    ) as exc_info:
+        backend.set("key", "value")
+
+    assert isinstance(exc_info.value.__cause__, sqlite3.OperationalError)
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("simulated rollback failure" in note for note in notes)
+    connection.rollback.assert_called_once()
+    backend.disconnect()
+
+
+def test_connection_remains_usable_after_write_failure(
+    tmp_path: Path,
+) -> None:
+    from sentinel.storage.exceptions import StorageWriteError
+
+    backend = SQLiteBackend(tmp_path / "write_recovery.db")
+    connection = backend._ensure_connected()
+
+    connection.execute(
+        """
+        CREATE TRIGGER reject_blocked_key
+        BEFORE INSERT ON storage
+        WHEN NEW.key = 'blocked'
+        BEGIN
+            SELECT RAISE(ABORT, 'simulated write rejection');
+        END;
+        """
+    )
+
+    with pytest.raises(
+        StorageWriteError,
+        match="simulated write rejection",
+    ):
+        backend.set("blocked", "value")
+
+    connection.execute("DROP TRIGGER reject_blocked_key")
+
+    backend.set("recovered", "success")
+
+    assert backend.get("recovered") == "success"
+    assert backend.exists("recovered")
+
+    backend.disconnect()
+
+def test_delete_missing_key_raises(
+    tmp_path: Path,
+) -> None:
+    backend = SQLiteBackend(tmp_path / "missing_delete.db")
+
+    with pytest.raises(StorageKeyNotFoundError):
+        backend.delete("missing")
+
+    backend.disconnect()
+
+
+def test_len_returns_number_of_stored_values(
+    tmp_path: Path,
+) -> None:
+    backend = SQLiteBackend(tmp_path / "length.db")
+
+    assert len(backend) == 0
+
+    backend.set("first", 1)
+    backend.set("second", 2)
+
+    assert len(backend) == 2
+
+    backend.delete("first")
+
+    assert len(backend) == 1
+
+    backend.disconnect()

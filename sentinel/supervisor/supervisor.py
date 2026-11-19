@@ -102,6 +102,7 @@ class Supervisor:
         with self._lock:
             return self._intentional_stop
 
+
     def start(self) -> None:
         """Start Sentinel and begin monitoring it."""
         with self._lock:
@@ -109,7 +110,6 @@ class Supervisor:
                 raise SupervisorStateError(
                     "Supervisor is already running."
                 )
-
             if self._state in {
                 SupervisorState.STARTING,
                 SupervisorState.STOPPING,
@@ -118,7 +118,6 @@ class Supervisor:
                 raise SupervisorStateError(
                     "Supervisor is currently transitioning."
                 )
-
             if self._state == SupervisorState.FAILED:
                 raise SupervisorStateError(
                     "Supervisor is in a failed state."
@@ -152,14 +151,12 @@ class Supervisor:
                 )
 
             if cleanup_failures:
-                failures: list[Exception] = [exc, *cleanup_failures]
-
                 raise SupervisorStartupError(
                     "Supervisor failed to start Sentinel and "
                     "rollback did not complete cleanly."
                 ) from ExceptionGroup(
                     "Supervisor startup and rollback failed.",
-                    failures,
+                    [exc, *cleanup_failures],
                 )
 
             raise SupervisorStartupError(
@@ -168,6 +165,7 @@ class Supervisor:
 
         with self._lock:
             self._state = SupervisorState.RUNNING
+
 
     def stop(self) -> None:
         """Intentionally stop Sentinel and its monitor."""
@@ -200,8 +198,9 @@ class Supervisor:
             )
 
         if shutdown_failures:
+            cause: BaseException
             if len(shutdown_failures) == 1:
-                cause: BaseException = shutdown_failures[0]
+                cause = shutdown_failures[0]
             else:
                 cause = ExceptionGroup(
                     "Supervisor shutdown failed.",
@@ -211,6 +210,7 @@ class Supervisor:
             raise SupervisorShutdownError(
                 "Supervisor failed to stop Sentinel."
             ) from cause
+
 
     def restart(self) -> None:
         """Explicitly restart Sentinel."""
@@ -239,8 +239,9 @@ class Supervisor:
             with self._lock:
                 self._state = SupervisorState.FAILED
 
+            cause: BaseException
             if len(restart_failures) == 1:
-                cause: BaseException = restart_failures[0]
+                cause = restart_failures[0]
             else:
                 cause = ExceptionGroup(
                     "Supervisor restart shutdown failed.",
@@ -274,17 +275,12 @@ class Supervisor:
                 self._state = SupervisorState.FAILED
 
             if rollback_failures:
-                failures: list[Exception] = [
-                    exc,
-                    *rollback_failures,
-                ]
-
                 raise SupervisorRestartError(
                     "Supervisor failed to restart Sentinel and "
                     "rollback did not complete cleanly."
                 ) from ExceptionGroup(
                     "Supervisor restart and rollback failed.",
-                    failures,
+                    [exc, *rollback_failures],
                 )
 
             raise SupervisorRestartError(
@@ -302,12 +298,10 @@ class Supervisor:
 
         if delay > 0:
             sleep(delay)
-    def _handle_process_failure(self) -> None:
-        """
-        Handle an unexpected process termination.
 
-        This callback runs from the monitor thread.
-        """
+
+    def _handle_process_failure(self) -> None:
+        """Handle an unexpected process termination from the monitor thread."""
         with self._lock:
             if self._intentional_stop:
                 return
@@ -329,10 +323,8 @@ class Supervisor:
 
         try:
             self._wait_for_backoff()
-
             self._process.start()
             self._monitor.start()
-
         except Exception as exc:
             rollback_failures: list[Exception] = []
 
@@ -350,23 +342,19 @@ class Supervisor:
 
             with self._lock:
                 self._state = SupervisorState.FAILED
-
-            if rollback_failures:
-                # Automatic recovery runs in the monitor thread, so the
-                # failure cannot be raised back to the original caller.
-                # Preserve the complete failure chain for diagnostics.
-                self._last_recovery_error = ExceptionGroup(
-                    "Supervisor automatic recovery failed.",
-                    [exc, *rollback_failures],
-                )
-            else:
-                self._last_recovery_error = exc
-
+                if rollback_failures:
+                    self._last_recovery_error = ExceptionGroup(
+                        "Supervisor automatic recovery failed.",
+                        [exc, *rollback_failures],
+                    )
+                else:
+                    self._last_recovery_error = exc
             return
 
         with self._lock:
             self._restart_count += 1
             self._state = SupervisorState.RUNNING
+
 
     def health(self) -> dict[str, Any]:
         """Return Supervisor, monitor, and process health."""
@@ -379,7 +367,6 @@ class Supervisor:
         process_health = self._process.health()
 
         recovery_error_details: dict[str, Any] | None = None
-
         if recovery_error is not None:
             if isinstance(recovery_error, ExceptionGroup):
                 recovery_error_details = {

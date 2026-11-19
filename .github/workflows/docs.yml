@@ -1,0 +1,75 @@
+name: Documentation Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  documentation:
+    name: Validate Markdown links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate local Markdown links
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          files = [Path("README.md"), *Path("docs").rglob("*.md")]
+          files = [path for path in files if path.is_file()]
+          errors = []
+
+          link_pattern = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
+
+          for markdown in files:
+              try:
+                  content = markdown.read_text(encoding="utf-8")
+              except (OSError, UnicodeError) as exc:
+                  errors.append(f"{markdown}: cannot read UTF-8: {exc}")
+                  continue
+
+              for match in link_pattern.finditer(content):
+                  raw_target = match.group(1).strip()
+                  if not raw_target:
+                      continue
+                  target = raw_target.split()[0].strip("<>")
+                  if not target or target.startswith("#"):
+                      continue
+                  if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target):
+                      continue
+
+                  target_path = target.split("#", 1)[0].split("?", 1)[0]
+                  if not target_path:
+                      continue
+
+                  destination = (markdown.parent / target_path).resolve()
+                  if not destination.exists():
+                      line = content.count("\n", 0, match.start()) + 1
+                      errors.append(
+                          f"{markdown}:{line}: missing local target {target}"
+                      )
+
+          print(f"Checked {len(files)} Markdown files.")
+          if errors:
+              print("\n".join(errors), file=sys.stderr)
+              sys.exit(1)
+
+          print("Local Markdown links are valid.")
+          PY

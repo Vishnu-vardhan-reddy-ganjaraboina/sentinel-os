@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from threading import Barrier, Thread
 
 import pytest
@@ -12,9 +13,12 @@ from sentinel.boot import (
     BootStartupError,
     BootStateError,
 )
+from sentinel.control_plane.security_authorizer import SecurityControlAuthorizer
+from sentinel.infrastructure.configuration import Configuration
 from sentinel.kernel.kernel import Kernel
 from sentinel.kernel.service import Service
 from sentinel.platform import Platform
+from sentinel.security.service import SecurityService
 from sentinel.system import System
 
 
@@ -326,6 +330,34 @@ def test_from_configuration() -> None:
     assert manager.factory is not None
     assert manager.state == BootManager.STOPPED
     assert manager.running is False
+
+
+def test_from_configuration_passes_security_service_to_factory() -> None:
+    cert_dir = Path(__file__).resolve().parent / "certs"
+    configuration = BootConfiguration(
+        Configuration.from_dict(
+            {
+                "control_plane": {
+                    "tls": {
+                        "enabled": True,
+                        "certfile": str(cert_dir / "transport-test-cert.pem"),
+                        "keyfile": str(cert_dir / "transport-test-key.pem"),
+                    },
+                },
+            }
+        )
+    )
+    security = SecurityService()
+
+    manager = BootManager.from_configuration(
+        configuration,
+        security_service=security,
+    )
+
+    assert manager.system.control_plane is not None
+    authorizer = manager.system.control_plane.controller.authorizer
+    assert isinstance(authorizer, SecurityControlAuthorizer)
+    assert not hasattr(authorizer, "security")
 
 
 def test_from_configuration_accepts_profile() -> None:

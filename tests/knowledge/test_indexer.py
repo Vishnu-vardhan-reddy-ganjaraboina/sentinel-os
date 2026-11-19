@@ -1,4 +1,4 @@
-﻿from threading import Barrier, Thread
+from threading import Barrier, Thread
 
 import pytest
 
@@ -33,6 +33,15 @@ class FailingEmbeddingProvider:
             )
 
         return [1.0, 2.0]
+
+    def embed_many(
+        self,
+        texts: list[str],
+    ) -> list[list[float]]:
+        return [
+            self.embed(text)
+            for text in texts
+        ]
 
 
 def make_document(
@@ -321,3 +330,52 @@ def test_reindex_does_not_remove_previous_version_before_embedding() -> None:
         "abcde",
         "fghij",
     }
+
+
+def test_index_single_document() -> None:
+    indexer = make_indexer(
+        InMemoryVectorStore(),
+        chunk_size=100,
+    )
+
+    document = make_document("doc1", "Hello Sentinel")
+
+    chunks = indexer.index(document)
+
+    assert len(chunks) == 1
+    assert chunks[0].document_id == "doc1"
+
+
+def test_index_multiple_documents() -> None:
+    indexer = make_indexer(
+        InMemoryVectorStore(),
+        chunk_size=100,
+    )
+
+    documents = [
+        make_document("1", "One"),
+        make_document("2", "Two"),
+        make_document("3", "Three"),
+    ]
+
+    chunks = indexer.index_many(documents)
+
+    assert len(chunks) == 3
+
+
+def test_remove_document() -> None:
+    indexer = make_indexer(
+        InMemoryVectorStore(),
+        chunk_size=100,
+    )
+
+    indexer.index(
+        make_document("doc1", "Hello")
+    )
+
+    indexer.remove("doc1")
+
+    assert not any(
+        chunk.document_id == "doc1"
+        for chunk in indexer.vector_store.list_chunks()
+    )

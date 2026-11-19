@@ -45,6 +45,10 @@ class SimilarityMetric(ABC):
             raise ValueError(
                 "Vectors must have the same dimension."
             )
+        if not all(isfinite(value) for value in left):
+            raise ValueError("Vectors must contain only finite values.")
+        if not all(isfinite(value) for value in right):
+            raise ValueError("Vectors must contain only finite values.")
 
         for value in (*left, *right):
             if not isfinite(value):

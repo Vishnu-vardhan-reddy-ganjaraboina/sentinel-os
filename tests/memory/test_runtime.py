@@ -240,6 +240,7 @@ def test_runtime_exposes_underlying_memory_service() -> None:
     assert runtime.memory is not None
     assert isinstance(runtime.memory, MemoryService)
 
+
 def test_concurrent_initialize_is_safe() -> None:
     runtime = MemoryRuntimeService()
 

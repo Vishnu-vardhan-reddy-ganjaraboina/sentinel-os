@@ -69,6 +69,24 @@ class MemoryRuntimeService(Service):
             ttl=ttl,
         )
 
+    def upsert(
+        self,
+        memory_id: str,
+        content: Any,
+        *,
+        importance: int = 1,
+        memory_type: MemoryType = MemoryType.WORKING,
+        ttl: timedelta | None = None,
+    ) -> MemoryEntry:
+        """Insert a memory entry or atomically replace an existing entry."""
+        return self._memory.upsert(
+            memory_id=memory_id,
+            content=content,
+            importance=importance,
+            memory_type=memory_type,
+            ttl=ttl,
+        )
+
     def get(
         self,
         memory_id: str,
@@ -125,23 +143,32 @@ class MemoryRuntimeService(Service):
 
     def initialize(self) -> None:
         """
-        Initialize memory resources.
+        Initialize memory resources and apply persistent-store lifecycle tasks.
 
-        MemoryService currently owns no resources that require
-        initialization, so initialization only updates lifecycle state.
+        If initialization, migration, or retention fails, close the memory
+        service before propagating the original exception.
         """
         with self._lock:
             if self._initialized:
                 return
 
-            self._memory.initialize()
-            store = self._memory.manager.store
-            if isinstance(store, PersistentMemoryStore):
-                lifecycle = MemoryLifecycle(store)
-                lifecycle.migrate()
-                self._last_retention_removed = lifecycle.apply_retention(
-                    self._retention_policy
-                )
+            try:
+                self._memory.initialize()
+                store = self._memory.manager.store
+                if isinstance(store, PersistentMemoryStore):
+                    lifecycle = MemoryLifecycle(store)
+                    lifecycle.migrate()
+                    self._last_retention_removed = lifecycle.apply_retention(
+                        self._retention_policy
+                    )
+            except BaseException as initialization_error:
+                try:
+                    self._memory.close()
+                except BaseException as cleanup_error:
+                    initialization_error.add_note(
+                        f"Memory cleanup also failed: {cleanup_error!r}"
+                    )
+                raise
 
             self._initialized = True
 

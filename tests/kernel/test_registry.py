@@ -65,6 +65,7 @@ def test_registry_length():
 
     assert len(registry) == 2
 
+
 def test_register_rejects_invalid_service() -> None:
     registry = ServiceRegistry()
 
@@ -103,9 +104,7 @@ def test_concurrent_registration() -> None:
     registry = ServiceRegistry()
 
     def register(index: int) -> None:
-        registry.register(
-            DummyService(f"service-{index}")
-        )
+        registry.register(DummyService(f"service-{index}"))
 
     threads = [
         threading.Thread(
@@ -123,6 +122,7 @@ def test_concurrent_registration() -> None:
 
     assert len(registry) == 25
 
+
 def test_concurrent_duplicate_registration() -> None:
     registry = ServiceRegistry()
 
@@ -134,10 +134,7 @@ def test_concurrent_duplicate_registration() -> None:
         except Exception as exc:
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=register)
-        for _ in range(25)
-    ]
+    threads = [threading.Thread(target=register) for _ in range(25)]
 
     for thread in threads:
         thread.start()
@@ -148,7 +145,4 @@ def test_concurrent_duplicate_registration() -> None:
     assert len(registry) == 1
     assert registry.exists("shared")
     assert len(errors) == 24
-    assert all(
-        isinstance(error, DuplicateServiceError)
-        for error in errors
-    )
+    assert all(isinstance(error, DuplicateServiceError) for error in errors)

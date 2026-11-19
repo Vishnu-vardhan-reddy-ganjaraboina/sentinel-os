@@ -16,6 +16,7 @@ authors = [
 dependencies = [
     "jsonschema>=4.23,<5",
     "PyYAML>=6.0",
+    "cryptography>=45.0",
 ]
 
 [project.scripts]

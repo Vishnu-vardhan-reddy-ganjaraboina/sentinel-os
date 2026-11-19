@@ -8,9 +8,10 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sentinel.execution.exceptions import (
     ExecutionTimeoutError,
@@ -189,7 +190,9 @@ class IsolatedWorker:
                     shutil.which("bwrap") or "bwrap",
                     "--die-with-parent", "--new-session", "--unshare-net",
                     "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-                    "--tmpfs", "/tmp", "--bind", str(self._cwd), str(self._cwd),
+                    # Private tmpfs mount inside Bubblewrap's isolated namespace.
+                    "--tmpfs", "/tmp",  # nosec B108
+                    "--bind", str(self._cwd), str(self._cwd),
                     "--chdir", str(self._cwd), "--", *command,
                 ]
             return subprocess.Popen(
@@ -205,7 +208,9 @@ class IsolatedWorker:
                 shell=False,
                 start_new_session=(os.name == "posix"),
                 creationflags=(
-                    subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+                    cast(int, getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+                    if os.name == "nt"
+                    else 0
                 ),
             )
         except OSError as exc:
@@ -254,7 +259,9 @@ class _WindowsJob:
         from ctypes import wintypes
 
         self._ctypes = ctypes
-        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        get_last_error = ctypes.get_last_error
+        win_dll = cast(Callable[..., Any], ctypes.WinDLL)
+        self._kernel32 = win_dll("kernel32", use_last_error=True)
         self._kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         self._kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         self._kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -279,7 +286,7 @@ class _WindowsJob:
         self._kernel32.TerminateJobObject.restype = wintypes.BOOL
         self._handle = self._kernel32.CreateJobObjectW(None, None)
         if not self._handle:
-            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+            raise OSError(get_last_error(), "CreateJobObjectW failed")
 
         class BasicLimit(ctypes.Structure):
             _fields_ = [
@@ -325,19 +332,19 @@ class _WindowsJob:
             self._handle, 9, ctypes.byref(info), ctypes.sizeof(info)
         ):
             self.close()
-            raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+            raise OSError(get_last_error(), "SetInformationJobObject failed")
 
         access = 0x0100 | 0x0001  # PROCESS_SET_QUOTA | PROCESS_TERMINATE
         process_handle = self._kernel32.OpenProcess(access, False, pid)
         if not process_handle:
             self.close()
-            raise OSError(ctypes.get_last_error(), "OpenProcess failed")
+            raise OSError(get_last_error(), "OpenProcess failed")
         try:
             if not self._kernel32.AssignProcessToJobObject(
                 self._handle,
                 process_handle,
             ):
-                error_code = ctypes.get_last_error()
+                error_code = get_last_error()
                 self.close()
                 raise OSError(
                     error_code,

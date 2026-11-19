@@ -1,4 +1,4 @@
-"""
+﻿"""
 Intent model for Sentinel Brain.
 
 An Intent represents the structured meaning of a requested action.

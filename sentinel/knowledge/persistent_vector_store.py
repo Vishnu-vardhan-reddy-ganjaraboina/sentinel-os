@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from math import isfinite
+from threading import RLock
 
 from sentinel.knowledge.chunk import Chunk
 from sentinel.knowledge.similarity import (
@@ -22,13 +23,18 @@ from sentinel.storage.interfaces import StorageBackend
 
 class PersistentVectorStore(VectorStore):
     """
-    Persistent VectorStore implementation.
+    Thread-safe persistent VectorStore implementation.
 
-    Chunks and embeddings are serialized as JSON and persisted through
-    the configured StorageBackend.
+    Each chunk is stored as one JSON record containing:
 
-    The storage backend is injected so the vector store remains
-    independent of the concrete persistence technology.
+        {
+            "chunk": {...},
+            "embedding": [...]
+        }
+
+    Multi-chunk document replacement requires the storage backend to support
+    atomic transactions. This prevents an indexing failure from leaving a
+    partially replaced document.
     """
 
     _KEY_PREFIX = "knowledge:chunk:"
@@ -38,8 +44,14 @@ class PersistentVectorStore(VectorStore):
         backend: StorageBackend,
         similarity: SimilarityMetric | None = None,
     ) -> None:
+        self._lock = RLock()
         self._backend = backend
-        self._similarity = similarity if similarity is not None else CosineSimilarity()
+
+        self._similarity = (
+            similarity
+            if similarity is not None
+            else CosineSimilarity()
+        )
 
     @property
     def backend(self) -> StorageBackend:
@@ -47,16 +59,12 @@ class PersistentVectorStore(VectorStore):
         return self._backend
 
     def connect(self) -> None:
-        """
-        Connect the underlying storage backend.
-        """
-        self._backend.connect()
+        with self._lock:
+            self._backend.connect()
 
     def close(self) -> None:
-        """
-        Close the underlying storage backend.
-        """
-        self._backend.close()
+        with self._lock:
+            self._backend.close()
 
     def add(
         self,
@@ -64,45 +72,126 @@ class PersistentVectorStore(VectorStore):
         embedding: list[float],
     ) -> None:
         """
-        Add or replace a chunk and its embedding.
+        Add or replace one chunk.
+
+        Serialization happens before the storage mutation so invalid data
+        cannot partially modify the store.
         """
-        values = [float(value) for value in embedding]
-        if not all(isfinite(value) for value in values):
-            raise ValueError("Embedding must contain only finite values.")
-
-        payload = {
-            "chunk": {
-                "id": chunk.id,
-                "document_id": chunk.document_id,
-                "text": chunk.text,
-                "index": chunk.index,
-                "metadata": dict(chunk.metadata),
-            },
-            "embedding": values,
-        }
-
-        self._backend.set(
-            self._key(chunk.id),
-            json.dumps(payload),
+        serialized = self._serialize(
+            chunk,
+            embedding,
         )
+
+        with self._lock:
+            self._backend.set(
+                self._key(chunk.id),
+                serialized,
+            )
+
+    def replace_document(
+        self,
+        document_id: str,
+        chunks: list[tuple[Chunk, list[float]]],
+    ) -> None:
+        """
+        Atomically replace every chunk belonging to a document.
+
+        All chunks and embeddings are serialized before any mutation occurs.
+
+        The storage backend must support atomic transactions. Otherwise,
+        silently performing delete-then-insert would violate the production
+        consistency guarantee.
+        """
+        if not isinstance(document_id, str) or not document_id.strip():
+            raise ValueError("Document id cannot be empty.")
+
+        prepared: list[tuple[str, str]] = []
+        seen_ids: set[str] = set()
+
+        for chunk, embedding in chunks:
+            if chunk.document_id != document_id:
+                raise ValueError(
+                    "Chunk document ID does not match replacement "
+                    f"document ID '{document_id}'."
+                )
+
+            if chunk.id in seen_ids:
+                raise ValueError(
+                    f"Duplicate chunk ID '{chunk.id}' in replacement."
+                )
+
+            if not embedding:
+                raise ValueError("Embedding cannot be empty.")
+
+            seen_ids.add(chunk.id)
+
+            prepared.append(
+                (
+                    self._key(chunk.id),
+                    self._serialize(
+                        chunk,
+                        embedding,
+                    ),
+                )
+            )
+
+        with self._lock:
+            try:
+                transaction = self._backend.atomic()
+            except AttributeError as exc:
+                raise RuntimeError(
+                    "Storage backend does not expose atomic transactions."
+                ) from exc
+
+            try:
+                with transaction:
+                    # Prevent replacement from overwriting another
+                    # document's chunk when IDs collide.
+                    for chunk, _ in chunks:
+                        existing = self._load_locked(chunk.id)
+                        if (
+                            existing is not None
+                            and existing[0].document_id != document_id
+                        ):
+                            raise ValueError(
+                                f"Chunk ID '{chunk.id}' already belongs "
+                                "to another document."
+                            )
+
+                    old_keys = self._document_keys_locked(
+                        document_id,
+                    )
+
+                    for key in old_keys:
+                        self._backend.delete(key)
+
+                    for key, serialized in prepared:
+                        self._backend.set(
+                            key,
+                            serialized,
+                        )
+
+            except NotImplementedError as exc:
+                raise RuntimeError(
+                    "Storage backend does not support atomic document "
+                    "replacement."
+                ) from exc
 
     def delete(
         self,
         chunk_id: str,
     ) -> None:
         """
-        Delete a chunk.
+        Delete a chunk if it exists.
 
-        Deleting a missing chunk is intentionally a no-op,
-        matching InMemoryVectorStore behavior.
+        Missing chunks remain a no-op at the vector-store level.
         """
         key = self._key(chunk_id)
 
-        if self._backend.exists(key):
+        with self._lock:
             try:
                 self._backend.delete(key)
             except StorageKeyNotFoundError:
-                # Another concurrent delete may already have removed it.
                 pass
 
     def delete_document(
@@ -111,65 +200,19 @@ class PersistentVectorStore(VectorStore):
     ) -> None:
         """
         Delete all chunks belonging to a document.
+
+        This operation is serialized at the vector-store level.
         """
-        for chunk in self.list_chunks():
-            if chunk.document_id == document_id:
-                self.delete(chunk.id)
+        with self._lock:
+            keys = self._document_keys_locked(
+                document_id,
+            )
 
-    def replace_document(
-        self,
-        document_id: str,
-        chunks_with_embeddings: list[tuple[Chunk, list[float]]],
-    ) -> None:
-        """Replace a document's chunks in one backend transaction."""
-        if not document_id.strip():
-            raise ValueError("Document id cannot be empty.")
-
-        staged: list[tuple[Chunk, list[float]]] = []
-        replacement_ids: set[str] = set()
-
-        for chunk, embedding in chunks_with_embeddings:
-            if chunk.document_id != document_id:
-                raise ValueError(
-                    "Replacement chunk has a different document id."
-                )
-            if chunk.id in replacement_ids:
-                raise ValueError(
-                    f"Duplicate replacement chunk id: {chunk.id}"
-                )
-
-            values = [float(value) for value in embedding]
-            if not values:
-                raise ValueError("Embedding cannot be empty.")
-            if not all(isfinite(value) for value in values):
-                raise ValueError("Embedding must contain only finite values.")
-
-            replacement_ids.add(chunk.id)
-            staged.append((chunk, values))
-
-        with self._backend.atomic():
-            # Read current state only after acquiring the backend transaction.
-            for chunk, _ in staged:
-                existing = self._load(chunk.id)
-                if (
-                    existing is not None
-                    and existing[0].document_id != document_id
-                ):
-                    raise ValueError(
-                        f"Chunk id {chunk.id!r} belongs to another document."
-                    )
-
-            old_ids = {
-                chunk.id
-                for chunk in self.list_chunks()
-                if chunk.document_id == document_id
-            }
-
-            for chunk, embedding in staged:
-                self.add(chunk, embedding)
-
-            for chunk_id in old_ids - replacement_ids:
-                self.delete(chunk_id)
+            for key in keys:
+                try:
+                    self._backend.delete(key)
+                except StorageKeyNotFoundError:
+                    pass
 
     def search(
         self,
@@ -179,24 +222,25 @@ class PersistentVectorStore(VectorStore):
     ) -> list[Chunk]:
         """
         Return chunks ranked by similarity.
+
+        Persistent records are loaded into a stable snapshot before
+        similarity calculations.
         """
         query_embedding = [float(value) for value in embedding]
         if not all(isfinite(value) for value in query_embedding):
-            raise ValueError("Query embedding must contain only finite values.")
+            raise ValueError(
+                "Query embedding must contain only finite values."
+            )
 
         if limit <= 0:
             return []
 
+        with self._lock:
+            snapshot = self._snapshot_locked()
+
         ranked: list[tuple[float, Chunk]] = []
 
-        for chunk_id in self._chunk_ids():
-            stored = self._load(chunk_id)
-
-            if stored is None:
-                continue
-
-            chunk, stored_embedding = stored
-
+        for chunk, stored_embedding in snapshot:
             score = self._similarity.similarity(
                 query_embedding,
                 stored_embedding,
@@ -223,21 +267,19 @@ class PersistentVectorStore(VectorStore):
         self,
         chunk_id: str,
     ) -> bool:
-        """Return whether a chunk exists."""
-        return self._backend.exists(
-            self._key(chunk_id),
-        )
+        with self._lock:
+            return self._backend.exists(
+                self._key(chunk_id)
+            )
 
     def get(
         self,
         chunk_id: str,
     ) -> Chunk | None:
-        """
-        Retrieve a chunk by ID.
-
-        Returns None when the chunk does not exist.
-        """
-        stored = self._load(chunk_id)
+        with self._lock:
+            stored = self._load_locked(
+                chunk_id,
+            )
 
         if stored is None:
             return None
@@ -246,54 +288,121 @@ class PersistentVectorStore(VectorStore):
         return chunk
 
     def list_chunks(self) -> list[Chunk]:
-        """Return all persisted chunks."""
-        chunks: list[Chunk] = []
+        with self._lock:
+            snapshot = self._snapshot_locked()
 
-        for chunk_id in self._chunk_ids():
-            stored = self._load(chunk_id)
-
-            if stored is None:
-                continue
-
-            chunk, _ = stored
-            chunks.append(chunk)
-
-        return chunks
+        return [
+            chunk
+            for chunk, _ in snapshot
+        ]
 
     def clear(self) -> None:
-        """Remove all persisted knowledge chunks."""
-        for chunk_id in self._chunk_ids():
-            try:
-                self.delete(chunk_id)
-            except StorageKeyNotFoundError:
-                # Another concurrent clear may already have deleted it.
-                continue
+        with self._lock:
+            keys = self._chunk_keys_locked()
+
+            for key in keys:
+                try:
+                    self._backend.delete(key)
+                except StorageKeyNotFoundError:
+                    pass
 
     def __len__(self) -> int:
-        """Return the number of persisted chunks."""
-        return len(self._chunk_ids())
+        with self._lock:
+            return len(
+                self._chunk_keys_locked()
+            )
 
     def _key(
         self,
         chunk_id: str,
     ) -> str:
-        """Build the storage key for a chunk."""
         return f"{self._KEY_PREFIX}{chunk_id}"
 
-    def _chunk_ids(self) -> list[str]:
-        """Return IDs of all persisted knowledge chunks."""
+    def _chunk_keys_locked(self) -> list[str]:
+        """
+        Return a stable list of persisted knowledge keys.
+
+        Caller must hold ``self._lock``.
+        """
         return [
-            key.removeprefix(self._KEY_PREFIX)
+            key
             for key in self._backend.keys()
-            if key.startswith(self._KEY_PREFIX)
+            if key.startswith(
+                self._KEY_PREFIX
+            )
         ]
 
-    def _load(
+    def _document_keys_locked(
+        self,
+        document_id: str,
+    ) -> list[str]:
+        """
+        Find all chunk keys belonging to a document.
+
+        Caller must hold ``self._lock``.
+        """
+        keys: list[str] = []
+
+        for key in self._chunk_keys_locked():
+            chunk_id = key.removeprefix(
+                self._KEY_PREFIX
+            )
+
+            stored = self._load_locked(
+                chunk_id,
+            )
+
+            if stored is None:
+                continue
+
+            chunk, _ = stored
+
+            if chunk.document_id == document_id:
+                keys.append(key)
+
+        return keys
+
+    def _snapshot_locked(
+        self,
+    ) -> list[tuple[Chunk, list[float]]]:
+        """
+        Load all records into a stable snapshot.
+
+        Caller must hold ``self._lock``.
+        """
+        snapshot: list[
+            tuple[Chunk, list[float]]
+        ] = []
+
+        for key in self._chunk_keys_locked():
+            chunk_id = key.removeprefix(
+                self._KEY_PREFIX
+            )
+
+            stored = self._load_locked(
+                chunk_id,
+            )
+
+            if stored is not None:
+                chunk, embedding = stored
+
+                snapshot.append(
+                    (
+                        chunk,
+                        list(embedding),
+                    )
+                )
+
+        return snapshot
+
+    def _load_locked(
         self,
         chunk_id: str,
     ) -> tuple[Chunk, list[float]] | None:
         """
-        Load and deserialize a persisted chunk.
+        Load and validate one persisted chunk.
+
+        Caller must hold ``self._lock``.
         """
         key = self._key(chunk_id)
 
@@ -335,27 +444,39 @@ class PersistentVectorStore(VectorStore):
                 f"Stored embedding for '{chunk_id}' is invalid."
             )
 
-        required_fields = ("id", "document_id", "text", "index")
-        if any(field not in chunk_data for field in required_fields):
+        required_fields = (
+            "id",
+            "document_id",
+            "text",
+            "index",
+        )
+
+        for field_name in required_fields:
+            if field_name not in chunk_data:
+                raise ValueError(
+                    f"Stored chunk '{chunk_id}' is missing "
+                    f"'{field_name}'."
+                )
+
+        metadata = chunk_data.get(
+            "metadata",
+            {},
+        )
+
+        if not isinstance(metadata, dict):
             raise ValueError(
-                f"Stored chunk '{chunk_id}' is missing required fields."
+                f"Stored metadata for '{chunk_id}' is invalid."
             )
 
         if (
             not isinstance(chunk_data["id"], str)
             or not isinstance(chunk_data["document_id"], str)
             or not isinstance(chunk_data["text"], str)
-            or not isinstance(chunk_data["index"], int)
             or isinstance(chunk_data["index"], bool)
+            or not isinstance(chunk_data["index"], int)
         ):
             raise ValueError(
-                f"Stored chunk '{chunk_id}' contains invalid field types."
-            )
-
-        metadata = chunk_data.get("metadata", {})
-        if not isinstance(metadata, dict):
-            raise ValueError(
-                f"Stored metadata for '{chunk_id}' is invalid."
+                f"Stored chunk '{chunk_id}' has invalid field types."
             )
 
         try:
@@ -374,16 +495,70 @@ class PersistentVectorStore(VectorStore):
                 f"Stored chunk '{chunk_id}' is invalid."
             ) from exc
 
-        try:
-            embedding = [float(value) for value in embedding_data]
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(
-                f"Stored embedding for '{chunk_id}' is invalid."
-            ) from exc
+        embedding: list[float] = []
 
-        if not all(isfinite(value) for value in embedding):
-            raise ValueError(
-                f"Stored embedding for '{chunk_id}' must contain only finite values."
+        for value in embedding_data:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"Stored embedding for '{chunk_id}' "
+                    "contains an invalid numeric value."
+                ) from exc
+
+            if not isfinite(numeric):
+                raise ValueError(
+                    f"Stored embedding for '{chunk_id}' "
+                    "contains a non-finite value."
+                )
+
+            embedding.append(numeric)
+
+        return (
+            chunk,
+            embedding,
+        )
+
+    @staticmethod
+    def _serialize(
+        chunk: Chunk,
+        embedding: list[float],
+    ) -> str:
+        """
+        Serialize one chunk/embedding pair.
+
+        This intentionally serializes Chunk explicitly because Chunk does
+        not own persistence concerns and does not expose to_dict().
+        """
+        serialized_embedding: list[float] = []
+
+        for value in embedding:
+            numeric = float(value)
+
+            if not isfinite(numeric):
+                raise ValueError(
+                    "Embedding must contain only finite values."
+                )
+
+            serialized_embedding.append(
+                numeric
             )
 
-        return chunk, embedding
+        payload = {
+            "chunk": {
+                "id": chunk.id,
+                "document_id": chunk.document_id,
+                "text": chunk.text,
+                "index": chunk.index,
+                "metadata": dict(chunk.metadata),
+            },
+            "embedding": serialized_embedding,
+        }
+
+        return json.dumps(
+            payload,
+            separators=(
+                ",",
+                ":",
+            ),
+        )

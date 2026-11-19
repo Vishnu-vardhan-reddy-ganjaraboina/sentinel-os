@@ -1,4 +1,4 @@
-from math import inf, nan
+import math
 
 import pytest
 
@@ -7,6 +7,36 @@ from sentinel.knowledge.similarity import (
     DotProductSimilarity,
     EuclideanSimilarity,
 )
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        CosineSimilarity(),
+        DotProductSimilarity(),
+        EuclideanSimilarity(),
+    ],
+)
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_similarity_rejects_non_finite_values(
+    metric,
+    invalid_value,
+):
+    with pytest.raises(
+        ValueError,
+        match="finite values",
+    ):
+        metric.similarity(
+            [1.0, invalid_value],
+            [1.0, 2.0],
+        )
 
 
 def test_cosine_identical():
@@ -24,6 +54,15 @@ def test_cosine_orthogonal():
     assert metric.similarity(
         [1, 0],
         [0, 1],
+    ) == pytest.approx(0.0)
+
+
+def test_cosine_zero_vector():
+    metric = CosineSimilarity()
+
+    assert metric.similarity(
+        [0, 0],
+        [1, 2],
     ) == pytest.approx(0.0)
 
 
@@ -45,6 +84,15 @@ def test_euclidean_identical():
     ) == pytest.approx(1.0)
 
 
+def test_euclidean_different_vectors():
+    metric = EuclideanSimilarity()
+
+    assert metric.similarity(
+        [0, 0],
+        [3, 4],
+    ) == pytest.approx(1 / 6)
+
+
 def test_dimension_mismatch():
     metric = CosineSimilarity()
 
@@ -61,64 +109,22 @@ def test_empty_vector():
     with pytest.raises(ValueError):
         metric.similarity([], [])
 
-@pytest.mark.parametrize(
-    "vector",
-    [
-        [nan],
-        [inf],
-        [-inf],
-    ],
-)
-def test_cosine_rejects_non_finite_values(
-    vector: list[float],
-) -> None:
-    with pytest.raises(ValueError, match="finite"):
-        CosineSimilarity().similarity(vector, [1.0])
 
+def test_empty_left_vector():
+    metric = CosineSimilarity()
 
-@pytest.mark.parametrize(
-    "metric",
-    [
-        CosineSimilarity(),
-        DotProductSimilarity(),
-        EuclideanSimilarity(),
-    ],
-)
-def test_similarity_metrics_reject_non_finite_values(
-    metric,
-) -> None:
-    with pytest.raises(ValueError, match="finite"):
-        metric.similarity([nan], [1.0])
-
-
-def test_cosine_zero_vector() -> None:
-    assert CosineSimilarity().similarity(
-        [0.0, 0.0],
-        [1.0, 2.0],
-    ) == pytest.approx(0.0)
-
-
-def test_empty_left_vector() -> None:
     with pytest.raises(ValueError):
-        CosineSimilarity().similarity([], [1.0, 2.0])
+        metric.similarity([], [1.0])
 
 
-def test_empty_right_vector() -> None:
+def test_empty_right_vector():
+    metric = CosineSimilarity()
+
     with pytest.raises(ValueError):
-        CosineSimilarity().similarity([1.0, 2.0], [])
+        metric.similarity([1.0], [])
 
 
-def test_euclidean_different_vectors() -> None:
-    assert EuclideanSimilarity().similarity(
-        [0.0, 0.0],
-        [3.0, 4.0],
-    ) == pytest.approx(1.0 / 6.0)
-
-
-def test_valid_similarity_results_are_finite() -> None:
-    import math
-
-    vectors = ([1.0, 2.0, 3.0], [3.0, 2.0, 1.0])
+def test_valid_similarity_results_are_finite():
     metrics = (
         CosineSimilarity(),
         DotProductSimilarity(),
@@ -126,5 +132,9 @@ def test_valid_similarity_results_are_finite() -> None:
     )
 
     for metric in metrics:
-        result = metric.similarity(*vectors)
+        result = metric.similarity(
+            [1.0, 2.0, 3.0],
+            [3.0, 2.0, 1.0],
+        )
+
         assert math.isfinite(result)

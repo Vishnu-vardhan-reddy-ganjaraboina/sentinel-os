@@ -1,4 +1,4 @@
-"""
+﻿"""
 Engine implementation for the Sentinel Brain subsystem.
 """
 
@@ -15,6 +15,12 @@ from sentinel.brain.planner import BrainPlanner
 class BrainEngine(Engine):
     """
     Default Brain engine implementation.
+
+    Brain performs planning only. Capability execution belongs to downstream
+    execution/capability subsystems.
+
+    The public API exposes one engine-wide BrainState, so executions are
+    serialized to keep that state internally consistent.
     """
 
     def __init__(self) -> None:
@@ -32,12 +38,9 @@ class BrainEngine(Engine):
         with self._state_lock:
             return self._state
 
-    @state.setter
-    def state(self, value: BrainState) -> None:
-        if not isinstance(value, BrainState):
-            raise TypeError("state must be a BrainState.")
+    def _set_state(self, state: BrainState) -> None:
         with self._state_lock:
-            self._state = value
+            self._state = state
 
     def execute(
         self,
@@ -47,14 +50,13 @@ class BrainEngine(Engine):
         """
         Build and complete a Brain plan.
 
-        Brain is responsible for planning, not capability execution.
-        Concurrent executions are serialized to protect engine state.
+        Brain does not execute capabilities.
         """
         if not isinstance(context, Context):
-            raise TypeError("context must implement the Context interface.")
+            raise TypeError("context must be a Context instance.")
 
         with self._execution_lock:
-            self.state = BrainState.THINKING
+            self._set_state(BrainState.THINKING)
 
             try:
                 plan = self._planner.create_plan(
@@ -62,11 +64,11 @@ class BrainEngine(Engine):
                     context=context,
                 )
 
-                self.state = BrainState.PLANNING
+                self._set_state(BrainState.PLANNING)
 
                 plan = self._planner.mark_ready(plan)
 
-                self.state = BrainState.EXECUTING
+                self._set_state(BrainState.EXECUTING)
 
                 completed_plan = self._planner.mark_completed(plan)
 
@@ -77,10 +79,9 @@ class BrainEngine(Engine):
                     "success": True,
                 }
 
-                self.state = BrainState.COMPLETED
-
+                self._set_state(BrainState.COMPLETED)
                 return result
 
             except Exception:
-                self.state = BrainState.FAILED
+                self._set_state(BrainState.FAILED)
                 raise

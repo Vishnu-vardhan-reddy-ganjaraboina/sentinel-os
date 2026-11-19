@@ -149,3 +149,54 @@ def test_constructor_copies_supplied_metadata() -> None:
 
     assert capability.name == "Dummy"
     assert capability.enabled is True
+
+
+def test_concurrent_enable_disable() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    capability = DummyCapability()
+
+    def enable() -> None:
+        capability.enable()
+
+    def disable() -> None:
+        capability.disable()
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = []
+
+        for _ in range(100):
+            futures.append(executor.submit(enable))
+            futures.append(executor.submit(disable))
+
+        for future in futures:
+            future.result()
+
+    assert isinstance(capability.enabled, bool)
+
+
+def test_concurrent_execution_and_disable() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    capability = DummyCapability()
+
+    def execute() -> None:
+        try:
+            capability.execute(value=1)
+        except CapabilityDisabledError:
+            pass
+
+    def disable() -> None:
+        capability.disable()
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = []
+
+        for _ in range(100):
+            futures.append(executor.submit(execute))
+            futures.append(executor.submit(disable))
+
+        for future in futures:
+            future.result()
+
+    assert capability.enabled is False

@@ -343,8 +343,10 @@ class ApplicationManager:
         """
         Return health information for all registered applications.
 
-        Capture application references and lifecycle metadata under the
-        manager lock. Invoke application health code after releasing it.
+        The application/state/error snapshot is captured while holding the
+        manager lock. Application health code executes after the lock is
+        released so arbitrary application code cannot block lifecycle
+        operations.
         """
         with self._lock:
             snapshot = tuple(
@@ -363,7 +365,11 @@ class ApplicationManager:
             if state != ApplicationState.RUNNING:
                 result[name] = {
                     "healthy": False,
-                    "state": state.value if state is not None else None,
+                    "state": (
+                        state.value
+                        if state is not None
+                        else None
+                    ),
                     "error": error,
                 }
                 continue

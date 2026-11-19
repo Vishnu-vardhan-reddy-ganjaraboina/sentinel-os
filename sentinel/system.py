@@ -146,10 +146,17 @@ class System:
         application: Application,
         manifest: Any | None = None,
     ) -> None:
+        """
+        Register an application before the system starts.
+
+        Application registration is rejected while the system is running
+        or while a lifecycle transition is in progress.
+        """
         with self._lock:
             if self._starting or self._stopping:
                 raise RuntimeError(
-                    "Cannot register applications while system is transitioning."
+                    "Cannot register applications while system is "
+                    "transitioning."
                 )
 
             if self._running:
@@ -186,11 +193,16 @@ class System:
                 )
 
             if self._starting or self._stopping:
-                raise RuntimeError("Sentinel system is transitioning.")
+                raise RuntimeError(
+                    "Sentinel system is transitioning."
+                )
 
             self._starting = True
 
         try:
+            # Kernel startup is deliberately kept separate from the later
+            # rollback block. This preserves the existing behavior where
+            # Kernel-owned failure handling remains the Kernel's responsibility.
             self._kernel.boot()
         except Exception:
             with self._lock:
@@ -247,6 +259,7 @@ class System:
             with self._lock:
                 self._starting = False
                 self._running = False
+
             raise
 
         with self._lock:
@@ -272,7 +285,9 @@ class System:
         """
         with self._lock:
             if self._starting or self._stopping:
-                raise RuntimeError("Sentinel system is transitioning.")
+                raise RuntimeError(
+                    "Sentinel system is transitioning."
+                )
 
             if not self._running:
                 raise RuntimeError(

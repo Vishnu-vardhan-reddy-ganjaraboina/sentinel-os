@@ -214,3 +214,77 @@ def test_submit_failure_rolls_back_state() -> None:
     finally:
         executor._pool.submit = original_submit  # type: ignore[method-assign]
         executor.shutdown()
+
+
+def test_get_context_is_safe_during_concurrent_submissions() -> None:
+    executor = DefaultExecutor(max_workers=4)
+
+    task_ids: list[str] = []
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+
+    def submit_tasks() -> None:
+        try:
+            for _ in range(50):
+                task_id = executor.submit(add, 1, 2)
+                with lock:
+                    task_ids.append(task_id)
+        except BaseException as exc:
+            with lock:
+                errors.append(exc)
+
+    threads = [
+        threading.Thread(target=submit_tasks)
+        for _ in range(4)
+    ]
+
+    try:
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == []
+        assert len(task_ids) == 200
+
+        for task_id in task_ids:
+            context = executor.get_context(task_id)
+            assert context is not None
+    finally:
+        executor.shutdown()
+
+
+def test_cancel_only_marks_context_when_future_cancels() -> None:
+    executor = DefaultExecutor(max_workers=1)
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_task() -> None:
+        started.set()
+        release.wait(timeout=5)
+
+    try:
+        first_task = executor.submit(blocking_task)
+
+        assert started.wait(timeout=1)
+
+        second_task = executor.submit(add, 1, 2)
+
+        assert executor.cancel(second_task) is True
+
+        second_context = executor.get_context(second_task)
+        assert second_context is not None
+        assert second_context.status == TaskStatus.CANCELLED
+
+        assert executor.cancel(first_task) is False
+
+        first_context = executor.get_context(first_task)
+        assert first_context is not None
+        assert first_context.status == TaskStatus.RUNNING
+
+    finally:
+        release.set()
+        executor.shutdown()

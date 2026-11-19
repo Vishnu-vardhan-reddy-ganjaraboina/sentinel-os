@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from sentinel.knowledge.embeddings import (
@@ -30,3 +32,31 @@ def test_dimension():
 def test_invalid_dimension():
     with pytest.raises(ValueError):
         DummyEmbeddingProvider(0)
+
+def test_concurrent_embedding_calls() -> None:
+    provider = DummyEmbeddingProvider(16)
+
+    texts = [
+        "Sentinel",
+        "Knowledge",
+        "Indexer",
+        "Retriever",
+        "Runtime",
+        "Vector Store",
+        "Kernel",
+        "Platform",
+    ]
+
+    def embed(text: str) -> list[float]:
+        return provider.embed(text)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(
+            executor.map(embed, texts),
+        )
+
+    assert len(results) == len(texts)
+
+    for text, vector in zip(texts, results, strict=True):
+        assert len(vector) == 16
+        assert vector == [float(len(text))] * 16

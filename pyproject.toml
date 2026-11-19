@@ -13,13 +13,19 @@ authors = [
     { name = "Vishnu Vardhan Reddy" }
 ]
 
-dependencies = ["PyYAML>=6.0", "jsonschema>=4.23,<5"]
+dependencies = [
+    "jsonschema>=4.23,<5",
+    "PyYAML>=6.0",
+    "cryptography>=45.0",
+]
 
 [project.scripts]
 sentinel = "sentinel.cli.main:main"
 
 [project.optional-dependencies]
-semantic = ["sentence-transformers>=5,<6"]
+semantic = [
+    "sentence-transformers>=5,<6",
+]
 dev = [
     "pytest>=9.0",
     "pytest-cov>=7.0",
@@ -107,6 +113,10 @@ disallow_untyped_defs = true
 
 no_implicit_optional = true
 
+[[tool.mypy.overrides]]
+module = ["sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+
 # -------------------------------------------------------------------
 # Setuptools
 # -------------------------------------------------------------------
@@ -125,7 +135,3 @@ exclude = [
     "tools*",
     "scripts*",
 ]
-
-[[tool.mypy.overrides]]
-module = ["sentence_transformers", "sentence_transformers.*"]
-ignore_missing_imports = true

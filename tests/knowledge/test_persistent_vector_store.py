@@ -720,7 +720,7 @@ def test_persisted_chunk_rejects_missing_required_field(
         ),
     )
 
-    with pytest.raises(ValueError, match="missing required fields"):
+    with pytest.raises(ValueError, match="missing 'index'"):
         store.get("broken")
 
 

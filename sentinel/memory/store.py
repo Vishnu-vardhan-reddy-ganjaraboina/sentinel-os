@@ -36,13 +36,22 @@ class InMemoryStore(Memory):
         """
         with self._lock:
             if entry.id in self._entries:
-                raise MemoryAlreadyExistsError(f"Memory '{entry.id}' already exists.")
+                raise MemoryAlreadyExistsError(
+                    f"Memory '{entry.id}' already exists."
+                )
+
             self._entries[entry.id] = entry
 
     def upsert(self, entry: MemoryEntry) -> None:
-        """Insert or atomically replace an entry by ID."""
+        """Insert or replace a memory entry atomically."""
         with self._lock:
             self._entries[entry.id] = entry
+
+    def connect(self) -> None:
+        """Connect to the in-memory store (no operation required)."""
+
+    def close(self) -> None:
+        """Close the in-memory store (no operation required)."""
 
     def get(self, memory_id: str) -> MemoryEntry:
         """
@@ -70,7 +79,10 @@ class InMemoryStore(Memory):
         """
         with self._lock:
             if memory_id not in self._entries:
-                raise MemoryNotFoundError(f"Memory '{memory_id}' was not found.")
+                raise MemoryNotFoundError(
+                    f"Memory '{memory_id}' was not found."
+                )
+
             del self._entries[memory_id]
 
     def exists(self, memory_id: str) -> bool:
@@ -86,6 +98,7 @@ class InMemoryStore(Memory):
         Other content types are converted to strings.
         """
         normalized = keyword.strip().lower()
+
         if not normalized:
             return []
 
@@ -120,7 +133,11 @@ class InMemoryStore(Memory):
 
     def __contains__(self, memory_id: object) -> bool:
         """Support ``memory_id in store``."""
-        return isinstance(memory_id, str) and self.exists(memory_id)
+        if not isinstance(memory_id, str):
+            return False
+
+        with self._lock:
+            return memory_id in self._entries
 
     def __len__(self) -> int:
         """Return the number of stored entries."""

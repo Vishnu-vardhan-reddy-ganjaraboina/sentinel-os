@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -302,6 +303,181 @@ def test_query_rejects_invalid_query(tmp_path: Path) -> None:
         store.query("invalid")  # type: ignore[arg-type]
 
     store.close()
+def test_concurrent_appends_are_serialized(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = SQLiteControlAuditStore(tmp_path / "audit.db")
+
+    event_count = 100
+
+    def append_event(index: int) -> None:
+        store.append(
+            make_event(
+                caller_id=f"user-{index}",
+                command=f"service.status.{index}",
+            )
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(append_event, range(event_count)))
+
+        events = store.events()
+
+        assert len(events) == event_count
+        assert {
+            event.caller_id
+            for event in events
+        } == {
+            f"user-{index}"
+            for index in range(event_count)
+        }
+    finally:
+        store.close()
+
+
+def test_concurrent_append_and_query_are_safe(
+    tmp_path: Path,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = SQLiteControlAuditStore(tmp_path / "audit.db")
+
+    event_count = 100
+
+    def append_event(index: int) -> None:
+        store.append(
+            make_event(
+                caller_id=f"user-{index}",
+                command="service.status",
+            )
+        )
+
+    def query_events(_: int) -> tuple[ControlAuditEvent, ...]:
+        return store.query(
+            ControlAuditQuery(command="service.status")
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            append_futures = [
+                executor.submit(append_event, index)
+                for index in range(event_count)
+            ]
+
+            query_futures = [
+                executor.submit(query_events, index)
+                for index in range(event_count)
+            ]
+
+            for future in append_futures:
+                future.result()
+
+            for future in query_futures:
+                future.result()
+
+        assert len(store.events()) == event_count
+    finally:
+        store.close()
+
+
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    store = SQLiteControlAuditStore(tmp_path / "audit.db")
+
+    store.close()
+    store.close()
+    store.disconnect()
+    store.disconnect()
+
+    with pytest.raises(RuntimeError):
+        store.events()
+
+
+def test_reconnect_preserves_persisted_events(tmp_path: Path) -> None:
+    database = tmp_path / "audit.db"
+    store = SQLiteControlAuditStore(database)
+
+    event = make_event()
+
+    store.append(event)
+    store.close()
+
+    store.connect()
+
+    try:
+        assert store.events() == (event,)
+    finally:
+        store.close()
+
+
+def test_multiple_store_instances_can_persist(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "audit.db"
+
+    first = SQLiteControlAuditStore(database)
+    second = SQLiteControlAuditStore(database)
+
+    first_event = make_event(caller_id="first")
+    second_event = make_event(caller_id="second")
+
+    try:
+        first.append(first_event)
+        second.append(second_event)
+
+        assert first.events() == (
+            first_event,
+            second_event,
+        )
+
+        assert second.events() == (
+            first_event,
+            second_event,
+        )
+    finally:
+        first.close()
+        second.close()
+
+def test_append_sql_failure_rolls_back_transaction(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteControlAuditStore(tmp_path / "audit.db")
+
+    event = make_event(caller_id="recovered")
+
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            store._connection.execute(  # type: ignore[union-attr]
+                """
+                INSERT INTO control_audit_events (
+                    timestamp,
+                    caller_id,
+                    caller_type,
+                    command,
+                    success,
+                    data,
+                    error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    None,
+                    "invalid",
+                    "user",
+                    "service.status",
+                    1,
+                    "{}",
+                    None,
+                ),
+            )
+
+        store._connection.rollback()  # type: ignore[union-attr]
+
+        store.append(event)
+
+        assert store.events() == (event,)
+    finally:
+        store.close()
 
 
 def test_nested_audit_data_round_trips_through_sqlite(

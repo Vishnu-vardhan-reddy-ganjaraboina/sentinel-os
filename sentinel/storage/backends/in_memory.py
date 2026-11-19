@@ -1,8 +1,5 @@
 """
 Thread-safe in-memory storage backend for Sentinel OS.
-
-This module provides the low-level in-memory implementation of the
-StorageBackend contract.
 """
 
 from __future__ import annotations
@@ -25,11 +22,12 @@ class MemoryBackend(StorageBackend):
     Thread-safe in-memory storage backend.
 
     Characteristics:
+
         - Thread-safe operations.
         - Deep-copy protection on reads and writes.
         - Explicit lifecycle management.
         - Deterministic error handling after close.
-        - No external resources.
+        - Atomic transaction support.
     """
 
     def __init__(self) -> None:
@@ -41,9 +39,8 @@ class MemoryBackend(StorageBackend):
         """
         Open the backend.
 
-        A MemoryBackend can be reconnected after being closed.
-        Reconnecting starts with an empty store because close()
-        intentionally clears all in-memory data.
+        Reconnecting after close starts with an empty store because
+        close/disconnect intentionally clears in-memory data.
         """
         with self._lock:
             self._closed = False
@@ -57,9 +54,7 @@ class MemoryBackend(StorageBackend):
             self._closed = True
 
     def exists(self, key: str) -> bool:
-        """
-        Return whether a key exists.
-        """
+        """Return whether a key exists."""
         self._validate_key(key)
         self._ensure_open()
 
@@ -70,13 +65,7 @@ class MemoryBackend(StorageBackend):
         """
         Retrieve a value.
 
-        Raises:
-            ValueError:
-                If the key is invalid.
-            StorageBackendError:
-                If the backend is closed.
-            StorageKeyNotFoundError:
-                If the key does not exist.
+        Returns a defensive copy.
         """
         self._validate_key(key)
         self._ensure_open()
@@ -95,8 +84,7 @@ class MemoryBackend(StorageBackend):
         """
         Store or replace a value.
 
-        Values are deep-copied before storage to prevent callers
-        from mutating internal state.
+        Values are deep-copied before storage.
         """
         self._validate_key(key)
         self._ensure_open()
@@ -111,10 +99,6 @@ class MemoryBackend(StorageBackend):
         Delete a key.
 
         Raises:
-            ValueError:
-                If the key is invalid.
-            StorageBackendError:
-                If the backend is closed.
             StorageKeyNotFoundError:
                 If the key does not exist.
         """
@@ -130,18 +114,14 @@ class MemoryBackend(StorageBackend):
             del self._storage[key]
 
     def clear(self) -> None:
-        """
-        Remove all stored values.
-        """
+        """Remove all stored values."""
         self._ensure_open()
 
         with self._lock:
             self._storage.clear()
 
     def keys(self) -> list[str]:
-        """
-        Return all stored keys.
-        """
+        """Return all stored keys."""
         self._ensure_open()
 
         with self._lock:
@@ -149,10 +129,19 @@ class MemoryBackend(StorageBackend):
 
     @contextmanager
     def atomic(self) -> Iterator[None]:
-        """Run operations atomically and restore state on failure."""
+        """
+        Execute operations atomically.
+
+        The entire transaction holds the backend lock, preventing another
+        thread from observing an intermediate state.
+
+        A deep snapshot is retained for rollback.
+        """
         with self._lock:
             self._ensure_open()
+
             snapshot = deepcopy(self._storage)
+
             try:
                 yield
             except BaseException:
@@ -160,37 +149,23 @@ class MemoryBackend(StorageBackend):
                 raise
 
     def close(self) -> None:
-        """
-        Close the backend.
-
-        Closing clears all in-memory data. Any subsequent
-        operation fails with StorageBackendError.
-        """
+        """Close the backend."""
         self.disconnect()
 
     def save(self, key: str, value: Any) -> None:
-        """
-        Backward-compatible alias for set().
-        """
+        """Backward-compatible alias for set()."""
         self.set(key, value)
 
     def load(self, key: str) -> Any:
-        """
-        Backward-compatible alias for get().
-        """
+        """Backward-compatible alias for get()."""
         return self.get(key)
 
     def __len__(self) -> int:
-        """
-        Return the number of stored values.
-        """
+        """Return the number of stored values."""
         with self._lock:
             return len(self._storage)
 
     def _ensure_open(self) -> None:
-        """
-        Ensure the backend is available.
-        """
         if self._closed:
             raise StorageBackendError(
                 "MemoryBackend has been closed."
@@ -198,9 +173,6 @@ class MemoryBackend(StorageBackend):
 
     @staticmethod
     def _validate_key(key: str) -> None:
-        """
-        Validate a storage key.
-        """
         if not isinstance(key, str):
             raise ValueError(
                 "Storage key must be a string."

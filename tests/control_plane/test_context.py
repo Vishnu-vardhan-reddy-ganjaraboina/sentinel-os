@@ -93,8 +93,6 @@ def test_context_accepts_caller_type_enum() -> None:
     assert context.caller_type is ControlCallerType.AI_AGENT
 
 
-
-
 def test_context_preserves_unknown_caller_type() -> None:
     context = ControlContext(
         caller_id="test",

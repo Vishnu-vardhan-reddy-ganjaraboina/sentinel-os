@@ -140,4 +140,3 @@ def test_request_deep_copies_nested_data() -> None:
     data["options"]["mode"] = "changed"
 
     assert request.data == {"options": {"mode": "safe"}}
-

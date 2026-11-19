@@ -1,5 +1,13 @@
 """
 Capability registry for the Sentinel Capabilities subsystem.
+
+The registry is responsible for:
+- capability registration
+- capability removal
+- capability lookup
+- capability discovery
+- thread-safe access
+- stable snapshots for readers
 """
 
 from __future__ import annotations
@@ -21,6 +29,17 @@ CapabilityList = list[BaseCapability]
 class CapabilityRegistry:
     """
     Thread-safe registry for Sentinel capabilities.
+
+    Concurrency model
+    -----------------
+    Mutating operations are protected by an RLock.
+
+    Read operations take the same lock while accessing the underlying
+    dictionary. Collection-returning operations return snapshots so the
+    caller never receives a live view of the registry.
+
+    The lock is never held while a caller consumes an iterator or while
+    a capability executes.
     """
 
     def __init__(self) -> None:
@@ -33,6 +52,11 @@ class CapabilityRegistry:
     ) -> None:
         """
         Register a capability.
+
+        Raises
+        ------
+        CapabilityAlreadyExistsError
+            If another capability with the same ID is already registered.
         """
         if not isinstance(capability, BaseCapability):
             raise TypeError(
@@ -55,14 +79,17 @@ class CapabilityRegistry:
     ) -> None:
         """
         Remove a capability.
+
+        Raises
+        ------
+        CapabilityNotFoundError
+            If the capability is not registered.
         """
         self._validate_capability_id(capability_id)
 
         with self._lock:
             if capability_id not in self._capabilities:
-                raise CapabilityNotFoundError(
-                    capability_id
-                )
+                raise CapabilityNotFoundError(capability_id)
 
             del self._capabilities[capability_id]
 
@@ -70,7 +97,14 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> BaseCapability:
-        """Return a capability."""
+        """
+        Return a registered capability.
+
+        Raises
+        ------
+        CapabilityNotFoundError
+            If the capability is not registered.
+        """
         self._validate_capability_id(capability_id)
 
         with self._lock:
@@ -85,7 +119,9 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> bool:
-        """Check whether a capability exists."""
+        """
+        Check whether a capability is registered.
+        """
         self._validate_capability_id(capability_id)
 
         with self._lock:
@@ -94,7 +130,9 @@ class CapabilityRegistry:
     def list(
         self,
     ) -> CapabilityList:
-        """Return all registered capabilities."""
+        """
+        Return a stable snapshot of all registered capabilities.
+        """
         with self._lock:
             return list(self._capabilities.values())
 
@@ -102,7 +140,9 @@ class CapabilityRegistry:
         self,
         category: CapabilityCategory,
     ) -> CapabilityList:
-        """Return capabilities belonging to a category."""
+        """
+        Return a stable snapshot of capabilities in a category.
+        """
         if not isinstance(category, CapabilityCategory):
             raise TypeError(
                 "category must be a CapabilityCategory."
@@ -140,20 +180,41 @@ class CapabilityRegistry:
         self,
         capability_id: str,
     ) -> bool:
+        """
+        Support ``capability_id in registry``.
+        """
         self._validate_capability_id(capability_id)
 
         with self._lock:
             return capability_id in self._capabilities
 
     def __len__(self) -> int:
+        """
+        Return the number of registered capabilities.
+        """
         with self._lock:
             return len(self._capabilities)
+
+    def __iter__(self) -> Iterator[BaseCapability]:
+        """
+        Iterate over a stable registry snapshot.
+
+        The registry lock is released before the caller consumes the
+        iterator. Therefore concurrent registration/unregistration cannot
+        invalidate the iterator.
+        """
+        with self._lock:
+            snapshot = tuple(self._capabilities.values())
+
+        return iter(snapshot)
 
     @staticmethod
     def _validate_capability_id(
         capability_id: str,
     ) -> None:
-        """Validate a capability identifier."""
+        """
+        Validate a capability identifier.
+        """
         if not isinstance(capability_id, str):
             raise TypeError(
                 "capability_id must be a string."
@@ -163,6 +224,3 @@ class CapabilityRegistry:
             raise ValueError(
                 "capability_id cannot be empty."
             )
-
-    def __iter__(self) -> Iterator[BaseCapability]:
-        return iter(self.list())

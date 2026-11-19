@@ -31,7 +31,9 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
             raise ValueError("batch_size must be a positive integer.")
 
         try:
-            from sentence_transformers import SentenceTransformer
+            from sentence_transformers import (
+                SentenceTransformer,
+            )
         except ImportError as exc:
             raise ImportError(
                 "Local embeddings require the optional dependency. "

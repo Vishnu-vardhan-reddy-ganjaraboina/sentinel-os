@@ -97,7 +97,8 @@ class OrchestrationManager:
         self,
     ) -> Callable[[OrchestrationRequest], Any] | None:
         """Return the configured custom handler."""
-        return self._handler
+        with self._state_lock:
+            return self._handler
 
     @property
     def brain(self) -> BrainManager:
@@ -142,8 +143,10 @@ class OrchestrationManager:
 
         try:
             try:
-                if self._handler is not None:
-                    result = self._handler(request)
+                handler = self.handler
+
+                if handler is not None:
+                    result = handler(request)
                 else:
                     result = self._execute_with_brain(request)
 

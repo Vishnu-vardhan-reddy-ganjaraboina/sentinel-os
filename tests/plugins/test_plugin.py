@@ -165,7 +165,6 @@ def test_invalid_version_type() -> None:
             version=123,  # type: ignore[arg-type]
         )
 
-
 def test_concurrent_load_only_one_transition_succeeds() -> None:
     plugin = SentinelPlugin("sample")
 
@@ -202,6 +201,7 @@ def test_concurrent_load_only_one_transition_succeeds() -> None:
     assert successes == 1
     assert failures == 19
     assert plugin.state == PluginState.LOADED
+
 
 def test_concurrent_enable_only_one_transition_succeeds() -> None:
     plugin = SentinelPlugin("sample")
@@ -241,6 +241,7 @@ def test_concurrent_enable_only_one_transition_succeeds() -> None:
     assert failures == 19
     assert plugin.state == PluginState.ENABLED
 
+
 def test_concurrent_disable_only_one_transition_succeeds() -> None:
     plugin = SentinelPlugin("sample")
     plugin.load()
@@ -279,6 +280,7 @@ def test_concurrent_disable_only_one_transition_succeeds() -> None:
     assert successes == 1
     assert failures == 19
     assert plugin.state == PluginState.DISABLED
+
 
 def test_concurrent_unload_only_one_transition_succeeds() -> None:
     plugin = SentinelPlugin("sample")

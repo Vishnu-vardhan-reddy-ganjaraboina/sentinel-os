@@ -28,10 +28,13 @@ class DefaultExecutor(Executor):
         max_workers: int = DEFAULT_MAX_WORKERS,
     ) -> None:
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
+
         self._contexts: dict[str, ExecutionContext] = {}
         self._futures: dict[str, Future[Any]] = {}
+
         self._shutdown = False
         self._lock = Lock()
+
         self._submitted = 0
         self._completed = 0
         self._failed = 0
@@ -43,16 +46,26 @@ class DefaultExecutor(Executor):
         *args: Any,
         **kwargs: Any,
     ) -> str:
-        task = Task(callback=callback, args=args, kwargs=kwargs)
+        task = Task(
+            callback=callback,
+            args=args,
+            kwargs=kwargs,
+        )
+
         context = ExecutionContext(task.task_id)
 
         with self._lock:
             self._ensure_accepting_work()
+
             self._contexts[task.task_id] = context
             self._submitted += 1
 
             try:
-                future = self._pool.submit(self._run_task, task, context)
+                future = self._pool.submit(
+                    self._run_task,
+                    task,
+                    context,
+                )
             except BaseException:
                 self._contexts.pop(task.task_id, None)
                 self._submitted -= 1
@@ -67,6 +80,7 @@ class DefaultExecutor(Executor):
 
         with self._lock:
             self._ensure_accepting_work()
+
             self._contexts[task.task_id] = context
             self._submitted += 1
 
@@ -96,26 +110,37 @@ class DefaultExecutor(Executor):
 
             raise
 
-    def cancel(self, task_id: str) -> bool:
+    def cancel(
+        self,
+        task_id: str,
+    ) -> bool:
         with self._lock:
             future = self._futures.get(task_id)
 
             if future is None:
                 return False
 
-            if not future.cancel():
+            cancelled = future.cancel()
+
+            if not cancelled:
                 return False
 
             context = self._contexts.get(task_id)
+
             if context is not None:
                 context.mark_cancelled()
 
             self._cancelled += 1
+
             return True
 
-    def is_running(self, task_id: str) -> bool:
+    def is_running(
+        self,
+        task_id: str,
+    ) -> bool:
         with self._lock:
             context = self._contexts.get(task_id)
+
             return (
                 context is not None
                 and context.status == TaskStatus.RUNNING
@@ -129,7 +154,9 @@ class DefaultExecutor(Executor):
             return self._contexts.get(task_id)
 
     def stats(self) -> dict[str, int]:
-        """Return executor statistics."""
+        """
+        Return executor statistics.
+        """
         with self._lock:
             running = sum(
                 1

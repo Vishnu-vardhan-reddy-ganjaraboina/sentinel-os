@@ -1,4 +1,4 @@
-import threading
+﻿import threading
 
 from sentinel.storage.cache import LRUCache
 
@@ -129,3 +129,4 @@ def test_concurrent_puts():
 
     for index in range(100):
         assert cache.get(index) == index
+

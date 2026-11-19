@@ -50,6 +50,12 @@ class SimilarityMetric(ABC):
         if not all(isfinite(value) for value in right):
             raise ValueError("Vectors must contain only finite values.")
 
+        for value in (*left, *right):
+            if not isfinite(value):
+                raise ValueError(
+                    "Vectors must contain only finite values."
+                )
+
 
 class CosineSimilarity(SimilarityMetric):
     """

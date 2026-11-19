@@ -1,4 +1,4 @@
-﻿"""
+"""
 Local TCP control server for Sentinel OS.
 """
 

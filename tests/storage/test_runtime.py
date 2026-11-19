@@ -142,4 +142,3 @@ def test_shutdown_failure_retains_manager_for_cleanup_retry(
 
     disconnect.assert_called_with()
     assert service.health()["healthy"] is False
-

@@ -25,8 +25,8 @@ class SentinelPlugin(Plugin):
     """
     Default implementation of a Sentinel plugin.
 
-    The plugin enforces its own lifecycle state transitions so direct
-    lifecycle calls cannot bypass the Plugin state machine.
+    The plugin owns its lifecycle state machine and synchronizes every
+    lifecycle transition so concurrent callers cannot corrupt state.
     """
 
     def __init__(
@@ -35,7 +35,6 @@ class SentinelPlugin(Plugin):
         plugin_type: PluginType = PluginType.USER,
         version: str = DEFAULT_PLUGIN_VERSION,
     ) -> None:
-
         if not isinstance(name, str):
             raise TypeError("name must be a string")
 
@@ -76,7 +75,7 @@ class SentinelPlugin(Plugin):
 
     def load(self) -> None:
         """
-        Transition the plugin from REGISTERED to LOADED.
+        Transition REGISTERED -> LOADED atomically.
         """
         with self._lock:
             if self._state != PluginState.REGISTERED:
@@ -89,7 +88,7 @@ class SentinelPlugin(Plugin):
 
     def enable(self) -> None:
         """
-        Transition the plugin from LOADED to ENABLED.
+        Transition LOADED -> ENABLED atomically.
         """
         with self._lock:
             if self._state != PluginState.LOADED:
@@ -102,7 +101,7 @@ class SentinelPlugin(Plugin):
 
     def disable(self) -> None:
         """
-        Transition the plugin from ENABLED to DISABLED.
+        Transition ENABLED -> DISABLED atomically.
         """
         with self._lock:
             if self._state != PluginState.ENABLED:
@@ -115,7 +114,7 @@ class SentinelPlugin(Plugin):
 
     def unload(self) -> None:
         """
-        Transition the plugin from LOADED or DISABLED to UNLOADED.
+        Transition LOADED or DISABLED -> UNLOADED atomically.
         """
         with self._lock:
             if self._state not in (
@@ -130,6 +129,9 @@ class SentinelPlugin(Plugin):
             self._state = PluginState.UNLOADED
 
     def to_dict(self) -> dict[str, Any]:
+        """
+        Return a consistent snapshot of plugin metadata.
+        """
         with self._lock:
             return {
                 "name": self._name,

@@ -32,6 +32,11 @@ class CapabilityManager:
         )
 
 
+    @property
+    def registry(self) -> CapabilityRegistry:
+        """Return the capability registry."""
+        return self._registry
+
     def register(
         self,
         capability: BaseCapability,

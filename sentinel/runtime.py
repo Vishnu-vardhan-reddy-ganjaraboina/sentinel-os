@@ -1,4 +1,4 @@
-﻿"""
+"""
 Runtime composition for Sentinel OS.
 """
 
@@ -33,7 +33,7 @@ from sentinel.security.manager import SecurityManager
 from sentinel.storage.backends.sqlite import SQLiteBackend
 from sentinel.storage.runtime import StorageRuntimeService
 
-TService = TypeVar("TService", bound=Service)
+_ServiceT = TypeVar("_ServiceT", bound=Service)
 
 
 class Runtime:
@@ -112,8 +112,8 @@ class Runtime:
     def get_typed(
         self,
         name: str,
-        service_type: type[TService],
-    ) -> TService:
+        service_type: type[_ServiceT],
+    ) -> _ServiceT:
         """
         Return a composed service validated against an expected type.
 
@@ -349,7 +349,7 @@ class RuntimeComposer:
             )
 
         raise ValueError(
-            f"Unsupported knowledge embedding provider: '{provider}'."
+            f"Unsupported knowledge embedding provider: {provider!r}."
         )
 
     @staticmethod

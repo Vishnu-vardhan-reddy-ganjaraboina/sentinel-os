@@ -93,6 +93,7 @@ def test_shutdown() -> None:
 
     assert monitor.get_all_health() == {}
 
+
 def test_duplicate_service_rejected() -> None:
     monitor = Monitor()
 
@@ -180,6 +181,7 @@ def test_shutdown_rejects_future_operations() -> None:
 
     with pytest.raises(ServiceNotFoundError):
         monitor.get_health("kernel")
+
 
 def test_sync_kernel_registers_running_services() -> None:
     monitor = Monitor()

@@ -294,7 +294,7 @@ class Monitor(Service):
         """
         Return a registered service.
 
-        This method must be called while holding ``self._lock``.
+        This method must be called while holding `self._lock`.
         """
         try:
             return self._services[service_name]

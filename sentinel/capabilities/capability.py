@@ -28,6 +28,11 @@ class BaseCapability(Capability):
         self,
         metadata: CapabilityMetadata,
     ) -> None:
+        if not isinstance(metadata, CapabilityMetadata):
+            raise TypeError(
+                "metadata must be a CapabilityMetadata instance."
+            )
+
         self._metadata = deepcopy(metadata)
         self._state_lock = RLock()
 

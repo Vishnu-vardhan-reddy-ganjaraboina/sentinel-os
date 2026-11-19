@@ -9,7 +9,7 @@ from typing import Any
 
 from sentinel.memory.constants import MemoryType
 from sentinel.memory.entry import BaseMemoryEntry
-from sentinel.memory.interfaces import MemoryEntry
+from sentinel.memory.interfaces import Memory, MemoryEntry
 from sentinel.memory.store import InMemoryStore
 
 
@@ -23,12 +23,12 @@ class MemoryManager:
 
     def __init__(
         self,
-        store: InMemoryStore | None = None,
+        store: Memory | None = None,
     ) -> None:
         self._store = store if store is not None else InMemoryStore()
 
     @property
-    def store(self) -> InMemoryStore:
+    def store(self) -> Memory:
         """Return the underlying memory store."""
         return self._store
 
@@ -73,8 +73,17 @@ class MemoryManager:
             memory_type=memory_type,
             ttl=ttl,
         )
-        self._store.upsert(entry)
+        self._upsert_entry(entry)
         return entry
+
+    def _upsert_entry(self, entry: MemoryEntry) -> None:
+        """Persist an entry when the configured store supports upsert."""
+        operation = getattr(self._store, "upsert", None)
+        if not callable(operation):
+            raise TypeError(
+                "The configured memory store does not support upsert()."
+            )
+        operation(entry)
 
     def get(
         self,
@@ -123,7 +132,12 @@ class MemoryManager:
         Archive a memory entry and return it.
         """
         entry = self._store.get(memory_id)
+        if not callable(getattr(self._store, "upsert", None)):
+            raise TypeError(
+                "The configured memory store does not support upsert()."
+            )
         entry.archive()
+        self._upsert_entry(entry)
         return entry
 
     def delete(
@@ -134,17 +148,34 @@ class MemoryManager:
         Mark a memory entry as deleted and return it.
         """
         entry = self._store.get(memory_id)
+        if not callable(getattr(self._store, "upsert", None)):
+            raise TypeError(
+                "The configured memory store does not support upsert()."
+            )
         entry.delete()
+        self._upsert_entry(entry)
         return entry
 
     def clear(self) -> None:
         """Remove all memory entries."""
         self._store.clear()
 
+    def connect(self) -> None:
+        """Initialize optional backing-store resources."""
+        operation = getattr(self._store, "connect", None)
+        if callable(operation):
+            operation()
+
+    def close(self) -> None:
+        """Release optional backing-store resources."""
+        operation = getattr(self._store, "close", None)
+        if callable(operation):
+            operation()
+
     def list(self) -> list[MemoryEntry]:
         """Return all stored memory entries."""
         return self._store.list()
 
     def __len__(self) -> int:
-        """Return the number of stored memory entries."""
-        return len(self._store)
+        """Return the number of stored entries."""
+        return len(self._store.list())

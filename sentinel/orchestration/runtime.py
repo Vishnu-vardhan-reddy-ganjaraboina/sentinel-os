@@ -90,7 +90,9 @@ class OrchestrationRuntimeService(Service):
         """
         Execute an orchestration request.
 
-        Delegates directly to the underlying OrchestrationService.
+        Lifecycle synchronization protects only the lifecycle state;
+        actual request execution remains delegated to the orchestration
+        service.
         """
         return self._orchestration.execute(request)
 
@@ -100,8 +102,6 @@ class OrchestrationRuntimeService(Service):
     ) -> bool:
         """
         Return whether an orchestration request can be executed.
-
-        Delegates directly to the underlying OrchestrationService.
         """
         return self._orchestration.can_execute(request)
 
@@ -109,8 +109,7 @@ class OrchestrationRuntimeService(Service):
         """
         Initialize orchestration resources.
 
-        The current orchestration service owns no external resources,
-        so initialization only updates lifecycle state.
+        Initialization is idempotent and synchronized.
         """
         with self._lifecycle_lock:
             if self._initialized:
@@ -122,8 +121,7 @@ class OrchestrationRuntimeService(Service):
         """
         Shut down orchestration resources.
 
-        Shutdown is idempotent because the current service owns
-        no external resources.
+        Shutdown is idempotent and synchronized.
         """
         with self._lifecycle_lock:
             if not self._initialized:
@@ -132,8 +130,12 @@ class OrchestrationRuntimeService(Service):
             self._initialized = False
 
     def health(self) -> dict[str, bool]:
-        """Return orchestration service health information."""
+        """
+        Return orchestration service health information.
+        """
         with self._lifecycle_lock:
-            return {
-                "healthy": self._initialized,
-            }
+            initialized = self._initialized
+
+        return {
+            "healthy": initialized,
+        }

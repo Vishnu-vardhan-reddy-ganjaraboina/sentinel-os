@@ -20,6 +20,10 @@ from sentinel.storage.exceptions import (
 from sentinel.storage.interfaces import StorageBackend
 from sentinel.storage.serializers import JsonSerializer
 
+# Backends targeting the same database share a process-wide lock.
+_DATABASE_LOCKS: dict[Path, RLock] = {}
+_DATABASE_LOCKS_GUARD = RLock()
+
 
 class SQLiteBackend(StorageBackend):
     """
@@ -33,9 +37,15 @@ class SQLiteBackend(StorageBackend):
         self,
         database: str | Path,
     ) -> None:
-        self._database = Path(database)
+        self._database = Path(database).expanduser().resolve()
         self._connection: sqlite3.Connection | None = None
-        self._lock = RLock()
+
+        with _DATABASE_LOCKS_GUARD:
+            self._lock = _DATABASE_LOCKS.setdefault(
+                self._database,
+                RLock(),
+            )
+
         self._serializer = JsonSerializer()
         self._transaction_depth = 0
 
@@ -77,6 +87,7 @@ class SQLiteBackend(StorageBackend):
 
                 connection.commit()
                 self._connection = connection
+                self._transaction_depth = 0
 
             except sqlite3.Error as exc:
                 if connection is not None:

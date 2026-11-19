@@ -91,7 +91,13 @@ class ExecutionService:
         return self._executor.get_context(task_id)
 
     def shutdown(self) -> None:
-        """Shut down the executor and process manager."""
+        """
+        Shut down all execution resources.
+
+        Executor and process resources are both released. If multiple
+        resources fail during shutdown, the first failure is preserved
+        while cleanup of the remaining resource is still attempted.
+        """
         failures: list[BaseException] = []
 
         for component in (self._executor, self._process_manager):

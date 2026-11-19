@@ -215,14 +215,13 @@ class KernelController:
 
             return self._audit_result(request, result)
 
-        except Exception:
+        except Exception as exc:
             result = ControlResult(
                 success=False,
                 command=request.command.value,
-                error=f"Command '{request.command.value}' failed.",
+                error=str(exc),
             )
-
-            return self._audit_result(request, result)
+        return self._audit_result(request, result)
 
     def _authorize(
         self,
@@ -282,6 +281,8 @@ class KernelController:
         """
         Execute a validated and authorized request and audit the result.
         """
+        preserve_error = False
+
         try:
             result = self._dispatch(
                 request.command,
@@ -296,20 +297,36 @@ class KernelController:
             )
 
         except ServiceNotFoundError as exc:
+            preserve_error = True
             result = ControlResult(
                 success=False,
                 command=request.command.value,
                 error=str(exc),
             )
 
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            safe_validation_errors = {
+                "Command requires a non-empty 'service' value.",
+                "Service value must be a string.",
+            }
+            error = (
+                str(exc)
+                if str(exc) in safe_validation_errors
+                else f"Command '{request.command.value}' failed."
+            )
             result = ControlResult(
                 success=False,
                 command=request.command.value,
-                error=f"Command '{request.command.value}' failed.",
+                error=error,
             )
 
-        return self._audit_result(request, result)
+        except Exception as exc:
+            result = ControlResult(
+                success=False,
+                command=request.command.value,
+                error=str(exc),
+            )
+        return self._audit_result(request, result, preserve_error=preserve_error)
 
     def _dispatch(
         self,
@@ -489,8 +506,9 @@ class KernelController:
         self,
         request: ControlRequest,
         result: ControlResult,
+        preserve_error: bool = False,
     ) -> ControlResult:
-        """Preserve the operation result when audit recording fails."""
+        """Preserve operation errors if audit recording fails."""
         try:
             self._record_audit(request, result)
         except Exception:
@@ -498,12 +516,28 @@ class KernelController:
                 success=result.success,
                 command=result.command,
                 data=result.data,
-                error=_safe_audit_error(request.command, result.error),
+                error=result.error,
                 audit_error="Audit recording failed.",
             )
 
-        return result
+        if result.error is None:
+            return result
 
+        safe_service_errors = {
+            "Command requires a non-empty 'service' value.",
+            "Service value must be a string.",
+        }
+
+        if result.error in safe_service_errors or preserve_error:
+            return result
+
+        return ControlResult(
+            success=result.success,
+            command=result.command,
+            data=result.data,
+            error=_safe_audit_error(request.command, result.error),
+            audit_error=result.audit_error,
+        )
     def _record_audit(
         self,
         request: ControlRequest,

@@ -19,6 +19,7 @@ from .security_authorizer import SecurityControlAuthorizer
 
 __all__ = [
     "ControlAuthorizer",
+    "ControlAuthorizerProtocol",
     "ControlContext",
     "ControlPolicy",
     "ControlPermission",
@@ -35,8 +36,6 @@ __all__ = [
     "SQLiteControlAuditStore",
     "ControlAuditQuery",
     "ControlPlane",
-
-    "ControlAuthorizerProtocol",
     "SecurityControlAuthorizer",
 ]
 
@@ -50,3 +49,4 @@ from sentinel.control_plane.audit_store import ControlAuditStore
 from sentinel.control_plane.sqlite_audit_store import (
     SQLiteControlAuditStore,
 )
+

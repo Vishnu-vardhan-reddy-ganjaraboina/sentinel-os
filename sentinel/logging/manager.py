@@ -55,7 +55,7 @@ class LogManager:
 
         Handler failures are isolated so one failing handler does not prevent
         other handlers from receiving the record. A single handler failure is
-        re-raised directly. Multiple failures are raised as an ExceptionGroup.
+re-raised directly. Multiple failures are raised as a BaseExceptionGroup.
         """
         with self._lock:
             handlers = tuple(self._handlers)

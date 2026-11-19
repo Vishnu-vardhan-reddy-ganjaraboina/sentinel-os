@@ -170,3 +170,24 @@ def test_context_update_is_thread_safe() -> None:
 
     expected = {f"value_{value}": value for value in range(100)}
     assert context.data == expected
+
+
+def test_planner_mark_ready_rejects_invalid_plan() -> None:
+    planner = BrainPlanner()
+
+    with pytest.raises(TypeError):
+        planner.mark_ready(None)  # type: ignore[arg-type]
+
+
+def test_planner_mark_ready_rejects_plan_without_status() -> None:
+    planner = BrainPlanner()
+
+    with pytest.raises(ValueError, match="status"):
+        planner.mark_ready({"steps": []})
+
+
+def test_planner_mark_ready_rejects_plan_without_steps() -> None:
+    planner = BrainPlanner()
+
+    with pytest.raises(ValueError, match="steps"):
+        planner.mark_ready({"status": "created"})

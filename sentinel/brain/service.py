@@ -1,4 +1,4 @@
-"""
+﻿"""
 Service layer for the Sentinel Brain subsystem.
 """
 
@@ -14,6 +14,9 @@ from sentinel.brain.manager import BrainManager
 class BrainService:
     """
     Public service interface for the Brain subsystem.
+
+    BrainService is intentionally thin. Lifecycle ownership remains with the
+    higher-level Sentinel runtime/kernel.
     """
 
     def __init__(self) -> None:
@@ -21,9 +24,6 @@ class BrainService:
 
     @property
     def manager(self) -> BrainManager:
-        """
-        Return the underlying manager.
-        """
         return self._manager
 
     def create_context(

@@ -148,8 +148,27 @@ class ProcessManager:
             if self._shutdown:
                 return
             self._shutdown = True
+            process = self._process
 
-        self.terminate()
+        try:
+            self.terminate()
+        except Exception:
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        self._close_streams(process)
+                    except Exception:
+                        pass
+                    with self._lock:
+                        if self._process is process:
+                            self._process = None
+            raise
 
     @staticmethod
     def _close_streams(process: subprocess.Popen[str]) -> None:

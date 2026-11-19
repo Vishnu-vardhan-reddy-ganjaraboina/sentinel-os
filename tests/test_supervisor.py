@@ -276,6 +276,54 @@ def test_startup_failure_returns_to_stopped() -> None:
     assert supervisor.running is False
 
 
+def test_startup_rollback_failure_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    process = make_process(tmp_path=tmp_path)
+    supervisor = Supervisor(process)
+
+    def fail_monitor_start() -> None:
+        raise RuntimeError("monitor start failed")
+
+    def fail_process_stop() -> None:
+        raise RuntimeError("process rollback failed")
+
+    monkeypatch.setattr(
+        supervisor.monitor,
+        "start",
+        fail_monitor_start,
+    )
+    monkeypatch.setattr(
+        process,
+        "stop",
+        fail_process_stop,
+    )
+
+    try:
+        with pytest.raises(SupervisorStartupError) as exc_info:
+            supervisor.start()
+
+        assert supervisor.state == SupervisorState.FAILED
+        assert supervisor.running is False
+        assert process.running is True
+
+        cause = exc_info.value.__cause__
+
+        assert isinstance(cause, ExceptionGroup)
+        assert [
+            str(error)
+            for error in cause.exceptions
+        ] == [
+            "monitor start failed",
+            "process rollback failed",
+        ]
+    finally:
+        monkeypatch.undo()
+
+        if process.running:
+            process.stop()
+
 def test_health_before_start() -> None:
     process = make_process()
     supervisor = Supervisor(process)
@@ -606,7 +654,6 @@ def test_monitor_failure_callback_is_called_once() -> None:
             process.stop()
 
 
-
 def test_monitor_failure_callback_exception_is_isolated() -> None:
     process = make_process()
     callback_started = Event()
@@ -778,57 +825,6 @@ def test_supervisor_zero_backoff_does_not_sleep(monkeypatch, tmp_path):
 
     supervisor.stop()
 
-
-def test_startup_rollback_failure_is_preserved(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    process = make_process(tmp_path=tmp_path)
-    supervisor = Supervisor(process)
-
-    def fail_monitor_start() -> None:
-        raise RuntimeError("monitor start failed")
-
-    def fail_process_stop() -> None:
-        raise RuntimeError("process rollback failed")
-
-    monkeypatch.setattr(
-        supervisor.monitor,
-        "start",
-        fail_monitor_start,
-    )
-    monkeypatch.setattr(
-        process,
-        "stop",
-        fail_process_stop,
-    )
-
-    try:
-        with pytest.raises(SupervisorStartupError) as exc_info:
-            supervisor.start()
-
-        assert supervisor.state == SupervisorState.FAILED
-        assert supervisor.running is False
-        assert process.running is True
-
-        cause = exc_info.value.__cause__
-
-        assert isinstance(cause, ExceptionGroup)
-        assert [
-            str(error)
-            for error in cause.exceptions
-        ] == [
-            "monitor start failed",
-            "process rollback failed",
-        ]
-    finally:
-        monkeypatch.undo()
-
-        if process.running:
-            process.stop()
-
-
-
 def test_shutdown_failure_preserves_all_cleanup_failures(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -891,8 +887,6 @@ def test_shutdown_failure_preserves_all_cleanup_failures(
         if process.running:
             process.stop()
 
-
-
 def test_restart_monitor_start_failure_rolls_back_process(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -939,8 +933,6 @@ def test_restart_monitor_start_failure_rolls_back_process(
 
         if process.running:
             process.stop()
-
-
 
 def test_restart_rollback_failure_is_preserved(
     monkeypatch: pytest.MonkeyPatch,
@@ -1002,8 +994,6 @@ def test_restart_rollback_failure_is_preserved(
         if process.running:
             process.stop()
 
-
-
 def test_automatic_restart_failure_leaves_supervisor_failed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1054,8 +1044,6 @@ def test_automatic_restart_failure_leaves_supervisor_failed(
 
         if process.running:
             process.stop()
-
-
 
 def test_automatic_restart_monitor_failure_rolls_back_process(
     monkeypatch: pytest.MonkeyPatch,
@@ -1109,8 +1097,6 @@ def test_automatic_restart_monitor_failure_rolls_back_process(
 
         if process.running:
             process.stop()
-
-
 
 def test_automatic_restart_rollback_failure_is_preserved(
     monkeypatch: pytest.MonkeyPatch,
